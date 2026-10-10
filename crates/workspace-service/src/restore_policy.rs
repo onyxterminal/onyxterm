@@ -5,7 +5,6 @@ use domain::{
 use persistence::{PanelSnapshot, TabSnapshot, WorkspaceSnapshot};
 use std::path::{Path, PathBuf};
 
-pub const SEEDED_WORKSPACE_NAMES: [&str; 3] = ["Personal", "Infrastructure", "Project"];
 pub const DEFAULT_PANEL_TITLE: &str = "Terminal";
 
 pub fn new_terminal_tab(workspace: WorkspaceId, cwd: PathBuf) -> TabSnapshot {
@@ -16,17 +15,6 @@ pub fn new_terminal_tab(workspace: WorkspaceId, cwd: PathBuf) -> TabSnapshot {
         tab,
         panels: vec![PanelSnapshot { panel, cwd }],
     }
-}
-
-pub(crate) fn seed_snapshot(home: &Path) -> WorkspaceSnapshot {
-    let mut snapshot = WorkspaceSnapshot::default();
-    for name in SEEDED_WORKSPACE_NAMES {
-        let workspace = Workspace::new(WorkspaceId::new(), name.to_string());
-        snapshot.workspaces.push(workspace);
-    }
-    ensure_every_workspace_has_a_tab(&mut snapshot, home);
-    snapshot.active_workspace = snapshot.workspaces.first().map(|w| w.id);
-    snapshot
 }
 
 pub(crate) struct RestorePolicy<'a> {

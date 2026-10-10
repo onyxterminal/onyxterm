@@ -15,6 +15,7 @@ pub struct WorkspaceMenuItem {
     pub id: SharedString,
     pub name: SharedString,
     pub is_active: bool,
+    pub is_editable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,13 +41,12 @@ pub fn workspace_menu(
     theme: &Theme,
     actions: WorkspaceMenuActions,
 ) -> Div {
-    let can_delete = items.len() > 1;
     let is_creating = field.as_ref().is_some_and(|field| field.renaming.is_none());
     let rows: Vec<_> = items.into_iter().map(|item| {
         let editing = field.as_ref().filter(|field| field.renaming.as_ref() == Some(&item.id));
         match editing {
             Some(field) => name_field(&field.text, theme).into_any_element(),
-            None => menu_row(item, can_delete, theme, actions.clone()).into_any_element(),
+            None => menu_row(item, theme, actions.clone()).into_any_element(),
         }
     }).collect();
     let footer = match field.filter(|_| is_creating) {
@@ -68,7 +68,8 @@ pub fn workspace_menu(
         .child(footer)
 }
 
-fn menu_row(item: WorkspaceMenuItem, can_delete: bool, theme: &Theme, actions: WorkspaceMenuActions) -> impl IntoElement {
+fn menu_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuActions) -> impl IntoElement {
+    let is_editable = item.is_editable;
     let marker = if item.is_active { "\u{2713}" } else { "" };
     let hover_bg = theme.surface.subtle;
     let id = item.id.clone();
@@ -90,11 +91,11 @@ fn menu_row(item: WorkspaceMenuItem, can_delete: bool, theme: &Theme, actions: W
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| (actions.select)(&id, window, cx))
         .child(div().w(px(12.0)).text_color(theme.accent.primary).child(marker))
         .child(div().flex_1().child(item.name))
-        .child(row_button(("rename", rename_id.clone()), "Rename", theme, move |window, cx| {
-            rename(&rename_id, window, cx)
-        }))
-        .when(can_delete, |row| {
-            row.child(row_button(("delete", delete_id.clone()), "\u{00d7}", theme, move |window, cx| {
+        .when(is_editable, |row| {
+            row.child(row_button(("rename", rename_id.clone()), "Rename", theme, move |window, cx| {
+                rename(&rename_id, window, cx)
+            }))
+            .child(row_button(("delete", delete_id.clone()), "\u{00d7}", theme, move |window, cx| {
                 delete(&delete_id, window, cx)
             }))
         })

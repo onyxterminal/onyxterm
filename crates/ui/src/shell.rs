@@ -350,9 +350,6 @@ impl Shell {
     }
 
     fn request_delete_workspace(&mut self, key: &SharedString, cx: &mut Context<Self>) {
-        if !self.model.can_delete_workspace() {
-            return;
-        }
         if let Some(id) = self.workspace_by_key(key) {
             self.pending = Some(Confirmation::DeleteWorkspace(id));
             self.close_workspace_menu(cx);
@@ -524,9 +521,7 @@ impl Shell {
             tracing::warn!(?err, "close pane failed");
         }
         self.discard_pane(panel, cx);
-        if self.model.tabs().is_empty() {
-            self.open_tab(cx);
-        }
+        self.show_active_workspace(cx);
         self.persist();
     }
 
@@ -689,6 +684,7 @@ impl Shell {
                 id: entry.workspace.id.to_string().into(),
                 name: entry.workspace.name.clone().into(),
                 is_active: entry.workspace.id == active,
+                is_editable: !entry.is_scratch,
             })
             .collect();
         let actions = WorkspaceMenuActions {

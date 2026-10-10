@@ -15,7 +15,7 @@ mod writer;
 
 pub use in_memory::{InMemoryLayoutService, InMemoryTabService, InMemoryWorkspaceService};
 pub use persistence::{PanelSnapshot, RestoreWarning, TabSnapshot, WorkspaceSnapshot};
-pub use restore_policy::{new_terminal_tab, DEFAULT_PANEL_TITLE, SEEDED_WORKSPACE_NAMES};
+pub use restore_policy::{new_terminal_tab, DEFAULT_PANEL_TITLE};
 pub use store::{RestoredState, StoreError, StoreWarning, WorkspaceStore};
 pub use writer::SAVE_DEBOUNCE;
 

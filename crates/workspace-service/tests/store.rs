@@ -1,10 +1,10 @@
-use domain::{Agent, AgentId, AgentState, PanelKind, TerminalSessionId};
+use domain::{Agent, AgentId, AgentState, PanelKind, TerminalSessionId, Workspace, WorkspaceId};
 use persistence::{PersistenceError, Repository};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use workspace_service::{
     new_terminal_tab, RestoredState, StoreError, StoreWarning, WorkspaceSnapshot, WorkspaceStore,
-    SAVE_DEBOUNCE, SEEDED_WORKSPACE_NAMES,
+    SAVE_DEBOUNCE,
 };
 
 fn db_path(dir: &TempDir) -> PathBuf {
@@ -19,6 +19,20 @@ fn home() -> PathBuf {
     platform::home_dir().expect("home")
 }
 
+fn two_workspaces() -> WorkspaceSnapshot {
+    let mut snapshot = WorkspaceSnapshot::default();
+    for name in ["Alpha", "Beta"] {
+        let mut workspace = Workspace::new(WorkspaceId::new(), name.into());
+        let tab = new_terminal_tab(workspace.id, home());
+        workspace.tab_order.push(tab.tab.id);
+        workspace.active_tab = Some(tab.tab.id);
+        snapshot.workspaces.push(workspace);
+        snapshot.tabs.push(tab);
+    }
+    snapshot.active_workspace = Some(snapshot.workspaces[0].id);
+    snapshot
+}
+
 fn renamed(snapshot: &WorkspaceSnapshot, name: &str) -> WorkspaceSnapshot {
     let mut next = snapshot.clone();
     next.workspaces[0].name = name.to_string();
@@ -26,32 +40,43 @@ fn renamed(snapshot: &WorkspaceSnapshot, name: &str) -> WorkspaceSnapshot {
 }
 
 #[test]
-fn first_run_seeds_three_workspaces_with_one_terminal_tab_each() {
+fn first_run_yields_zero_workspaces() {
     let dir = TempDir::new().expect("tempdir");
     let (_store, restored) = open(&db_path(&dir));
-    let snapshot = restored.snapshot;
-
-    let names: Vec<&str> = snapshot.workspaces.iter().map(|w| w.name.as_str()).collect();
-    assert_eq!(names, SEEDED_WORKSPACE_NAMES);
     assert!(restored.warnings.is_empty());
-    assert_eq!(snapshot.active_workspace, Some(snapshot.workspaces[0].id));
-    for workspace in &snapshot.workspaces {
-        let tabs: Vec<_> = snapshot.tabs.iter().filter(|t| t.tab.workspace_id == workspace.id).collect();
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(workspace.tab_order, vec![tabs[0].tab.id]);
-        assert_eq!(workspace.active_tab, Some(tabs[0].tab.id));
-        assert_eq!(tabs[0].panels.len(), 1);
-        assert_eq!(tabs[0].panels[0].panel.kind, PanelKind::Terminal);
-        assert_eq!(tabs[0].panels[0].cwd, home());
-    }
+    assert!(restored.snapshot.workspaces.is_empty());
+    assert!(restored.snapshot.tabs.is_empty());
+    assert_eq!(restored.snapshot.active_workspace, None);
+}
+
+#[test]
+fn created_workspace_is_exactly_what_reopens() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = db_path(&dir);
+    let (store, _) = open(&path);
+    let mut snapshot = WorkspaceSnapshot::default();
+    let mut workspace = Workspace::new(WorkspaceId::new(), "Mine".into());
+    let tab = new_terminal_tab(workspace.id, home());
+    workspace.tab_order.push(tab.tab.id);
+    workspace.active_tab = Some(tab.tab.id);
+    snapshot.active_workspace = Some(workspace.id);
+    snapshot.workspaces.push(workspace);
+    snapshot.tabs.push(tab);
+    store.save(snapshot.clone());
+    drop(store);
+
+    let (_store, reopened) = open(&path);
+    assert!(reopened.warnings.is_empty());
+    assert_eq!(reopened.snapshot, snapshot);
+    assert_eq!(reopened.snapshot.tabs[0].panels[0].panel.kind, PanelKind::Terminal);
 }
 
 #[test]
 fn save_drop_reopen_roundtrips_state() {
     let dir = TempDir::new().expect("tempdir");
     let path = db_path(&dir);
-    let (store, restored) = open(&path);
-    let mut changed = renamed(&restored.snapshot, "Renamed");
+    let (store, _) = open(&path);
+    let mut changed = renamed(&two_workspaces(), "Renamed");
     let workspace = changed.workspaces[1].id;
     let extra = new_terminal_tab(workspace, dir.path().to_path_buf());
     changed.workspaces[1].tab_order.push(extra.tab.id);
@@ -74,9 +99,10 @@ fn save_drop_reopen_roundtrips_state() {
 fn rapid_saves_coalesce_into_one_write_of_the_latest_snapshot() {
     let dir = TempDir::new().expect("tempdir");
     let path = db_path(&dir);
-    let (store, restored) = open(&path);
+    let (store, _) = open(&path);
+    let base = two_workspaces();
     for index in 0..50 {
-        store.save(renamed(&restored.snapshot, &format!("Name {index}")));
+        store.save(renamed(&base, &format!("Name {index}")));
     }
     store.flush().expect("flush");
     assert_eq!(store.completed_writes(), 1);
@@ -89,8 +115,8 @@ fn rapid_saves_coalesce_into_one_write_of_the_latest_snapshot() {
 #[test]
 fn pending_save_is_written_once_the_debounce_window_elapses() {
     let dir = TempDir::new().expect("tempdir");
-    let (store, restored) = open(&db_path(&dir));
-    store.save(renamed(&restored.snapshot, "Debounced"));
+    let (store, _) = open(&db_path(&dir));
+    store.save(renamed(&two_workspaces(), "Debounced"));
     assert_eq!(store.completed_writes(), 0);
     std::thread::sleep(SAVE_DEBOUNCE * 3);
     assert_eq!(store.completed_writes(), 1);
@@ -100,8 +126,8 @@ fn pending_save_is_written_once_the_debounce_window_elapses() {
 fn flush_blocks_until_pending_snapshot_is_written() {
     let dir = TempDir::new().expect("tempdir");
     let path = db_path(&dir);
-    let (store, restored) = open(&path);
-    store.save(renamed(&restored.snapshot, "Flushed"));
+    let (store, _) = open(&path);
+    store.save(renamed(&two_workspaces(), "Flushed"));
     store.flush().expect("flush");
 
     let reader = Repository::open(&path).expect("second connection");
@@ -127,7 +153,7 @@ fn corrupt_database_is_quarantined_and_replaced_with_fresh_state() {
         std::fs::read(&quarantined_to).expect("quarantined bytes"),
         b"this is definitely not a sqlite database file"
     );
-    assert_eq!(restored.snapshot.workspaces.len(), SEEDED_WORKSPACE_NAMES.len());
+    assert!(restored.snapshot.workspaces.is_empty());
 }
 
 #[test]
@@ -164,8 +190,8 @@ fn missing_workspace_root_falls_back_to_home_with_warning() {
     let path = db_path(&dir);
     let gone = dir.path().join("deleted-project");
     std::fs::create_dir_all(&gone).expect("mkdir root");
-    let (store, restored) = open(&path);
-    let mut changed = restored.snapshot.clone();
+    let (store, _) = open(&path);
+    let mut changed = two_workspaces();
     changed.workspaces[0].root = Some(gone.clone());
     let workspace = changed.workspaces[0].id;
     store.save(changed);
@@ -185,8 +211,8 @@ fn missing_workspace_root_falls_back_to_home_with_warning() {
 fn running_agent_is_restored_as_exited_and_never_resumed() {
     let dir = TempDir::new().expect("tempdir");
     let path = db_path(&dir);
-    let (store, restored) = open(&path);
-    let mut changed = restored.snapshot.clone();
+    let (store, _) = open(&path);
+    let mut changed = two_workspaces();
     let mut agent = Agent::new(
         AgentId::new(),
         "claude".into(),

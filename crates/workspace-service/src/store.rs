@@ -1,4 +1,4 @@
-use crate::restore_policy::{seed_snapshot, RestorePolicy};
+use crate::restore_policy::RestorePolicy;
 use crate::writer::{SnapshotWriter, WriterCommand};
 use domain::WorkspaceId;
 use persistence::{LoadedSnapshot, PersistenceError, Repository, RestoreWarning, WorkspaceSnapshot};
@@ -55,14 +55,8 @@ impl WorkspaceStore {
         let mut warnings = Vec::new();
         let (repository, loaded) = open_or_quarantine(path, &home, &mut warnings)?;
         warnings.extend(loaded.warnings.into_iter().map(StoreWarning::LayoutDropped));
-        let snapshot = if loaded.snapshot.workspaces.is_empty() {
-            let seeded = seed_snapshot(&home);
-            repository.write_snapshot(&seeded)?;
-            seeded
-        } else {
-            let mut policy = RestorePolicy { home: &home, warnings: &mut warnings };
-            policy.apply(loaded.snapshot)
-        };
+        let mut policy = RestorePolicy { home: &home, warnings: &mut warnings };
+        let snapshot = policy.apply(loaded.snapshot);
         let store = Self::spawn_writer(repository)?;
         Ok((store, RestoredState { snapshot, warnings }))
     }

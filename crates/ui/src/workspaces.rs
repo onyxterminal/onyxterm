@@ -7,12 +7,20 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use workspace_service::{PanelSnapshot, StoreWarning, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
 
-const FALLBACK_WORKSPACE_NAME: &str = "Personal";
+pub const SCRATCH_NAME: &str = "Scratch";
 
 #[derive(Debug)]
 pub struct WorkspaceEntry {
     pub workspace: Workspace,
     pub tabs: Tabs,
+    pub is_scratch: bool,
+}
+
+impl WorkspaceEntry {
+    fn scratch() -> Self {
+        let workspace = Workspace::new(WorkspaceId::new(), SCRATCH_NAME.to_string());
+        Self { workspace, tabs: Tabs::default(), is_scratch: true }
+    }
 }
 
 #[derive(Debug)]
@@ -40,8 +48,7 @@ impl WorkspaceModel {
             .map(|workspace| restore_entry(workspace, &mut tabs_by_id))
             .collect();
         if entries.is_empty() {
-            let workspace = Workspace::new(WorkspaceId::new(), FALLBACK_WORKSPACE_NAME.to_string());
-            entries.push(WorkspaceEntry { workspace, tabs: Tabs::default() });
+            entries.push(WorkspaceEntry::scratch());
         }
         let active = snapshot
             .active_workspace
@@ -53,11 +60,13 @@ impl WorkspaceModel {
     }
 
     pub fn snapshot(&self) -> WorkspaceSnapshot {
+        let persisted: Vec<&WorkspaceEntry> = self.entries.iter().filter(|entry| !entry.is_scratch).collect();
+        let is_persisted = |id: WorkspaceId| persisted.iter().any(|entry| entry.workspace.id == id);
         WorkspaceSnapshot {
-            workspaces: self.entries.iter().map(snapshot_workspace).collect(),
-            tabs: self.entries.iter().flat_map(|entry| self.snapshot_tabs(entry)).collect(),
-            agents: self.agents.clone(),
-            active_workspace: Some(self.active_id()),
+            workspaces: persisted.iter().map(|entry| snapshot_workspace(entry)).collect(),
+            tabs: persisted.iter().flat_map(|entry| self.snapshot_tabs(entry)).collect(),
+            agents: self.agents.iter().filter(|agent| is_persisted(agent.workspace)).cloned().collect(),
+            active_workspace: Some(self.active_id()).filter(|id| is_persisted(*id)),
         }
     }
 
@@ -128,7 +137,22 @@ impl WorkspaceModel {
             .iter_mut()
             .find(|entry| entry.tabs.position_of(panel).is_some())
             .ok_or_else(|| DomainError::PanelNotFound(panel.to_string()))?;
-        entry.tabs.close_panel(panel)
+        entry.tabs.close_panel(panel)?;
+        self.drop_empty_scratch();
+        Ok(())
+    }
+
+    fn drop_empty_scratch(&mut self) {
+        let has_workspaces = self.entries.iter().any(|entry| !entry.is_scratch);
+        let Some(index) = self.entries.iter().position(|entry| entry.is_scratch && entry.tabs.is_empty()) else {
+            return;
+        };
+        if !has_workspaces {
+            return;
+        }
+        let active_id = self.active_id();
+        self.entries.remove(index);
+        self.active = self.position(active_id).unwrap_or(0);
     }
 
     pub fn locate(&self, panel: PanelId) -> Option<(WorkspaceId, usize)> {
@@ -141,7 +165,7 @@ impl WorkspaceModel {
         let mut workspace = Workspace::new(WorkspaceId::new(), name);
         workspace.root = Some(self.home.clone());
         let id = workspace.id;
-        self.entries.push(WorkspaceEntry { workspace, tabs: Tabs::default() });
+        self.entries.push(WorkspaceEntry { workspace, tabs: Tabs::default(), is_scratch: false });
         id
     }
 
@@ -151,10 +175,6 @@ impl WorkspaceModel {
         }
     }
 
-    pub fn can_delete_workspace(&self) -> bool {
-        self.entries.len() > 1
-    }
-
     pub fn workspace_panels(&self, id: WorkspaceId) -> Vec<PanelId> {
         self.position(id)
             .map(|index| self.entries[index].tabs.iter().flat_map(|tab| tab.layout().leaves()).collect())
@@ -162,10 +182,7 @@ impl WorkspaceModel {
     }
 
     pub fn delete_workspace(&mut self, id: WorkspaceId) {
-        if !self.can_delete_workspace() {
-            return;
-        }
-        let Some(index) = self.position(id) else {
+        let Some(index) = self.position(id).filter(|index| !self.entries[*index].is_scratch) else {
             return;
         };
         for panel in self.workspace_panels(id) {
@@ -174,7 +191,13 @@ impl WorkspaceModel {
         self.agents.retain(|agent| agent.workspace != id);
         let active_id = self.active_id();
         self.entries.remove(index);
-        self.active = self.position(active_id).unwrap_or(0);
+        if self.entries.is_empty() {
+            self.entries.push(WorkspaceEntry::scratch());
+        }
+        self.active = self
+            .position(active_id)
+            .or_else(|| self.entries.iter().position(|entry| !entry.is_scratch))
+            .unwrap_or(0);
     }
 
     pub fn workspace_name(&self, id: WorkspaceId) -> Option<&str> {
@@ -221,7 +244,7 @@ fn restore_entry(workspace: Workspace, tabs_by_id: &mut HashMap<TabId, Tab>) -> 
         .active_tab
         .and_then(|active| tabs.iter().position(|tab| tab.id() == active))
         .unwrap_or(0);
-    WorkspaceEntry { workspace, tabs: Tabs::restore(tabs, active) }
+    WorkspaceEntry { workspace, tabs: Tabs::restore(tabs, active), is_scratch: false }
 }
 
 fn snapshot_workspace(entry: &WorkspaceEntry) -> Workspace {

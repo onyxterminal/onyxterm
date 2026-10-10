@@ -26,10 +26,21 @@ fn subdir(root: &TempDir, name: &str) -> PathBuf {
 
 fn seeded_model(home: &Path) -> WorkspaceModel {
     let mut model = WorkspaceModel::from_snapshot(WorkspaceSnapshot::default(), home);
-    for name in ["Infrastructure", "Project"] {
+    for name in ["Personal", "Infrastructure", "Project"] {
         model.create_workspace(name.to_string());
     }
     model
+}
+
+fn workspace_ids(model: &WorkspaceModel) -> Vec<WorkspaceId> {
+    model.entries().iter().filter(|entry| !entry.is_scratch).map(|entry| entry.workspace.id).collect()
+}
+
+fn open_terminal_tab(model: &mut WorkspaceModel, cwd: &Path) -> PanelId {
+    let panel = PanelId::new();
+    model.add_panel(fresh_terminal(panel, cwd.to_path_buf()));
+    model.tabs_mut().open(panel);
+    panel
 }
 
 #[test]
@@ -40,7 +51,11 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
     let (api, web, logs) = (subdir(&dir, "api"), subdir(&dir, "web"), subdir(&dir, "logs"));
     let (store, restored) = WorkspaceStore::open(&database).expect("open");
     let mut model = WorkspaceModel::from_snapshot(restored.snapshot, &home);
-    let seeded: Vec<WorkspaceId> = model.entries().iter().map(|entry| entry.workspace.id).collect();
+    let seeded = [model.create_workspace("Home".to_string()), model.create_workspace("Infra".to_string())];
+    for id in seeded {
+        model.switch_to(id);
+        open_terminal_tab(&mut model, &home);
+    }
 
     let backend = model.create_workspace("Backend".to_string());
     model.switch_to(backend);
@@ -59,7 +74,7 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
     let second_tab = Tab::restore(TabId::new(), LayoutNode::leaf(d), None);
     let tab_ids = [first_tab.id(), second_tab.id()];
     *model.tabs_mut() = Tabs::restore(vec![first_tab, second_tab], 0);
-    model.rename_workspace(seeded[0], "Home".to_string());
+    model.rename_workspace(seeded[0], "Home Base".to_string());
     model.delete_workspace(seeded[1]);
 
     store.save(model.snapshot());
@@ -72,7 +87,8 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
     assert_eq!(restored.snapshot(), model.snapshot());
 
     let names: Vec<&str> = restored.entries().iter().map(|entry| entry.workspace.name.as_str()).collect();
-    assert_eq!(names, ["Home", "Project", "Backend"]);
+    assert_eq!(names, ["Home Base", "Backend"]);
+    assert!(restored.entries().iter().all(|entry| !entry.is_scratch));
     assert_eq!(restored.active_id(), backend);
     let tabs = restored.tabs();
     assert_eq!(tabs.iter().map(Tab::id).collect::<Vec<_>>(), tab_ids);
@@ -91,12 +107,10 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
 fn only_the_active_workspace_needs_spawning_and_switching_keeps_live_panels() {
     let dir = TempDir::new().expect("tempdir");
     let mut model = seeded_model(dir.path());
-    let ids: Vec<WorkspaceId> = model.entries().iter().map(|entry| entry.workspace.id).collect();
+    let ids = workspace_ids(&model);
     for id in &ids {
         model.switch_to(*id);
-        let panel = PanelId::new();
-        model.add_panel(fresh_terminal(panel, dir.path().to_path_buf()));
-        model.tabs_mut().open(panel);
+        open_terminal_tab(&mut model, dir.path());
     }
     model.switch_to(ids[0]);
     let first = model.panels_to_spawn(|_| false);
@@ -119,15 +133,11 @@ fn only_the_active_workspace_needs_spawning_and_switching_keeps_live_panels() {
 fn closing_a_hidden_workspace_panel_leaves_the_active_workspace_alone() {
     let dir = TempDir::new().expect("tempdir");
     let mut model = seeded_model(dir.path());
-    let ids: Vec<WorkspaceId> = model.entries().iter().map(|entry| entry.workspace.id).collect();
+    let ids = workspace_ids(&model);
     model.switch_to(ids[1]);
-    let hidden = PanelId::new();
-    model.add_panel(fresh_terminal(hidden, dir.path().to_path_buf()));
-    model.tabs_mut().open(hidden);
+    let hidden = open_terminal_tab(&mut model, dir.path());
     model.switch_to(ids[0]);
-    let visible = PanelId::new();
-    model.add_panel(fresh_terminal(visible, dir.path().to_path_buf()));
-    model.tabs_mut().open(visible);
+    open_terminal_tab(&mut model, dir.path());
 
     model.remove_panel(hidden).expect("remove hidden");
     assert_eq!(model.active_id(), ids[0]);
@@ -139,7 +149,7 @@ fn closing_a_hidden_workspace_panel_leaves_the_active_workspace_alone() {
 fn delete_workspace_drops_its_panels_and_agents_but_never_the_last_one() {
     let dir = TempDir::new().expect("tempdir");
     let mut model = seeded_model(dir.path());
-    let ids: Vec<WorkspaceId> = model.entries().iter().map(|entry| entry.workspace.id).collect();
+    let ids = workspace_ids(&model);
     model.switch_to(ids[1]);
     let panel = PanelId::new();
     model.add_panel(fresh_terminal(panel, dir.path().to_path_buf()));
@@ -156,13 +166,93 @@ fn delete_workspace_drops_its_panels_and_agents_but_never_the_last_one() {
     model.delete_workspace(ids[2]);
     model.delete_workspace(ids[0]);
     assert_eq!(model.entries().len(), 1);
-    assert!(!model.can_delete_workspace());
+    assert!(model.entries()[0].is_scratch);
+    assert!(model.snapshot().workspaces.is_empty());
+}
+
+#[test]
+fn deleting_the_last_workspace_falls_back_to_scratch() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut model = WorkspaceModel::from_snapshot(WorkspaceSnapshot::default(), dir.path());
+    open_terminal_tab(&mut model, dir.path());
+    let scratch_panel = model.tabs().active().expect("scratch tab").focused();
+    model.remove_panel(scratch_panel).expect("close scratch");
+    let mine = model.create_workspace("Mine".to_string());
+    model.switch_to(mine);
+    open_terminal_tab(&mut model, dir.path());
+
+    model.delete_workspace(mine);
+    assert_eq!(model.entries().len(), 1);
+    assert!(model.entries()[0].is_scratch);
+    assert!(model.tabs().is_empty());
+    model.delete_workspace(model.active_id());
+    assert_eq!(model.entries().len(), 1);
+}
+
+#[test]
+fn first_run_is_a_single_unpersisted_scratch_session() {
+    let dir = TempDir::new().expect("tempdir");
+    let database = dir.path().join("profile").join("onyxterm.db");
+    let (store, restored) = WorkspaceStore::open(&database).expect("open");
+    assert!(restored.snapshot.workspaces.is_empty());
+    let mut model = WorkspaceModel::from_snapshot(restored.snapshot, dir.path());
+    assert_eq!(model.entries().len(), 1);
+    assert!(model.entries()[0].is_scratch);
+    assert_eq!(model.entries()[0].workspace.name, crate::workspaces::SCRATCH_NAME);
+    open_terminal_tab(&mut model, dir.path());
+
+    let snapshot = model.snapshot();
+    assert!(snapshot.workspaces.is_empty() && snapshot.tabs.is_empty());
+    assert_eq!(snapshot.active_workspace, None);
+    store.save(snapshot);
+    store.flush().expect("flush");
+    drop(store);
+    let (_store, reopened) = WorkspaceStore::open(&database).expect("reopen");
+    assert!(reopened.snapshot.workspaces.is_empty());
+}
+
+#[test]
+fn scratch_disappears_when_closed_once_a_workspace_exists() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut model = WorkspaceModel::from_snapshot(WorkspaceSnapshot::default(), dir.path());
+    let scratch_panel = open_terminal_tab(&mut model, dir.path());
+    let mine = model.create_workspace("Mine".to_string());
+    assert_eq!(model.entries().len(), 2);
+    assert!(model.entries()[0].is_scratch);
+
+    model.remove_panel(scratch_panel).expect("close scratch");
+    assert_eq!(model.entries().len(), 1);
+    assert_eq!(model.active_id(), mine);
+}
+
+#[test]
+fn created_workspace_is_exactly_what_comes_back_after_reopen() {
+    let dir = TempDir::new().expect("tempdir");
+    let database = dir.path().join("profile").join("onyxterm.db");
+    let (store, restored) = WorkspaceStore::open(&database).expect("open");
+    let mut model = WorkspaceModel::from_snapshot(restored.snapshot, dir.path());
+    open_terminal_tab(&mut model, dir.path());
+    let mine = model.create_workspace("Mine".to_string());
+    model.switch_to(mine);
+    let panel = open_terminal_tab(&mut model, dir.path());
+    store.save(model.snapshot());
+    store.flush().expect("flush");
+    drop(store);
+
+    let (_store, reopened) = WorkspaceStore::open(&database).expect("reopen");
+    let restored = WorkspaceModel::from_snapshot(reopened.snapshot, dir.path());
+    let names: Vec<&str> = restored.entries().iter().map(|entry| entry.workspace.name.as_str()).collect();
+    assert_eq!(names, ["Mine"]);
+    assert_eq!(restored.active_id(), mine);
+    assert_eq!(restored.tabs().active().map(|tab| tab.focused()), Some(panel));
+    assert_eq!(restored.snapshot(), model.snapshot());
 }
 
 #[test]
 fn restored_agent_panels_become_fresh_terminals() {
     let dir = TempDir::new().expect("tempdir");
     let mut model = seeded_model(dir.path());
+    model.switch_to(workspace_ids(&model)[0]);
     let panel = PanelId::new();
     model.add_panel(PanelSnapshot {
         panel: Panel::new_agent(panel, "Claude Code".into(), AgentId::new()),
