@@ -21,6 +21,13 @@ pub enum CommandId {
     Quit,
 }
 
+impl CommandId {
+    pub fn is_structural(self) -> bool {
+        use CommandId::*;
+        matches!(self, NewTab | NextTab | PrevTab | SplitRight | SplitDown | FocusAdjacent | CloseActive)
+    }
+}
+
 pub type EnabledFn = fn(&AppState) -> bool;
 pub type HandlerFn = fn(&mut AppState);
 

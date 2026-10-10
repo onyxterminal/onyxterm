@@ -1,19 +1,30 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use domain::{Axis, DomainError, LayoutNode, PanelId};
+use domain::{Axis, DomainError, LayoutNode, PanelId, TabId};
 
 const SPLIT_RATIO: f32 = 0.5;
 
 #[derive(Debug, Clone)]
 pub struct Tab {
+    id: TabId,
     layout: LayoutNode,
     focused: PanelId,
 }
 
 impl Tab {
     pub fn new(panel: PanelId) -> Self {
-        Self { layout: LayoutNode::leaf(panel), focused: panel }
+        Self { id: TabId::new(), layout: LayoutNode::leaf(panel), focused: panel }
+    }
+
+    pub fn restore(id: TabId, layout: LayoutNode, focused: Option<PanelId>) -> Self {
+        let leaves = layout.leaves();
+        let focused = focused.filter(|panel| leaves.contains(panel)).unwrap_or(leaves[0]);
+        Self { id, layout, focused }
+    }
+
+    pub fn id(&self) -> TabId {
+        self.id
     }
 
     pub fn layout(&self) -> &LayoutNode {
@@ -66,6 +77,15 @@ pub struct Tabs {
 }
 
 impl Tabs {
+    pub fn restore(tabs: Vec<Tab>, active: usize) -> Self {
+        let active = active.min(tabs.len().saturating_sub(1));
+        Self { tabs, active }
+    }
+
+    pub fn position_of(&self, panel: PanelId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.contains(panel))
+    }
+
     pub fn len(&self) -> usize {
         self.tabs.len()
     }

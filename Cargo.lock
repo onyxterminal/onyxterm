@@ -135,6 +135,7 @@ dependencies = [
  "terminal-core",
  "tracing",
  "ui",
+ "workspace-service",
 ]
 
 [[package]]
@@ -6149,11 +6150,13 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "tempfile",
  "terminal-core",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "uuid",
+ "workspace-service",
 ]
 
 [[package]]

@@ -8,25 +8,25 @@ use crate::command::{
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
-use crate::tabs::Tabs;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
 use crate::workspace_menu::{workspace_menu, WorkspaceMenuItem};
-use domain::{Axis, LayoutNode, PanelId, TerminalSessionId};
+use crate::workspaces::{restore_notice, WorkspaceModel};
+use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
 use gpui::{
     div, img, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle, Hsla, Image, ImageFormat,
-    IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Task, Window,
-    WindowOptions,
+    IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
+    Window, WindowOptions,
 };
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 use terminal_core::broadcast::{error::RecvError, Receiver};
 use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
+use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 const DEFAULT_SHELL: &str = "/bin/zsh";
 const LOGIN_FLAG: &str = "-l";
-const FALLBACK_CWD: &str = "/";
 const INITIAL_GRID: GridSize = GridSize { cols: 80, rows: 24 };
 const ESCAPE_KEY: &str = "escape";
 const ENTER_KEY: &str = "enter";
@@ -64,36 +64,98 @@ impl EventBatch {
     }
 }
 
+pub struct Startup {
+    pub terminals: Arc<InMemoryTerminalService>,
+    pub store: WorkspaceStore,
+    pub restored: RestoredState,
+    pub home: PathBuf,
+}
+
 pub struct Shell {
     state: AppState,
     terminals: Arc<InMemoryTerminalService>,
+    store: WorkspaceStore,
     style: TerminalStyle,
     focus_handle: FocusHandle,
-    tabs: Tabs,
+    model: WorkspaceModel,
     panes: HashMap<PanelId, Pane>,
     pending_close: Option<PanelId>,
     is_workspace_menu_open: bool,
-    active_workspace: SharedString,
+    notice: Option<String>,
+    _quit_hook: Subscription,
 }
 
 impl Shell {
-    pub fn new(state: AppState, terminals: Arc<InMemoryTerminalService>, cx: &mut Context<Self>) -> Self {
+    pub fn new(state: AppState, startup: Startup, cx: &mut Context<Self>) -> Self {
         let font_family = state.theme.font.resolve_family(&cx.text_system().all_font_names());
         tracing::info!(%font_family, "terminal font resolved");
-        let active_workspace = state.workspaces.first().map(|ws| ws.id.clone().into()).unwrap_or_default();
+        let Startup { terminals, store, restored, home } = startup;
         let mut shell = Self {
             style: TerminalStyle::from_theme(&state.theme, font_family),
             state,
             terminals,
+            store,
             focus_handle: cx.focus_handle(),
-            tabs: Tabs::default(),
+            model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
             panes: HashMap::new(),
             pending_close: None,
             is_workspace_menu_open: false,
-            active_workspace,
+            notice: restore_notice(&restored.warnings),
+            _quit_hook: cx.on_app_quit(|shell, _cx| {
+                shell.flush();
+                async {}
+            }),
         };
-        shell.open_tab(cx);
+        shell.show_active_workspace(cx);
         shell
+    }
+
+    fn persist(&mut self) {
+        self.sync_live_cwds();
+        self.store.save(self.model.snapshot());
+    }
+
+    fn flush(&mut self) {
+        self.persist();
+        if let Err(err) = self.store.flush() {
+            tracing::error!(%err, "failed to flush workspace snapshot");
+        }
+    }
+
+    fn sync_live_cwds(&mut self) {
+        for (panel, pane) in &self.panes {
+            let Some(cwd) = pane.terminal.handle.current_dir() else {
+                continue;
+            };
+            if let Some(record) = self.model.panel_mut(*panel) {
+                record.cwd = cwd;
+            }
+        }
+    }
+
+    fn show_active_workspace(&mut self, cx: &mut Context<Self>) {
+        if self.model.tabs().is_empty() {
+            self.open_tab(cx);
+        }
+        for panel in self.model.panels_to_spawn(|panel| self.panes.contains_key(&panel)) {
+            self.spawn_restored(panel, cx);
+        }
+    }
+
+    fn spawn_restored(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let Some(record) = self.model.panel(panel).cloned() else {
+            return;
+        };
+        let command = login_shell_command(record.cwd.clone());
+        if let Some(session) = self.spawn_session(panel, command, record.panel.title.clone(), cx) {
+            self.set_panel_session(panel, session);
+        }
+    }
+
+    fn set_panel_session(&mut self, panel: PanelId, session: TerminalSessionId) {
+        if let Some(record) = self.model.panel_mut(panel) {
+            record.panel.resource = domain::ResourceRef::Terminal(session);
+        }
     }
 
     fn resolve_combo(&self, event: &KeyDownEvent) -> Option<CommandId> {
@@ -104,8 +166,8 @@ impl Shell {
     fn run_command(&mut self, id: CommandId, cx: &mut Context<Self>) {
         match id {
             CommandId::NewTab => self.open_tab(cx),
-            CommandId::NextTab => self.tabs.select_next(),
-            CommandId::PrevTab => self.tabs.select_previous(),
+            CommandId::NextTab => self.model.tabs_mut().select_next(),
+            CommandId::PrevTab => self.model.tabs_mut().select_previous(),
             CommandId::SplitRight => self.split_focused(Axis::Horizontal, cx),
             CommandId::SplitDown => self.split_focused(Axis::Vertical, cx),
             CommandId::FocusAdjacent => self.focus_next_pane(),
@@ -114,6 +176,9 @@ impl Shell {
             CommandId::Paste => self.paste_clipboard(cx),
             CommandId::Quit => cx.quit(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
+        }
+        if id.is_structural() {
+            self.persist();
         }
         cx.notify();
     }
@@ -206,12 +271,12 @@ impl Shell {
     }
 
     fn focused_handle(&self) -> Option<&TerminalHandle> {
-        let panel = self.tabs.active()?.focused();
+        let panel = self.model.tabs().active()?.focused();
         self.panes.get(&panel).map(|pane| &pane.terminal.handle)
     }
 
     fn request_close_focused(&mut self, cx: &mut Context<Self>) {
-        let Some(panel) = self.tabs.active().map(|tab| tab.focused()) else {
+        let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) else {
             return;
         };
         let is_busy = self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
@@ -244,25 +309,34 @@ impl Shell {
         cx.notify();
     }
 
-    fn select_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        self.active_workspace = id;
+    fn select_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+        self.model.switch_to(id);
+        self.show_active_workspace(cx);
+        self.persist();
         self.close_workspace_menu(cx);
     }
 
+    fn dismiss_notice(&mut self, cx: &mut Context<Self>) {
+        self.notice = None;
+        cx.notify();
+    }
+
     fn open_tab(&mut self, cx: &mut Context<Self>) {
-        if let Some(panel) = self.spawn_pane(cx) {
-            self.tabs.open(panel);
+        let cwd = self.model.active_root();
+        if let Some(panel) = self.spawn_shell_panel(cwd, cx) {
+            self.model.tabs_mut().open(panel);
         }
     }
 
     fn split_focused(&mut self, axis: Axis, cx: &mut Context<Self>) {
-        if self.tabs.is_empty() {
-            return;
-        }
-        let Some(panel) = self.spawn_pane(cx) else {
+        let Some(focused) = self.model.tabs().active().map(|tab| tab.focused()) else {
             return;
         };
-        let Some(tab) = self.tabs.active_mut() else {
+        let cwd = self.panel_cwd(focused);
+        let Some(panel) = self.spawn_shell_panel(cwd, cx) else {
+            return;
+        };
+        let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
         };
         if let Err(err) = tab.split_focused(axis, panel) {
@@ -271,29 +345,39 @@ impl Shell {
         }
     }
 
+    fn panel_cwd(&self, panel: PanelId) -> PathBuf {
+        self.panes
+            .get(&panel)
+            .and_then(|pane| pane.terminal.handle.current_dir())
+            .or_else(|| self.model.panel(panel).map(|record| record.cwd.clone()))
+            .unwrap_or_else(|| self.model.active_root())
+    }
+
     fn focus_next_pane(&mut self) {
-        if let Some(tab) = self.tabs.active_mut() {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus_next();
         }
     }
 
     fn focus_pane(&mut self, panel: PanelId) {
-        if let Some(tab) = self.tabs.active_mut() {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus(panel);
         }
+        self.persist();
     }
 
     fn close_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         if self.pending_close == Some(panel) {
             self.pending_close = None;
         }
-        if let Err(err) = self.tabs.close_panel(panel) {
+        if let Err(err) = self.model.remove_panel(panel) {
             tracing::warn!(?err, "close pane failed");
         }
         self.discard_pane(panel, cx);
-        if self.tabs.is_empty() {
-            cx.quit();
+        if self.model.tabs().is_empty() {
+            self.open_tab(cx);
         }
+        self.persist();
     }
 
     fn discard_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
@@ -310,25 +394,40 @@ impl Shell {
             .detach();
     }
 
-    fn spawn_pane(&mut self, cx: &mut Context<Self>) -> Option<PanelId> {
-        let command = login_shell_command();
+    fn spawn_shell_panel(&mut self, cwd: PathBuf, cx: &mut Context<Self>) -> Option<PanelId> {
+        let command = login_shell_command(cwd.clone());
         let title = shell_title(&command);
+        let panel = PanelId::new();
+        let session = self.spawn_session(panel, command, title.clone(), cx)?;
+        self.model.add_panel(PanelSnapshot { panel: Panel::new_terminal(panel, title, session), cwd });
+        Some(panel)
+    }
+
+    fn spawn_session(
+        &mut self,
+        panel: PanelId,
+        command: ShellCommand,
+        title: String,
+        cx: &mut Context<Self>,
+    ) -> Option<TerminalSessionId> {
         let session = self
             .terminals
             .spawn_command(command, INITIAL_GRID)
-            .inspect_err(|err| tracing::error!(?err, "failed to spawn shell"))
+            .inspect_err(|err| tracing::error!(?err, "failed to spawn session"))
             .ok()?;
         let handle = self.terminals.handle_for(session)?;
-        let panel = PanelId::new();
         let events = watch_session(panel, handle.subscribe(), cx);
         self.panes.insert(panel, Pane { session, terminal: TerminalPane::new(handle), title, _events: events });
-        Some(panel)
+        Some(session)
     }
 
     fn apply_batch(&mut self, panel: PanelId, batch: EventBatch, cx: &mut Context<Self>) {
         if let Some(title) = batch.title {
             if let Some(pane) = self.panes.get_mut(&panel) {
-                pane.title = title;
+                pane.title = title.clone();
+            }
+            if let Some(record) = self.model.panel_mut(panel) {
+                record.panel.title = title;
             }
         }
         if batch.exited {
@@ -339,9 +438,10 @@ impl Shell {
 
     fn render_tab_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
-        let active = self.tabs.active_index();
+        let active = self.model.tabs().active_index();
         let labels: Vec<(String, bool)> = self
-            .tabs
+            .model
+            .tabs()
             .iter()
             .enumerate()
             .map(|(index, tab)| {
@@ -386,7 +486,8 @@ impl Shell {
     }
 
     fn activate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.tabs.activate(index);
+        self.model.tabs_mut().activate(index);
+        self.persist();
         window.focus(&self.focus_handle);
         cx.notify();
     }
@@ -411,20 +512,21 @@ impl Shell {
 
     fn render_workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
+        let active = self.model.active_id();
         let items = self
-            .state
-            .workspaces
+            .model
+            .entries()
             .iter()
-            .map(|ws| WorkspaceMenuItem {
-                id: ws.id.clone().into(),
-                name: ws.name.clone().into(),
-                is_active: ws.id.as_str() == self.active_workspace.as_ref(),
+            .map(|entry| WorkspaceMenuItem {
+                id: entry.workspace.id.to_string().into(),
+                name: entry.workspace.name.clone().into(),
+                is_active: entry.workspace.id == active,
             })
             .collect();
         let shell = cx.entity().downgrade();
         let on_select = Rc::new(move |id: &SharedString, _window: &mut Window, cx: &mut gpui::App| {
             let id = id.clone();
-            if let Err(err) = shell.update(cx, |shell, cx| shell.select_workspace(id, cx)) {
+            if let Err(err) = shell.update(cx, |shell, cx| shell.select_workspace_by_key(&id, cx)) {
                 tracing::debug!(?err, "workspace select after shell dropped");
             }
         });
@@ -440,6 +542,38 @@ impl Shell {
                     .left(px(theme.layout.gap_px))
                     .occlude()
                     .child(workspace_menu(items, theme, on_select)),
+            )
+    }
+
+    fn select_workspace_by_key(&mut self, key: &str, cx: &mut Context<Self>) {
+        let id = self.model.entries().iter().map(|entry| entry.workspace.id).find(|id| id.to_string() == key);
+        if let Some(id) = id {
+            self.select_workspace(id, cx);
+        }
+    }
+
+    fn render_notice(&self, notice: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.state.theme;
+        div()
+            .flex_none()
+            .px_3()
+            .py_1()
+            .flex()
+            .flex_row()
+            .justify_between()
+            .gap_3()
+            .bg(theme.surface.subtle)
+            .border_b_1()
+            .border_color(theme.border_default())
+            .text_color(theme.text.muted)
+            .child(notice.to_string())
+            .child(
+                div()
+                    .id("notice-dismiss")
+                    .cursor_pointer()
+                    .text_color(theme.accent.primary)
+                    .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.dismiss_notice(cx)))
+                    .child("Dismiss"),
             )
     }
 
@@ -539,7 +673,7 @@ impl Shell {
         let Some(pane) = self.panes.get(&panel) else {
             return div().into_any_element();
         };
-        let is_focused = self.tabs.active().is_some_and(|tab| tab.focused() == panel);
+        let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
         div()
             .size_full()
             .p_1()
@@ -560,7 +694,7 @@ impl Shell {
 
     fn pane_border(&self, is_focused: bool) -> Hsla {
         let theme = &self.state.theme;
-        let is_split = self.tabs.active().is_some_and(|tab| !matches!(tab.layout(), LayoutNode::Leaf { .. }));
+        let is_split = self.model.tabs().active().is_some_and(|tab| !matches!(tab.layout(), LayoutNode::Leaf { .. }));
         match (is_split, is_focused) {
             (false, _) => theme.canvas(),
             (true, true) => theme.border_focus(),
@@ -574,7 +708,8 @@ impl Render for Shell {
         let theme = &self.state.theme;
         let palette_overlay = palette_render::build_overlay(&self.state, theme);
         let palette_visible = self.state.palette_visible;
-        let layout = self.tabs.active().map(|tab| tab.layout().clone());
+        let layout = self.model.tabs().active().map(|tab| tab.layout().clone());
+        let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let close_prompt = self.pending_close.map(|_| self.render_close_prompt(cx));
@@ -591,6 +726,7 @@ impl Render for Shell {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, _window, cx| shell.handle_key(event, cx)))
             .child(tab_strip)
+            .children(notice)
             .child(div().flex_1().min_h(px(0.0)).w_full().children(pane_area))
             .when(palette_visible, |el| el.child(palette_overlay))
             .children(workspace_menu)
@@ -629,9 +765,9 @@ fn write_to(handle: &TerminalHandle, bytes: &[u8]) {
     }
 }
 
-fn login_shell_command() -> ShellCommand {
+fn login_shell_command(cwd: PathBuf) -> ShellCommand {
     let program = std::env::var_os("SHELL").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_SHELL));
-    let cwd = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(FALLBACK_CWD));
+    let cwd = if Path::new(&cwd).is_dir() { cwd } else { PathBuf::from("/") };
     ShellCommand { program, args: vec![LOGIN_FLAG.to_string()], cwd }
 }
 
@@ -645,7 +781,7 @@ fn shell_title(command: &ShellCommand) -> String {
 
 pub fn open_shell_window(
     options: WindowOptions,
-    terminals: Arc<InMemoryTerminalService>,
+    startup: Startup,
     cx: &mut gpui::App,
 ) -> gpui::Result<gpui::WindowHandle<Shell>> {
     let state = AppState::new();
@@ -654,7 +790,7 @@ pub fn open_shell_window(
         ..options
     };
     cx.open_window(themed_options, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(state, terminals, cx));
+        let shell = cx.new(|cx| Shell::new(state, startup, cx));
         window.focus(&shell.read(cx).focus_handle);
         shell
     })

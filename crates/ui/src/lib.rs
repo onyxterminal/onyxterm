@@ -11,13 +11,14 @@ pub mod tabs;
 pub mod terminal_view;
 pub mod theme;
 pub mod workspace_menu;
+pub mod workspaces;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workspace_tests;
 
 use gpui::{Bounds, WindowOptions};
-use std::sync::Arc;
-use terminal_core::InMemoryTerminalService;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,7 +33,9 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-pub fn run_app(terminals: Arc<InMemoryTerminalService>) -> Result<(), UiError> {
+pub use shell::Startup;
+
+pub fn run_app(startup: Startup) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
         let options = WindowOptions {
@@ -52,7 +55,7 @@ pub fn run_app(terminals: Arc<InMemoryTerminalService>) -> Result<(), UiError> {
             show: true,
             ..Default::default()
         };
-        if let Err(err) = shell::open_shell_window(options, terminals, cx) {
+        if let Err(err) = shell::open_shell_window(options, startup, cx) {
             tracing::error!(?err, "failed to open main window");
             cx.quit();
         }

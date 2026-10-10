@@ -93,16 +93,6 @@ fn command_registry_execute_calls_handler() {
     let _ = toggle_palette;
 }
 
-#[test]
-fn app_state_starts_with_three_workspaces() {
-    let state = AppState::new();
-    assert_eq!(state.workspaces.len(), 3);
-    assert_eq!(state.workspaces[0].name, "Personal");
-    assert_eq!(state.workspaces[1].name, "Infrastructure");
-    assert_eq!(state.workspaces[2].name, "Project");
-    assert!(!state.palette_visible);
-}
-
 fn keystroke(modifiers: Modifiers, key: &str, key_char: Option<&str>) -> gpui::Keystroke {
     gpui::Keystroke {
         modifiers,

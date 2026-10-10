@@ -13,4 +13,5 @@ observability = { path = "../observability" }
 platform = { path = "../platform" }
 ui = { path = "../ui" }
 terminal-core = { path = "../terminal-core" }
+workspace-service = { path = "../workspace-service" }
 tracing = { workspace = true }
