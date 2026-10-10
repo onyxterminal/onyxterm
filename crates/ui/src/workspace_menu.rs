@@ -8,7 +8,7 @@ use std::rc::Rc;
 const MENU_WIDTH_PX: f32 = 260.0;
 const NEW_WORKSPACE_LABEL: &str = "New workspace\u{2026}";
 const NAME_PLACEHOLDER: &str = "Workspace name";
-const CARET: &str = "\u{258f}";
+pub const CARET: &str = "\u{258f}";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceMenuItem {

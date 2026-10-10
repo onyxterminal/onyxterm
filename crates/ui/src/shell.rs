@@ -12,7 +12,7 @@ use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
-use crate::workspace_menu::{workspace_menu, MenuField, WorkspaceMenuActions, WorkspaceMenuItem};
+use crate::workspace_menu::{workspace_menu, MenuField, WorkspaceMenuActions, WorkspaceMenuItem, CARET};
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
 use gpui::{
@@ -43,6 +43,7 @@ const ICON_WIDTH_PX: f32 = 12.0;
 const ICON_HEIGHT_PX: f32 = 10.0;
 const RESTORE_ICON_INSET_PX: f32 = 2.0;
 const CWD_TAIL_SEGMENTS: usize = 2;
+const DOUBLE_CLICK: usize = 2;
 const HOME_MARK: &str = "~";
 const ELLIPSIS: &str = "\u{2026}";
 const CLOSE_GLYPH: &str = "\u{00d7}";
@@ -92,6 +93,7 @@ pub struct Shell {
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
+    tab_field: Option<TabField>,
     notice: Option<String>,
     _quit_hook: Subscription,
 }
@@ -112,6 +114,7 @@ impl Shell {
             pending: None,
             is_workspace_menu_open: false,
             menu_field: None,
+            tab_field: None,
             notice: restore_notice(&restored.warnings),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
@@ -189,6 +192,7 @@ impl Shell {
             CommandId::Paste => self.paste_clipboard(cx),
             CommandId::SwitchWorkspace => self.open_workspace_picker(),
             CommandId::NewWorkspace => self.start_new_workspace(cx),
+            CommandId::RenameTab => self.start_rename_tab(self.model.tabs().active_index()),
             CommandId::Quit => self.request_quit(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
@@ -206,6 +210,10 @@ impl Shell {
         }
         if self.is_workspace_menu_open {
             self.handle_menu_key(keystroke, cx);
+            return;
+        }
+        if self.tab_field.is_some() {
+            self.handle_tab_field_key(keystroke, cx);
             return;
         }
         if let Some(id) = self.resolve_combo(event) {
@@ -435,6 +443,7 @@ impl Shell {
     }
 
     fn select_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+        self.tab_field = None;
         self.model.switch_to(id);
         self.show_active_workspace(cx);
         self.persist();
@@ -501,6 +510,7 @@ impl Shell {
         if self.pending == Some(Confirmation::ClosePane(panel)) {
             self.pending = None;
         }
+        self.tab_field = None;
         if let Err(err) = self.model.remove_panel(panel) {
             tracing::warn!(?err, "close pane failed");
         }
@@ -575,7 +585,11 @@ impl Shell {
             .enumerate()
             .map(|(index, tab)| {
                 let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
-                (format!("{}  {}", index + 1, title), index == active)
+                let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
+                    Some(field) => format!("{}{CARET}", field.text),
+                    None => format!("{}  {}", index + 1, tab.name().unwrap_or(title)),
+                };
+                (label, index == active)
             })
             .collect();
         let layout = theme.layout;
@@ -595,6 +609,8 @@ impl Shell {
                     (theme.surface.subtle, theme.text.muted, theme.surface.subtle)
                 };
                 let hover_bg = theme.border.muted;
+                let is_editing = self.tab_field.as_ref().is_some_and(|field| field.index == index);
+                let border = if is_editing { theme.border_focus() } else { border };
                 div()
                     .id(("tab", index))
                     .px_3()
@@ -610,10 +626,64 @@ impl Shell {
                     .when(!is_active, |el| el.hover(move |style| style.bg(hover_bg)))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |shell, _event, window, cx| shell.activate_tab(index, window, cx)),
+                        cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
+                            shell.click_tab(index, event.click_count, window, cx)
+                        }),
                     )
                     .child(label)
             }))
+    }
+
+    fn click_tab(&mut self, index: usize, click_count: usize, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        if self.tab_field.as_ref().is_some_and(|field| field.index == index) {
+            return;
+        }
+        self.commit_tab_field();
+        self.activate_tab(index, window, cx);
+        if click_count == DOUBLE_CLICK {
+            self.start_rename_tab(index);
+        }
+    }
+
+    fn start_rename_tab(&mut self, index: usize) {
+        let Some(tab) = self.model.tabs().iter().nth(index) else {
+            return;
+        };
+        let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
+        let text = tab.name().unwrap_or(title).to_string().into();
+        self.tab_field = Some(TabField { index, text });
+    }
+
+    fn handle_tab_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+        match keystroke.key.as_str() {
+            ESCAPE_KEY => self.tab_field = None,
+            ENTER_KEY => self.commit_tab_field(),
+            _ => {
+                if let Some(field) = self.tab_field.as_mut() {
+                    edit_field(&mut field.text, keystroke);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn commit_tab_field(&mut self) {
+        let Some(field) = self.tab_field.take() else {
+            return;
+        };
+        let Some(tab) = self.model.tabs_mut().get_mut(field.index) else {
+            return;
+        };
+        tab.rename(Some(field.text.to_string()));
+        self.persist();
+    }
+
+    fn commit_tab_field_on_click(&mut self, cx: &mut Context<Self>) {
+        if self.tab_field.is_some() {
+            self.commit_tab_field();
+            cx.notify();
+        }
     }
 
     fn activate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -967,6 +1037,7 @@ impl Render for Shell {
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, _window, cx| shell.handle_key(event, cx)))
+            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)
             .children(notice)
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
@@ -998,6 +1069,11 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
+}
+
+struct TabField {
+    index: usize,
+    text: SharedString,
 }
 
 struct HeaderAction {

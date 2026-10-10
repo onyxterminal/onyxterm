@@ -39,7 +39,9 @@ impl WorkspaceModel {
             for panel in tab.panels {
                 panels.insert(panel.panel.id, panel);
             }
-            tabs_by_id.insert(tab.tab.id, Tab::restore(tab.tab.id, tab.tab.layout, tab.tab.focused_panel));
+            let mut restored = Tab::restore(tab.tab.id, tab.tab.layout, tab.tab.focused_panel);
+            restored.rename(tab.tab.title);
+            tabs_by_id.insert(tab.tab.id, restored);
         }
         let mut entries: Vec<WorkspaceEntry> = snapshot
             .workspaces
@@ -205,9 +207,8 @@ impl WorkspaceModel {
         entry.tabs.iter().map(move |tab| {
             let panels: Vec<PanelSnapshot> =
                 tab.layout().leaves().iter().filter_map(|panel| self.panels.get(panel)).cloned().collect();
-            let title = self.panels.get(&tab.focused()).map(|panel| panel.panel.title.clone());
             let mut snapshot = domain::Tab::new(tab.id(), entry.workspace.id, tab.layout().clone());
-            snapshot.title = title;
+            snapshot.title = tab.name().map(str::to_string);
             snapshot.focused_panel = Some(tab.focused());
             TabSnapshot { tab: snapshot, panels }
         })

@@ -11,17 +11,18 @@ pub struct Tab {
     layout: LayoutNode,
     focused: PanelId,
     is_maximized: bool,
+    name: Option<String>,
 }
 
 impl Tab {
     pub fn new(panel: PanelId) -> Self {
-        Self { id: TabId::new(), layout: LayoutNode::leaf(panel), focused: panel, is_maximized: false }
+        Self { id: TabId::new(), layout: LayoutNode::leaf(panel), focused: panel, is_maximized: false, name: None }
     }
 
     pub fn restore(id: TabId, layout: LayoutNode, focused: Option<PanelId>) -> Self {
         let leaves = layout.leaves();
         let focused = focused.filter(|panel| leaves.contains(panel)).unwrap_or(leaves[0]);
-        Self { id, layout, focused, is_maximized: false }
+        Self { id, layout, focused, is_maximized: false, name: None }
     }
 
     pub fn id(&self) -> TabId {
@@ -34,6 +35,14 @@ impl Tab {
 
     pub fn focused(&self) -> PanelId {
         self.focused
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn rename(&mut self, name: Option<String>) {
+        self.name = name.map(|name| name.trim().to_string()).filter(|name| !name.is_empty());
     }
 
     pub fn is_maximized(&self) -> bool {
@@ -115,6 +124,10 @@ impl Tabs {
 
     pub fn active(&self) -> Option<&Tab> {
         self.tabs.get(self.active)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Tab> {
+        self.tabs.get_mut(index)
     }
 
     pub fn active_mut(&mut self) -> Option<&mut Tab> {

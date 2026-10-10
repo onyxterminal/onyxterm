@@ -71,7 +71,8 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
         split(Axis::Vertical, 0.72, LayoutNode::leaf(b), LayoutNode::leaf(c)),
     );
     let first_tab = Tab::restore(TabId::new(), nested.clone(), Some(c));
-    let second_tab = Tab::restore(TabId::new(), LayoutNode::leaf(d), None);
+    let mut second_tab = Tab::restore(TabId::new(), LayoutNode::leaf(d), None);
+    second_tab.rename(Some("  Monitoring ".to_string()));
     let tab_ids = [first_tab.id(), second_tab.id()];
     *model.tabs_mut() = Tabs::restore(vec![first_tab, second_tab], 0);
     model.rename_workspace(seeded[0], "Home Base".to_string());
@@ -96,8 +97,13 @@ fn user_workspaces_round_trip_through_store_with_layout_focus_and_cwd() {
     let first = tabs.active().expect("active tab");
     assert_eq!(first.layout(), &nested);
     assert_eq!(first.focused(), c);
-    let titles: Vec<String> = restored.snapshot().tabs.iter().filter_map(|t| t.tab.title.clone()).collect();
-    assert!(titles.ends_with(&["tail".to_string(), "htop".to_string()]), "{titles:?}");
+    let names: Vec<Option<&str>> = tabs.iter().map(Tab::name).collect();
+    assert_eq!(names, [None, Some("Monitoring")]);
+    let pane_titles: Vec<&str> = [a, b, c, d]
+        .iter()
+        .map(|panel| restored.panel(*panel).expect("panel").panel.title.as_str())
+        .collect();
+    assert_eq!(pane_titles, ["server", "vim", "tail", "htop"]);
     for (panel, cwd) in [(a, &api), (b, &web), (c, &logs), (d, &home)] {
         assert_eq!(&restored.panel(panel).expect("panel").cwd, cwd);
     }

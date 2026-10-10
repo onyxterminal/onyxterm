@@ -464,3 +464,21 @@ fn short_cwd_uses_home_mark_and_last_two_segments() {
     assert_eq!(short_cwd(Path::new("/"), home), "/");
     assert_eq!(short_cwd(Path::new("/opt/homebrew/bin"), home), "/\u{2026}/homebrew/bin");
 }
+
+#[test]
+fn tab_rename_trims_and_blank_reverts_to_automatic_title() {
+    use crate::command::CommandRegistry;
+    let mut tabs = Tabs::default();
+    tabs.open(PanelId::new());
+    let tab = tabs.get_mut(0).unwrap();
+    assert_eq!(tab.name(), None);
+    tab.rename(Some("  build  ".to_string()));
+    assert_eq!(tab.name(), Some("build"));
+    tab.rename(Some("   ".to_string()));
+    assert_eq!(tab.name(), None);
+    tab.rename(None);
+    assert_eq!(tab.name(), None);
+    assert!(tabs.get_mut(1).is_none());
+    let titles: Vec<&str> = CommandRegistry::with_defaults().list().iter().map(|c| c.title).collect();
+    assert!(titles.contains(&"Rename Tab"));
+}

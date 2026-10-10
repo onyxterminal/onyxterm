@@ -18,6 +18,7 @@ pub enum CommandId {
     MaximizePane,
     SwitchWorkspace,
     NewWorkspace,
+    RenameTab,
     Copy,
     Paste,
     Quit,
@@ -186,6 +187,7 @@ pub fn default_commands() -> Vec<Command> {
             .enabled_when(palette_open)
             .build(),
         Command::builder(NextTab, "Next Tab", "Tabs", no_op).build(),
+        Command::builder(RenameTab, "Rename Tab", "Tabs", no_op).build(),
         Command::builder(PrevTab, "Previous Tab", "Tabs", no_op).build(),
         Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),
         Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
