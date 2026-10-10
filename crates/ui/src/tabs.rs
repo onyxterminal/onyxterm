@@ -101,6 +101,12 @@ impl Tabs {
         }
     }
 
+    pub fn activate(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active = index;
+        }
+    }
+
     pub fn select_previous(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
