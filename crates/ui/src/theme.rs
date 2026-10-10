@@ -75,8 +75,10 @@ struct StatusTokensRaw {
     unknown: String,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FontTokens {
+    pub family: String,
+    pub fallback: String,
     pub size_px: f32,
     pub line_height: f32,
 }
@@ -110,7 +112,6 @@ struct AnsiTokensRaw {
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct LayoutTokens {
     pub tab_strip_height_px: f32,
-    pub workspace_rail_width_px: f32,
     pub pane_header_height_px: f32,
     pub border_radius_px: f32,
     pub gap_px: f32,
@@ -281,6 +282,34 @@ impl Theme {
 
     pub fn window_background(&self) -> WindowBackgroundAppearance {
         WindowBackgroundAppearance::Opaque
+    }
+}
+
+const SYSTEM_MONOSPACE: &str = "ui-monospace";
+const GENERIC_MONOSPACE: &str = "monospace";
+const SYSTEM_MONOSPACE_FAMILIES: [&str; 2] = ["SF Mono", "Menlo"];
+pub const LAST_RESORT_FONT: &str = "Menlo";
+
+impl FontTokens {
+    pub fn family_candidates(&self) -> Vec<String> {
+        std::iter::once(self.family.as_str())
+            .chain(self.fallback.split(','))
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .flat_map(|name| match name {
+                SYSTEM_MONOSPACE => SYSTEM_MONOSPACE_FAMILIES.to_vec(),
+                GENERIC_MONOSPACE => vec![LAST_RESORT_FONT],
+                other => vec![other],
+            })
+            .map(str::to_string)
+            .collect()
+    }
+
+    pub fn resolve_family(&self, available: &[String]) -> String {
+        self.family_candidates()
+            .into_iter()
+            .find(|candidate| available.iter().any(|name| name == candidate))
+            .unwrap_or_else(|| LAST_RESORT_FONT.to_string())
     }
 }
 

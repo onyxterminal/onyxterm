@@ -34,6 +34,24 @@ pub fn paste_bytes(text: &str, modes: InputModes) -> Vec<u8> {
     [PASTE_START, sanitized.as_bytes(), PASTE_END].concat()
 }
 
+pub fn page_scroll_lines(keystroke: &Keystroke, rows: u16) -> Option<i32> {
+    let modifiers = keystroke.modifiers;
+    if !modifiers.shift || modifiers.control || modifiers.alt || modifiers.platform {
+        return None;
+    }
+    let page = i32::from(rows.max(1));
+    match keystroke.key.as_str() {
+        "pageup" => Some(page),
+        "pagedown" => Some(-page),
+        _ => None,
+    }
+}
+
+pub fn wheel_bytes(lines: i32, modes: InputModes) -> Vec<u8> {
+    let key = if lines > 0 { "up" } else { "down" };
+    arrow_bytes(key, modes).repeat(lines.unsigned_abs() as usize)
+}
+
 fn is_named_key(key: &str) -> bool {
     key.chars().count() > 1
 }

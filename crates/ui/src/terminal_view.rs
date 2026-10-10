@@ -1,15 +1,21 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::input::wheel_bytes;
 use crate::theme::Theme;
 use gpui::{
-    canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, Font, FontWeight, Hsla,
-    Pixels, Point, Size, Styled, TextRun, UnderlineStyle, Window,
+    canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, DispatchPhase, Font,
+    FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent,
+    SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
 };
-use terminal_core::{Cell, CellColor, GridSize, GridSnapshot, TerminalHandle};
+use std::cell::RefCell;
+use std::rc::Rc;
+use terminal_core::{Cell, CellColor, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
 
-const FONT_FAMILY: &str = "Menlo";
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
+const SELECTION_ALPHA: f32 = 0.25;
+const WORD_CLICK_COUNT: usize = 2;
+const LINE_CLICK_COUNT: usize = 3;
 const MIN_COLS: u16 = 2;
 const MIN_ROWS: u16 = 1;
 const ANSI_COLOR_COUNT: u8 = 16;
@@ -82,25 +88,73 @@ pub fn grid_size_for(area: Size<Pixels>, cell: Size<Pixels>) -> GridSize {
     GridSize::new(cols.max(MIN_COLS), rows.max(MIN_ROWS))
 }
 
-#[derive(Debug, Clone, Copy)]
+pub fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<Pixels>, grid: GridSize) -> (GridPoint, Side) {
+    let local = position - origin;
+    let col_position = (local.x / cell.width).max(0.0);
+    let row = (local.y / cell.height).floor().clamp(0.0, f32::from(grid.rows.saturating_sub(1))) as u16;
+    let col = col_position.floor().min(f32::from(grid.cols.saturating_sub(1))) as u16;
+    let side = if col_position.fract() < 0.5 { Side::Left } else { Side::Right };
+    (GridPoint { row, col }, side)
+}
+
+pub fn split_scroll(accumulated: f32, line_height: f32) -> (i32, f32) {
+    let lines = (accumulated / line_height).trunc();
+    (lines as i32, accumulated - lines * line_height)
+}
+
+pub fn selection_kind_for(click_count: usize) -> SelectionKind {
+    match click_count {
+        WORD_CLICK_COUNT => SelectionKind::Word,
+        count if count >= LINE_CLICK_COUNT => SelectionKind::Line,
+        _ => SelectionKind::Simple,
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PointerState {
+    scroll_remainder: f32,
+    is_selecting: bool,
+}
+
+#[derive(Clone)]
+pub struct TerminalPane {
+    pub handle: TerminalHandle,
+    pub pointer: Rc<RefCell<PointerState>>,
+}
+
+impl TerminalPane {
+    pub fn new(handle: TerminalHandle) -> Self {
+        Self { handle, pointer: Rc::default() }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TerminalStyle {
     pub colors: TerminalColors,
+    pub font_family: SharedString,
     pub font_size: Pixels,
     pub line_height: Pixels,
+    pub selection: Hsla,
 }
 
 impl TerminalStyle {
-    pub fn from_theme(theme: &Theme) -> Self {
+    pub fn from_theme(theme: &Theme, font_family: String) -> Self {
         Self {
             colors: TerminalColors::from_theme(theme),
+            font_family: font_family.into(),
             font_size: px(theme.font.size_px),
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
+            selection: theme.accent.primary.opacity(SELECTION_ALPHA),
         }
+    }
+
+    fn font(&self) -> Font {
+        font(self.font_family.clone())
     }
 
     fn cell_size(&self, window: &Window) -> Size<Pixels> {
         let text_system = window.text_system();
-        let font_id = text_system.resolve_font(&font(FONT_FAMILY));
+        let font_id = text_system.resolve_font(&self.font());
         let width = text_system
             .advance(font_id, self.font_size, 'm')
             .map(|advance| advance.width)
@@ -114,18 +168,90 @@ pub struct Frame {
     cell: Size<Pixels>,
 }
 
-pub fn terminal_canvas(handle: TerminalHandle, style: TerminalStyle, is_focused: bool) -> Canvas<Frame> {
+pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, is_focused: bool) -> Canvas<Frame> {
+    let prepare_style = style.clone();
+    let prepare_handle = pane.handle.clone();
     canvas(
-        move |bounds, window, _cx| prepare_frame(&handle, bounds, style, window),
+        move |bounds, window, _cx| prepare_frame(&prepare_handle, bounds, &prepare_style, window),
         move |bounds, frame, window, cx| {
-            let painter = FramePainter { frame: &frame, origin: bounds.origin, style, is_focused };
+            let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
             painter.paint(window, cx);
+            let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
+            register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid }, window);
         },
     )
     .size_full()
 }
 
-fn prepare_frame(handle: &TerminalHandle, bounds: Bounds<Pixels>, style: TerminalStyle, window: &Window) -> Frame {
+#[derive(Clone, Copy)]
+struct PaneArea {
+    bounds: Bounds<Pixels>,
+    cell: Size<Pixels>,
+    grid: GridSize,
+}
+
+impl PaneArea {
+    fn point_at(&self, position: Point<Pixels>) -> (GridPoint, Side) {
+        grid_point_at(position, self.bounds.origin, self.cell, self.grid)
+    }
+}
+
+fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Window) {
+    let down = pane.clone();
+    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _cx| {
+        let is_left_press_inside = event.button == MouseButton::Left && area.bounds.contains(&event.position);
+        if phase != DispatchPhase::Bubble || !is_left_press_inside {
+            return;
+        }
+        let (point, side) = area.point_at(event.position);
+        down.handle.terminal().start_selection(selection_kind_for(event.click_count), point, side);
+        down.pointer.borrow_mut().is_selecting = true;
+        window.refresh();
+    });
+    let drag = pane.clone();
+    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
+        let is_dragging = event.pressed_button == Some(MouseButton::Left) && drag.pointer.borrow().is_selecting;
+        if phase != DispatchPhase::Bubble || !is_dragging {
+            return;
+        }
+        let (point, side) = area.point_at(event.position);
+        drag.handle.terminal().update_selection(point, side);
+        window.refresh();
+    });
+    let up = pane.clone();
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, _cx| {
+        if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+            up.pointer.borrow_mut().is_selecting = false;
+        }
+    });
+    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, _cx| {
+        if phase != DispatchPhase::Bubble || !area.bounds.contains(&event.position) {
+            return;
+        }
+        let delta = f32::from(event.delta.pixel_delta(area.cell.height).y);
+        scroll_pane(&pane, delta, f32::from(area.cell.height));
+        window.refresh();
+    });
+}
+
+fn scroll_pane(pane: &TerminalPane, delta: f32, line_height: f32) {
+    let mut pointer = pane.pointer.borrow_mut();
+    let (lines, remainder) = split_scroll(pointer.scroll_remainder + delta, line_height);
+    pointer.scroll_remainder = remainder;
+    if lines == 0 {
+        return;
+    }
+    let modes = pane.handle.input_modes();
+    if !(modes.alt_screen || modes.mouse_reporting) {
+        pane.handle.terminal().scroll_lines(lines);
+        return;
+    }
+    if let Err(err) = pane.handle.write(&wheel_bytes(lines, modes)) {
+        tracing::warn!(?err, "pty wheel write failed");
+    }
+}
+
+fn prepare_frame(handle: &TerminalHandle, bounds: Bounds<Pixels>, style: &TerminalStyle, window: &Window) -> Frame {
     let cell = style.cell_size(window);
     let grid = grid_size_for(bounds.size, cell);
     if handle.grid_size() != grid {
@@ -139,7 +265,7 @@ fn prepare_frame(handle: &TerminalHandle, bounds: Bounds<Pixels>, style: Termina
 struct FramePainter<'a> {
     frame: &'a Frame,
     origin: Point<Pixels>,
-    style: TerminalStyle,
+    style: &'a TerminalStyle,
     is_focused: bool,
 }
 
@@ -148,6 +274,7 @@ impl FramePainter<'_> {
         for (row_index, row) in self.rows() {
             self.paint_backgrounds(row_index, row, window);
         }
+        self.paint_selection(window);
         self.paint_cursor(window);
         for (row_index, row) in self.rows() {
             self.paint_text(row_index, row, window, cx);
@@ -175,6 +302,20 @@ impl FramePainter<'_> {
                 window.paint_quad(fill(self.cell_bounds(row_index, col, span), color));
             }
             col += span;
+        }
+    }
+
+    fn paint_selection(&self, window: &mut Window) {
+        let Some(span) = self.frame.snapshot.selection else {
+            return;
+        };
+        let cols = self.frame.snapshot.cols;
+        for row in span.start.row..=span.end.row {
+            if let Some(range) = span.columns_on(row, cols) {
+                let width = usize::from(range.end - range.start);
+                let bounds = self.cell_bounds(usize::from(row), usize::from(range.start), width);
+                window.paint_quad(fill(bounds, self.style.selection));
+            }
         }
     }
 
@@ -220,7 +361,7 @@ impl FramePainter<'_> {
             } else {
                 self.style.colors.foreground_of(cell)
             };
-            let run = cell_run(cell, color, ch.len_utf8());
+            let run = self.cell_run(cell, color, ch.len_utf8());
             text.push(ch);
             match runs.last_mut() {
                 Some(last) if same_style(last, &run) => last.len += run.len,
@@ -229,18 +370,19 @@ impl FramePainter<'_> {
         }
         (text, runs)
     }
-}
 
-fn cell_run(cell: &Cell, color: Hsla, len: usize) -> TextRun {
-    let weight = if cell.is_bold() { FontWeight::BOLD } else { FontWeight::NORMAL };
-    let underline = cell.is_underline().then_some(UnderlineStyle { thickness: px(1.0), color: None, wavy: false });
-    TextRun {
-        len,
-        font: Font { weight, ..font(FONT_FAMILY) },
-        color,
-        background_color: None,
-        underline,
-        strikethrough: None,
+    fn cell_run(&self, cell: &Cell, color: Hsla, len: usize) -> TextRun {
+        let weight = if cell.is_bold() { FontWeight::BOLD } else { FontWeight::NORMAL };
+        let underline =
+            cell.is_underline().then_some(UnderlineStyle { thickness: px(1.0), color: None, wavy: false });
+        TextRun {
+            len,
+            font: Font { weight, ..self.style.font() },
+            color,
+            background_color: None,
+            underline,
+            strikethrough: None,
+        }
     }
 }
 
