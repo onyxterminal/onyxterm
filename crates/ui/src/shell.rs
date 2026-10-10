@@ -197,6 +197,7 @@ impl Shell {
             CommandId::SplitRight => self.split_focused(Axis::Horizontal, cx),
             CommandId::SplitDown => self.split_focused(Axis::Vertical, cx),
             CommandId::FocusAdjacent => self.focus_next_pane(),
+            CommandId::MaximizePane => self.toggle_maximized(),
             CommandId::CloseActive => self.request_close_focused(cx),
             CommandId::Copy => self.copy_selection(cx),
             CommandId::Paste => self.paste_clipboard(cx),
@@ -503,6 +504,12 @@ impl Shell {
     fn focus_next_pane(&mut self) {
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus_next();
+        }
+    }
+
+    fn toggle_maximized(&mut self) {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.toggle_maximized();
         }
     }
 
@@ -874,7 +881,11 @@ impl Shell {
 
     fn pane_border(&self, is_focused: bool) -> Hsla {
         let theme = &self.state.theme;
-        let is_split = self.model.tabs().active().is_some_and(|tab| !matches!(tab.layout(), LayoutNode::Leaf { .. }));
+        let is_split = self
+            .model
+            .tabs()
+            .active()
+            .is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. }));
         match (is_split, is_focused) {
             (false, _) => theme.canvas(),
             (true, true) => theme.border_focus(),
@@ -888,7 +899,10 @@ impl Render for Shell {
         let theme = &self.state.theme;
         let palette_overlay = palette_render::build_overlay(&self.state, theme);
         let palette_visible = self.state.palette_visible;
-        let layout = self.model.tabs().active().map(|tab| tab.layout().clone());
+        let layout = self.model.tabs().active().map(|tab| match tab.is_maximized() {
+            true => LayoutNode::leaf(tab.focused()),
+            false => tab.layout().clone(),
+        });
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));

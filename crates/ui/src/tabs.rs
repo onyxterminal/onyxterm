@@ -10,17 +10,18 @@ pub struct Tab {
     id: TabId,
     layout: LayoutNode,
     focused: PanelId,
+    is_maximized: bool,
 }
 
 impl Tab {
     pub fn new(panel: PanelId) -> Self {
-        Self { id: TabId::new(), layout: LayoutNode::leaf(panel), focused: panel }
+        Self { id: TabId::new(), layout: LayoutNode::leaf(panel), focused: panel, is_maximized: false }
     }
 
     pub fn restore(id: TabId, layout: LayoutNode, focused: Option<PanelId>) -> Self {
         let leaves = layout.leaves();
         let focused = focused.filter(|panel| leaves.contains(panel)).unwrap_or(leaves[0]);
-        Self { id, layout, focused }
+        Self { id, layout, focused, is_maximized: false }
     }
 
     pub fn id(&self) -> TabId {
@@ -35,6 +36,14 @@ impl Tab {
         self.focused
     }
 
+    pub fn is_maximized(&self) -> bool {
+        self.is_maximized && !self.is_single_panel()
+    }
+
+    pub fn toggle_maximized(&mut self) {
+        self.is_maximized = !self.is_maximized;
+    }
+
     pub fn contains(&self, panel: PanelId) -> bool {
         self.layout.leaves().contains(&panel)
     }
@@ -42,6 +51,7 @@ impl Tab {
     pub fn split_focused(&mut self, axis: Axis, new_panel: PanelId) -> Result<(), DomainError> {
         self.layout.split_with(self.focused, axis, SPLIT_RATIO, new_panel)?;
         self.focused = new_panel;
+        self.is_maximized = false;
         Ok(())
     }
 
@@ -63,6 +73,7 @@ impl Tab {
 
     fn remove_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {
         self.layout.close_leaf(&mut |id| id == panel)?;
+        self.is_maximized = false;
         if self.focused == panel {
             self.focused = self.layout.leaves()[0];
         }

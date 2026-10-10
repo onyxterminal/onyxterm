@@ -399,3 +399,28 @@ fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
     let map = Keymap::default();
     assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "q")), Some(CommandId::Quit));
 }
+
+#[test]
+fn maximize_toggles_view_without_touching_layout() {
+    let mut tabs = Tabs::default();
+    let (first, second) = (PanelId::new(), PanelId::new());
+    tabs.open(first);
+    let tab = tabs.active_mut().unwrap();
+    tab.toggle_maximized();
+    assert!(!tab.is_maximized());
+    tab.toggle_maximized();
+    tab.split_focused(Axis::Vertical, second).unwrap();
+    assert!(!tab.is_maximized());
+    let layout = tab.layout().clone();
+    tab.toggle_maximized();
+    assert!(tab.is_maximized());
+    assert_eq!(tab.layout(), &layout);
+    tab.focus_next();
+    assert!(tab.is_maximized());
+    tab.toggle_maximized();
+    assert!(!tab.is_maximized());
+    assert_eq!(tab.layout(), &layout);
+    tab.toggle_maximized();
+    tabs.close_panel(second).unwrap();
+    assert!(!tabs.active().unwrap().is_maximized());
+}
