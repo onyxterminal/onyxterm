@@ -9,8 +9,10 @@ publish = false
 domain = { path = "../domain" }
 terminal-core = { path = "../terminal-core" }
 workspace-service = { path = "../workspace-service" }
+agent-core = { path = "../agent-core" }
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
 toml.workspace = true
+chrono.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

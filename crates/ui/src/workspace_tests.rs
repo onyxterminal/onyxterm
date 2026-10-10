@@ -186,3 +186,34 @@ fn restore_notice_lists_each_warning() {
     .expect("notice");
     assert!(notice.contains("/gone") && notice.contains("/home/me"));
 }
+
+#[test]
+fn persisted_agents_restore_as_exited_and_their_panes_open_plain_shells() {
+    let dir = TempDir::new().expect("tempdir");
+    let database = dir.path().join("profile").join("onyxterm.db");
+    let (store, restored) = WorkspaceStore::open(&database).expect("open");
+    let mut model = WorkspaceModel::from_snapshot(restored.snapshot, dir.path());
+    let workspace = model.create_workspace("Agents".to_string());
+    model.switch_to(workspace);
+    let panel = PanelId::new();
+    let agent = Agent::new(AgentId::new(), "claude".into(), workspace, TerminalSessionId::new(), dir.path().into())
+        .transition(domain::AgentState::Running)
+        .expect("running");
+    model.add_panel(PanelSnapshot {
+        panel: Panel::new_agent(panel, "Claude Code".into(), agent.id),
+        cwd: dir.path().to_path_buf(),
+    });
+    model.agents_mut().push(agent.clone());
+    model.tabs_mut().open(panel);
+    store.save(model.snapshot());
+    store.flush().expect("flush");
+    drop(store);
+
+    let (_store, reopened) = WorkspaceStore::open(&database).expect("reopen");
+    let restored = WorkspaceModel::from_snapshot(reopened.snapshot, dir.path());
+    assert_eq!(restored.agents().len(), 1);
+    assert_eq!(restored.agents()[0].id, agent.id);
+    assert_eq!(restored.agents()[0].state, domain::AgentState::Exited);
+    assert_eq!(restored.agent_of(panel), None);
+    assert_eq!(restored.panel_for_agent(agent.id), None);
+}

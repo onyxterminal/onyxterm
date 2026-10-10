@@ -1,13 +1,18 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+mod agent_center;
+
 use crate::app::AppState;
+use crate::agents::{status_color, AgentTracking, STOP_GRACE_SECS};
 use crate::app::PaletteChoice;
+use agent_center::{status_dot, AgentCenter};
+use agent_core::AdapterRegistry;
 use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_backspace, palette_move, palette_selected,
     palette_selected_choice, palette_type, CommandId,
 };
-use crate::confirm::{close_pane_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
+use crate::confirm::{close_pane_copy, delete_workspace_copy, quit_copy, stop_agent_copy, ConfirmCopy, Confirmation};
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
@@ -48,20 +53,26 @@ struct Pane {
     session: TerminalSessionId,
     terminal: TerminalPane,
     title: String,
+    has_exited: bool,
     _events: Task<()>,
 }
+
+const UNKNOWN_EXIT_CODE: i32 = -1;
 
 #[derive(Default)]
 struct EventBatch {
     title: Option<String>,
-    exited: bool,
+    exit_code: Option<i32>,
 }
 
 impl EventBatch {
     fn absorb(&mut self, event: TerminalEvent) {
         match event {
             TerminalEvent::TitleChanged(title) => self.title = Some(title),
-            TerminalEvent::Exited { .. } => self.exited = true,
+            TerminalEvent::Exited { code } if code != UNKNOWN_EXIT_CODE || self.exit_code.is_none() => {
+                self.exit_code = Some(code)
+            }
+            TerminalEvent::Exited { .. } => {}
             TerminalEvent::Output(_) | TerminalEvent::Resized { .. } => {}
         }
     }
@@ -86,6 +97,11 @@ pub struct Shell {
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
     notice: Option<String>,
+    agent_registry: AdapterRegistry,
+    agent_center: Option<AgentCenter>,
+    tracking: AgentTracking,
+    home: PathBuf,
+    _agent_tick: Option<Task<()>>,
     _quit_hook: Subscription,
 }
 
@@ -106,6 +122,11 @@ impl Shell {
             is_workspace_menu_open: false,
             menu_field: None,
             notice: restore_notice(&restored.warnings),
+            agent_registry: AdapterRegistry::with_defaults(),
+            agent_center: None,
+            tracking: AgentTracking::default(),
+            home,
+            _agent_tick: None,
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -181,6 +202,7 @@ impl Shell {
             CommandId::Paste => self.paste_clipboard(cx),
             CommandId::SwitchWorkspace => self.open_workspace_picker(),
             CommandId::NewWorkspace => self.start_new_workspace(cx),
+            CommandId::LaunchAgent | CommandId::Agents => self.open_agent_center(cx),
             CommandId::Quit => self.request_quit(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
@@ -198,6 +220,10 @@ impl Shell {
         }
         if self.is_workspace_menu_open {
             self.handle_menu_key(keystroke, cx);
+            return;
+        }
+        if self.agent_center.is_some() {
+            self.handle_agent_center_key(keystroke, cx);
             return;
         }
         if let Some(id) = self.resolve_combo(event) {
@@ -372,7 +398,8 @@ impl Shell {
         let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) else {
             return;
         };
-        let is_busy = self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
+        let is_busy = self.is_agent_alive(panel)
+            || self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
         if is_busy {
             self.pending = Some(Confirmation::ClosePane(panel));
             return;
@@ -390,6 +417,7 @@ impl Shell {
             Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
             Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
             Some(Confirmation::Quit { .. }) => cx.quit(),
+            Some(Confirmation::StopAgent(id)) => self.stop_agent(id),
             None => {}
         }
         cx.notify();
@@ -399,6 +427,7 @@ impl Shell {
         match confirmation {
             Confirmation::ClosePane(_) => close_pane_copy(),
             Confirmation::Quit { sessions } => quit_copy(sessions),
+            Confirmation::StopAgent(id) => stop_agent_copy(self.agent_provider(id), STOP_GRACE_SECS),
             Confirmation::DeleteWorkspace(id) => {
                 let live = self.model.workspace_panels(id).iter().filter(|p| self.panes.contains_key(p)).count();
                 delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live)
@@ -407,7 +436,7 @@ impl Shell {
     }
 
     fn live_session_count(&self) -> usize {
-        self.panes.len()
+        self.panes.values().filter(|pane| !pane.has_exited).count()
     }
 
     fn request_quit(&mut self, cx: &mut Context<Self>) {
@@ -419,6 +448,7 @@ impl Shell {
 
     fn toggle_workspace_menu(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = !self.is_workspace_menu_open;
+        self.agent_center = None;
         self.menu_field = None;
         cx.notify();
     }
@@ -501,6 +531,7 @@ impl Shell {
     }
 
     fn discard_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        self.mark_agent_terminated(panel);
         let Some(pane) = self.panes.remove(&panel) else {
             return;
         };
@@ -537,7 +568,8 @@ impl Shell {
             .ok()?;
         let handle = self.terminals.handle_for(session)?;
         let events = watch_session(panel, handle.subscribe(), cx);
-        self.panes.insert(panel, Pane { session, terminal: TerminalPane::new(handle), title, _events: events });
+        let pane = Pane { session, terminal: TerminalPane::new(handle), title, has_exited: false, _events: events };
+        self.panes.insert(panel, pane);
         Some(session)
     }
 
@@ -550,23 +582,35 @@ impl Shell {
                 record.panel.title = title;
             }
         }
-        if batch.exited {
-            self.close_pane(panel, cx);
+        if let Some(code) = batch.exit_code {
+            self.handle_session_exit(panel, code, cx);
         }
         cx.notify();
+    }
+
+    fn handle_session_exit(&mut self, panel: PanelId, code: i32, cx: &mut Context<Self>) {
+        let Some(agent) = self.model.agent_of(panel) else {
+            self.close_pane(panel, cx);
+            return;
+        };
+        if let Some(pane) = self.panes.get_mut(&panel) {
+            pane.has_exited = true;
+        }
+        self.record_agent_exit(agent, code);
     }
 
     fn render_tab_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let active = self.model.tabs().active_index();
-        let labels: Vec<(String, bool)> = self
+        let labels: Vec<(String, bool, Option<Hsla>)> = self
             .model
             .tabs()
             .iter()
             .enumerate()
             .map(|(index, tab)| {
                 let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
-                (format!("{}  {}", index + 1, title), index == active)
+                let dot = self.tab_agent_state(tab).map(|state| status_color(theme, state));
+                (format!("{}  {}", index + 1, title), index == active, dot)
             })
             .collect();
         div()
@@ -578,7 +622,7 @@ impl Shell {
             .flex()
             .flex_row()
             .child(self.render_logo_button(cx))
-            .children(labels.into_iter().enumerate().map(|(index, (label, is_active))| {
+            .children(labels.into_iter().enumerate().map(|(index, (label, is_active, dot))| {
                 let (bg, fg) = if is_active {
                     (theme.canvas(), theme.text_default())
                 } else {
@@ -591,6 +635,7 @@ impl Shell {
                     .px_3()
                     .flex()
                     .items_center()
+                    .gap_2()
                     .cursor_pointer()
                     .bg(bg)
                     .text_color(fg)
@@ -601,8 +646,11 @@ impl Shell {
                         MouseButton::Left,
                         cx.listener(move |shell, _event, window, cx| shell.activate_tab(index, window, cx)),
                     )
+                    .children(dot.map(status_dot))
                     .child(label)
             }))
+            .child(div().flex_1())
+            .child(self.render_agents_button(cx))
     }
 
     fn activate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -848,6 +896,7 @@ impl Render for Shell {
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
+        let agent_center = self.agent_center.as_ref().map(|center| self.render_agent_center(center, cx));
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(cx);
         let theme = &self.state.theme;
@@ -866,6 +915,7 @@ impl Render for Shell {
             .child(div().flex_1().min_h(px(0.0)).w_full().children(pane_area))
             .when(palette_visible, |el| el.child(palette_overlay))
             .children(workspace_menu)
+            .children(agent_center)
             .children(close_prompt)
     }
 }
@@ -873,7 +923,7 @@ impl Render for Shell {
 fn watch_session(panel: PanelId, mut events: Receiver<TerminalEvent>, cx: &mut Context<Shell>) -> Task<()> {
     cx.spawn(async move |shell, cx| loop {
         let batch = next_batch(&mut events).await;
-        let exited = batch.exited;
+        let exited = batch.exit_code.is_some();
         let updated = shell.update(cx, |shell, cx| shell.apply_batch(panel, batch, cx));
         if exited || updated.is_err() {
             break;
@@ -886,7 +936,7 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
     match events.recv().await {
         Ok(event) => batch.absorb(event),
         Err(RecvError::Lagged(_)) => {}
-        Err(RecvError::Closed) => batch.exited = true,
+        Err(RecvError::Closed) => batch.exit_code = Some(UNKNOWN_EXIT_CODE),
     }
     while let Ok(event) = events.try_recv() {
         batch.absorb(event);

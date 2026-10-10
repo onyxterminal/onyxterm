@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::tabs::{Tab, Tabs};
-use domain::{Agent, DomainError, Panel, PanelId, PanelKind, TabId, TerminalSessionId, Workspace, WorkspaceId};
+use domain::{Agent, AgentId, DomainError, Panel, PanelId, PanelKind, ResourceRef, TabId, TerminalSessionId, Workspace, WorkspaceId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use workspace_service::{PanelSnapshot, StoreWarning, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
@@ -97,6 +97,24 @@ impl WorkspaceModel {
 
     pub fn panel_mut(&mut self, id: PanelId) -> Option<&mut PanelSnapshot> {
         self.panels.get_mut(&id)
+    }
+
+    pub fn panel_for_agent(&self, agent: AgentId) -> Option<PanelId> {
+        self.panels
+            .values()
+            .find(|record| record.panel.resource == ResourceRef::Agent(agent))
+            .map(|record| record.panel.id)
+    }
+
+    pub fn agent_of(&self, panel: PanelId) -> Option<AgentId> {
+        match self.panels.get(&panel)?.panel.resource {
+            ResourceRef::Agent(agent) => Some(agent),
+            ResourceRef::Terminal(_) => None,
+        }
+    }
+
+    pub fn agent_mut(&mut self, id: AgentId) -> Option<&mut Agent> {
+        self.agents.iter_mut().find(|agent| agent.id == id)
     }
 
     pub fn add_panel(&mut self, panel: PanelSnapshot) {

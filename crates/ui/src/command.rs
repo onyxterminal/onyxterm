@@ -18,6 +18,8 @@ pub enum CommandId {
     MaximizePane,
     SwitchWorkspace,
     NewWorkspace,
+    LaunchAgent,
+    Agents,
     Copy,
     Paste,
     Quit,
@@ -193,6 +195,8 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
+        Command::builder(LaunchAgent, "Launch Agent\u{2026}", "Agents", no_op).build(),
+        Command::builder(Agents, "Agents", "Agents", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(Quit, "Quit Onyxterm", "Application", no_op)
