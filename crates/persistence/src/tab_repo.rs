@@ -1,10 +1,11 @@
 use crate::codec::{
     decode_layout, encode_layout, panel_kind_from_str, panel_kind_to_str, parse_uuid_id,
-    resource_ref_columns, resource_ref_from,
+    path_to_string_lossy, resource_ref_columns, resource_ref_from,
 };
 use crate::error::PersistenceError;
 use crate::sqlite::SqlitePool;
 use domain::{Panel, PanelId, Tab, TabId, WorkspaceId};
+use std::path::Path;
 
 pub trait TabRepo {
     fn list_for(&self, workspace: WorkspaceId) -> Result<Vec<Tab>, PersistenceError>;
@@ -106,41 +107,9 @@ impl<'a> TabRepo for SqliteTabRepo<'a> {
             )));
         }
         self.pool.transaction(|tx| {
-            tx.execute(
-                "INSERT INTO tabs (id, workspace_id, title, focused_panel) \
-                 VALUES (?1, ?2, ?3, ?4) \
-                 ON CONFLICT(id) DO UPDATE SET \
-                   workspace_id = excluded.workspace_id, \
-                   title = excluded.title, \
-                   focused_panel = excluded.focused_panel",
-                rusqlite::params![
-                    tab.id.to_string(),
-                    tab.workspace_id.to_string(),
-                    tab.title,
-                    tab.focused_panel.map(|p| p.to_string()),
-                ],
-            )?;
-            let layout_json = encode_layout(&tab.layout)?;
-            tx.execute(
-                "INSERT INTO layouts (tab_id, tree_json) VALUES (?1, ?2) \
-                 ON CONFLICT(tab_id) DO UPDATE SET tree_json = excluded.tree_json",
-                rusqlite::params![tab.id.to_string(), layout_json],
-            )?;
-            tx.execute("DELETE FROM panels WHERE tab_id = ?1", [tab.id.to_string()])?;
+            write_tab_row(tx, &tab)?;
             for panel in panels {
-                let (resource_kind, resource_id) = resource_ref_columns(panel.resource);
-                tx.execute(
-                    "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    rusqlite::params![
-                        panel.id.to_string(),
-                        tab.id.to_string(),
-                        panel_kind_to_str(panel.kind),
-                        panel.title,
-                        resource_kind,
-                        resource_id,
-                    ],
-                )?;
+                write_panel_row(tx, tab.id, panel, None)?;
             }
             Ok(())
         })
@@ -152,6 +121,63 @@ impl<'a> TabRepo for SqliteTabRepo<'a> {
             Ok(())
         })
     }
+}
+
+pub(crate) fn write_tab_row(
+    tx: &rusqlite::Transaction<'_>,
+    tab: &Tab,
+) -> Result<(), PersistenceError> {
+    tx.execute(
+        "INSERT INTO tabs (id, workspace_id, title, focused_panel) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(id) DO UPDATE SET \
+           workspace_id = excluded.workspace_id, \
+           title = excluded.title, \
+           focused_panel = excluded.focused_panel",
+        rusqlite::params![
+            tab.id.to_string(),
+            tab.workspace_id.to_string(),
+            tab.title,
+            tab.focused_panel.map(|p| p.to_string()),
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO layouts (tab_id, tree_json) VALUES (?1, ?2) \
+         ON CONFLICT(tab_id) DO UPDATE SET tree_json = excluded.tree_json",
+        rusqlite::params![tab.id.to_string(), encode_layout(&tab.layout)?],
+    )?;
+    tx.execute("DELETE FROM panels WHERE tab_id = ?1", [tab.id.to_string()])?;
+    Ok(())
+}
+
+pub(crate) fn write_panel_row(
+    tx: &rusqlite::Transaction<'_>,
+    tab: TabId,
+    panel: &Panel,
+    cwd: Option<&Path>,
+) -> Result<(), PersistenceError> {
+    let (resource_kind, resource_id) = resource_ref_columns(panel.resource);
+    tx.execute(
+        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+         ON CONFLICT(id) DO UPDATE SET \
+           tab_id = excluded.tab_id, \
+           kind = excluded.kind, \
+           title = excluded.title, \
+           resource_kind = excluded.resource_kind, \
+           resource_id = excluded.resource_id, \
+           cwd = excluded.cwd",
+        rusqlite::params![
+            panel.id.to_string(),
+            tab.to_string(),
+            panel_kind_to_str(panel.kind),
+            panel.title,
+            resource_kind,
+            resource_id,
+            cwd.map(path_to_string_lossy),
+        ],
+    )?;
+    Ok(())
 }
 
 struct TabPartial {
