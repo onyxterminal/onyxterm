@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app",
+    "crates/ui",
+    "crates/domain",
+    "crates/workspace-service",
+    "crates/terminal-core",
+    "crates/agent-core",
+    "crates/persistence",
+    "crates/platform",
+    "crates/observability",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+
+[workspace.dependencies]
+uuid = { version = "=1.28.0", features = ["v7", "serde"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+thiserror = "=2.0.21"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+toml = "=1.1.8"
+fs2 = "=0.4.3"
+chrono = { version = "=0.4.45", features = ["serde"] }
+parking_lot = "=0.12.5"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

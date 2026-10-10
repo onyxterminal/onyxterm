@@ -1,0 +1,15 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+
+[dependencies]
+observability = { path = "../observability" }
+platform = { path = "../platform" }
+ui = { path = "../ui" }
+tracing = { workspace = true }
