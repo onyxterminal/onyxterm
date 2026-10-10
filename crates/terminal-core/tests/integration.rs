@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use domain::TerminalSessionId;
-use terminal_core::event::GridSize;
+use terminal_core::event::{CellColor, CursorPosition, GridSize, InputModes, TerminalEvent};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
-use terminal_core::service::{InMemoryTerminalService, TerminalService};
+use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
 use tokio::time::timeout;
 
@@ -201,4 +201,49 @@ async fn service_terminates_only_target_session() {
         }
     }
     assert!(saw, "kept session should still respond");
+}
+
+#[test]
+fn snapshot_preserves_indexed_and_truecolor_and_cursor() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"\x1b[31mA\x1b[38;5;200mB\x1b[38;2;1;2;3mC\x1b[0m\x1b[7mD");
+    let snapshot = terminal.snapshot_grid();
+    assert_eq!(snapshot.cells[0].fg, CellColor::Indexed(1));
+    assert_eq!(snapshot.cells[1].fg, CellColor::Indexed(200));
+    assert_eq!(snapshot.cells[2].fg, CellColor::Rgb(1, 2, 3));
+    assert_eq!(snapshot.cells[3].fg, CellColor::Default);
+    assert!(snapshot.cells[3].is_inverse());
+    assert_eq!(snapshot.cursor, Some(CursorPosition { row: 0, col: 4 }));
+}
+
+#[test]
+fn input_modes_track_bracketed_paste_and_app_cursor() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    assert_eq!(terminal.input_modes(), InputModes::default());
+    terminal.feed(b"\x1b[?2004h\x1b[?1h");
+    let modes = terminal.input_modes();
+    assert!(modes.bracketed_paste);
+    assert!(modes.app_cursor);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_exit_emits_exited_event() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let command = ShellCommand {
+        program: PathBuf::from(SHELL),
+        args: vec!["-c".to_string(), "sleep 0.2".to_string()],
+        cwd: cwd(),
+    };
+    let id = service.spawn_command(command, GridSize::new(20, 5)).expect("spawn");
+    let mut rx = service.events(id).expect("events receiver");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut exited = false;
+    while Instant::now() < deadline && !exited {
+        if let Ok(Ok(TerminalEvent::Exited { .. })) =
+            timeout(Duration::from_millis(500), rx.recv()).await
+        {
+            exited = true;
+        }
+    }
+    assert!(exited, "expected Exited event after the shell finishes");
 }
