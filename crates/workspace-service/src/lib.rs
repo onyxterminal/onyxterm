@@ -9,8 +9,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub mod in_memory;
+mod restore_policy;
+mod store;
+mod writer;
 
 pub use in_memory::{InMemoryLayoutService, InMemoryTabService, InMemoryWorkspaceService};
+pub use persistence::{PanelSnapshot, RestoreWarning, TabSnapshot, WorkspaceSnapshot};
+pub use restore_policy::{new_terminal_tab, DEFAULT_PANEL_TITLE, SEEDED_WORKSPACE_NAMES};
+pub use store::{RestoredState, StoreError, StoreWarning, WorkspaceStore};
+pub use writer::SAVE_DEBOUNCE;
 
 pub trait WorkspaceService: Send + Sync {
     fn create(&self, name: String, root: Option<PathBuf>) -> Result<Workspace, DomainError>;
