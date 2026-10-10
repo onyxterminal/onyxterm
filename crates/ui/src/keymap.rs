@@ -85,6 +85,7 @@ impl Default for Keymap {
         let mut map = Self::new();
         map.bind(Combo::new(Modifiers::command(), "t"), NewTab);
         map.bind(Combo::new(Modifiers::command(), "w"), CloseActive);
+        map.bind(Combo::new(Modifiers::command(), "q"), Quit);
         map.bind(Combo::new(Modifiers::command(), "k"), OpenPalette);
         map.bind(Combo::new(Modifiers::command(), "c"), Copy);
         map.bind(Combo::new(Modifiers::command(), "v"), Paste);

@@ -388,3 +388,14 @@ fn delete_workspace_copy_names_workspace_and_session_count() {
     assert!(copy.body.ends_with("3 sessions will end."));
     assert_eq!(sessions_ending(1), "1 session will end.");
 }
+
+#[test]
+fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
+    use crate::confirm::quit_copy;
+    let copy = quit_copy(4);
+    assert_eq!(copy.title, "Quit Onyxterm?");
+    assert_eq!(copy.body, "4 sessions will end.");
+    assert_eq!(copy.action, "Quit");
+    let map = Keymap::default();
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "q")), Some(CommandId::Quit));
+}

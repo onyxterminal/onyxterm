@@ -7,7 +7,7 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_backspace, palette_move, palette_selected,
     palette_selected_choice, palette_type, CommandId,
 };
-use crate::confirm::{close_pane_copy, delete_workspace_copy, ConfirmCopy, Confirmation};
+use crate::confirm::{close_pane_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
@@ -181,7 +181,7 @@ impl Shell {
             CommandId::Paste => self.paste_clipboard(cx),
             CommandId::SwitchWorkspace => self.open_workspace_picker(),
             CommandId::NewWorkspace => self.start_new_workspace(cx),
-            CommandId::Quit => cx.quit(),
+            CommandId::Quit => self.request_quit(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -389,6 +389,7 @@ impl Shell {
         match self.pending.take() {
             Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
             Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
+            Some(Confirmation::Quit { .. }) => cx.quit(),
             None => {}
         }
         cx.notify();
@@ -397,10 +398,22 @@ impl Shell {
     fn confirmation_copy(&self, confirmation: Confirmation) -> ConfirmCopy {
         match confirmation {
             Confirmation::ClosePane(_) => close_pane_copy(),
+            Confirmation::Quit { sessions } => quit_copy(sessions),
             Confirmation::DeleteWorkspace(id) => {
                 let live = self.model.workspace_panels(id).iter().filter(|p| self.panes.contains_key(p)).count();
                 delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live)
             }
+        }
+    }
+
+    fn live_session_count(&self) -> usize {
+        self.panes.len()
+    }
+
+    fn request_quit(&mut self, cx: &mut Context<Self>) {
+        match self.live_session_count() {
+            0 => cx.quit(),
+            sessions => self.pending = Some(Confirmation::Quit { sessions }),
         }
     }
 
@@ -931,6 +944,20 @@ pub fn open_shell_window(
     cx.open_window(themed_options, |window, cx| {
         let shell = cx.new(|cx| Shell::new(state, startup, cx));
         window.focus(&shell.read(cx).focus_handle);
+        let guarded = shell.downgrade();
+        window.on_window_should_close(cx, move |_window, cx| {
+            let Some(shell) = guarded.upgrade() else {
+                return true;
+            };
+            let is_idle = shell.read(cx).live_session_count() == 0;
+            if !is_idle {
+                shell.update(cx, |shell, cx| {
+                    shell.request_quit(cx);
+                    cx.notify();
+                });
+            }
+            is_idle
+        });
         shell
     })
 }

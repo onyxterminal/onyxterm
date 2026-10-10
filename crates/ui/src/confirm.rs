@@ -7,6 +7,7 @@ use domain::{PanelId, WorkspaceId};
 pub enum Confirmation {
     ClosePane(PanelId),
     DeleteWorkspace(WorkspaceId),
+    Quit { sessions: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,10 @@ pub fn delete_workspace_copy(name: &str, sessions: usize) -> ConfirmCopy {
         body: format!("Its tabs and layout are removed. {}", sessions_ending(sessions)),
         action: "Delete",
     }
+}
+
+pub fn quit_copy(sessions: usize) -> ConfirmCopy {
+    ConfirmCopy { title: "Quit Onyxterm?".into(), body: sessions_ending(sessions), action: "Quit" }
 }
 
 pub fn sessions_ending(count: usize) -> String {
