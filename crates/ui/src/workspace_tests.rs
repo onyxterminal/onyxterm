@@ -2,7 +2,7 @@
 
 use crate::tabs::{Tab, Tabs};
 use crate::workspaces::{fresh_terminal, restore_notice, WorkspaceModel};
-use domain::{Agent, AgentId, Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
+use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use workspace_service::{PanelSnapshot, StoreWarning, WorkspaceSnapshot, WorkspaceStore};
@@ -146,7 +146,7 @@ fn closing_a_hidden_workspace_panel_leaves_the_active_workspace_alone() {
 }
 
 #[test]
-fn delete_workspace_drops_its_panels_and_agents_but_never_the_last_one() {
+fn delete_workspace_drops_its_panels_and_falls_back_to_scratch_when_last() {
     let dir = TempDir::new().expect("tempdir");
     let mut model = seeded_model(dir.path());
     let ids = workspace_ids(&model);
@@ -154,13 +154,10 @@ fn delete_workspace_drops_its_panels_and_agents_but_never_the_last_one() {
     let panel = PanelId::new();
     model.add_panel(fresh_terminal(panel, dir.path().to_path_buf()));
     model.tabs_mut().open(panel);
-    let agent = Agent::new(AgentId::new(), "claude".into(), ids[1], TerminalSessionId::new(), dir.path().into());
-    model.agents_mut().push(agent);
 
     assert_eq!(model.workspace_panels(ids[1]), vec![panel]);
     model.delete_workspace(ids[1]);
     assert!(model.panel(panel).is_none());
-    assert!(model.agents().is_empty());
     assert_eq!(model.active_id(), ids[0]);
 
     model.delete_workspace(ids[2]);
@@ -249,23 +246,6 @@ fn created_workspace_is_exactly_what_comes_back_after_reopen() {
 }
 
 #[test]
-fn restored_agent_panels_become_fresh_terminals() {
-    let dir = TempDir::new().expect("tempdir");
-    let mut model = seeded_model(dir.path());
-    model.switch_to(workspace_ids(&model)[0]);
-    let panel = PanelId::new();
-    model.add_panel(PanelSnapshot {
-        panel: Panel::new_agent(panel, "Claude Code".into(), AgentId::new()),
-        cwd: dir.path().to_path_buf(),
-    });
-    model.tabs_mut().open(panel);
-    let restored = WorkspaceModel::from_snapshot(model.snapshot(), dir.path());
-    let record = restored.panel(panel).expect("panel");
-    assert_eq!(record.panel.kind, domain::PanelKind::Terminal);
-    assert_eq!(record.cwd, dir.path());
-}
-
-#[test]
 fn restore_notice_lists_each_warning() {
     assert_eq!(restore_notice(&[]), None);
     let notice = restore_notice(&[StoreWarning::MissingDirectory {
@@ -275,35 +255,4 @@ fn restore_notice_lists_each_warning() {
     }])
     .expect("notice");
     assert!(notice.contains("/gone") && notice.contains("/home/me"));
-}
-
-#[test]
-fn persisted_agents_restore_as_exited_and_their_panes_open_plain_shells() {
-    let dir = TempDir::new().expect("tempdir");
-    let database = dir.path().join("profile").join("onyxterm.db");
-    let (store, restored) = WorkspaceStore::open(&database).expect("open");
-    let mut model = WorkspaceModel::from_snapshot(restored.snapshot, dir.path());
-    let workspace = model.create_workspace("Agents".to_string());
-    model.switch_to(workspace);
-    let panel = PanelId::new();
-    let agent = Agent::new(AgentId::new(), "claude".into(), workspace, TerminalSessionId::new(), dir.path().into())
-        .transition(domain::AgentState::Running)
-        .expect("running");
-    model.add_panel(PanelSnapshot {
-        panel: Panel::new_agent(panel, "Claude Code".into(), agent.id),
-        cwd: dir.path().to_path_buf(),
-    });
-    model.agents_mut().push(agent.clone());
-    model.tabs_mut().open(panel);
-    store.save(model.snapshot());
-    store.flush().expect("flush");
-    drop(store);
-
-    let (_store, reopened) = WorkspaceStore::open(&database).expect("reopen");
-    let restored = WorkspaceModel::from_snapshot(reopened.snapshot, dir.path());
-    assert_eq!(restored.agents().len(), 1);
-    assert_eq!(restored.agents()[0].id, agent.id);
-    assert_eq!(restored.agents()[0].state, domain::AgentState::Exited);
-    assert_eq!(restored.agent_of(panel), None);
-    assert_eq!(restored.panel_for_agent(agent.id), None);
 }

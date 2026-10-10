@@ -1,7 +1,6 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-pub mod agents;
 pub mod app;
 pub mod command;
 pub mod confirm;
@@ -15,8 +14,6 @@ pub mod theme;
 pub mod workspace_menu;
 pub mod workspaces;
 
-#[cfg(test)]
-mod agent_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

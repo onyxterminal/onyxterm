@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::tabs::{Tab, Tabs};
-use domain::{Agent, AgentId, DomainError, Panel, PanelId, PanelKind, ResourceRef, TabId, TerminalSessionId, Workspace, WorkspaceId};
+use domain::{DomainError, Panel, PanelId, TabId, TerminalSessionId, Workspace, WorkspaceId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use workspace_service::{PanelSnapshot, StoreWarning, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
@@ -27,7 +27,6 @@ impl WorkspaceEntry {
 pub struct WorkspaceModel {
     entries: Vec<WorkspaceEntry>,
     panels: HashMap<PanelId, PanelSnapshot>,
-    agents: Vec<Agent>,
     active: usize,
     home: PathBuf,
 }
@@ -38,7 +37,7 @@ impl WorkspaceModel {
         let mut tabs_by_id: HashMap<TabId, Tab> = HashMap::new();
         for tab in snapshot.tabs {
             for panel in tab.panels {
-                panels.insert(panel.panel.id, as_new_terminal(panel));
+                panels.insert(panel.panel.id, panel);
             }
             tabs_by_id.insert(tab.tab.id, Tab::restore(tab.tab.id, tab.tab.layout, tab.tab.focused_panel));
         }
@@ -54,7 +53,7 @@ impl WorkspaceModel {
             .active_workspace
             .and_then(|id| entries.iter().position(|entry| entry.workspace.id == id))
             .unwrap_or(0);
-        let mut model = Self { entries, panels, agents: snapshot.agents, active, home: home.to_path_buf() };
+        let mut model = Self { entries, panels, active, home: home.to_path_buf() };
         model.fill_missing_panels();
         model
     }
@@ -65,7 +64,7 @@ impl WorkspaceModel {
         WorkspaceSnapshot {
             workspaces: persisted.iter().map(|entry| snapshot_workspace(entry)).collect(),
             tabs: persisted.iter().flat_map(|entry| self.snapshot_tabs(entry)).collect(),
-            agents: self.agents.iter().filter(|agent| is_persisted(agent.workspace)).cloned().collect(),
+            agents: Vec::new(),
             active_workspace: Some(self.active_id()).filter(|id| is_persisted(*id)),
         }
     }
@@ -106,24 +105,6 @@ impl WorkspaceModel {
 
     pub fn panel_mut(&mut self, id: PanelId) -> Option<&mut PanelSnapshot> {
         self.panels.get_mut(&id)
-    }
-
-    pub fn panel_for_agent(&self, agent: AgentId) -> Option<PanelId> {
-        self.panels
-            .values()
-            .find(|record| record.panel.resource == ResourceRef::Agent(agent))
-            .map(|record| record.panel.id)
-    }
-
-    pub fn agent_of(&self, panel: PanelId) -> Option<AgentId> {
-        match self.panels.get(&panel)?.panel.resource {
-            ResourceRef::Agent(agent) => Some(agent),
-            ResourceRef::Terminal(_) => None,
-        }
-    }
-
-    pub fn agent_mut(&mut self, id: AgentId) -> Option<&mut Agent> {
-        self.agents.iter_mut().find(|agent| agent.id == id)
     }
 
     pub fn add_panel(&mut self, panel: PanelSnapshot) {
@@ -188,7 +169,6 @@ impl WorkspaceModel {
         for panel in self.workspace_panels(id) {
             self.panels.remove(&panel);
         }
-        self.agents.retain(|agent| agent.workspace != id);
         let active_id = self.active_id();
         self.entries.remove(index);
         if self.entries.is_empty() {
@@ -202,14 +182,6 @@ impl WorkspaceModel {
 
     pub fn workspace_name(&self, id: WorkspaceId) -> Option<&str> {
         self.position(id).map(|index| self.entries[index].workspace.name.as_str())
-    }
-
-    pub fn agents(&self) -> &[Agent] {
-        &self.agents
-    }
-
-    pub fn agents_mut(&mut self) -> &mut Vec<Agent> {
-        &mut self.agents
     }
 
     fn position(&self, id: WorkspaceId) -> Option<usize> {
@@ -252,13 +224,6 @@ fn snapshot_workspace(entry: &WorkspaceEntry) -> Workspace {
     workspace.tab_order = entry.tabs.iter().map(Tab::id).collect();
     workspace.active_tab = entry.tabs.active().map(Tab::id);
     workspace
-}
-
-fn as_new_terminal(snapshot: PanelSnapshot) -> PanelSnapshot {
-    if snapshot.panel.kind == PanelKind::Terminal {
-        return snapshot;
-    }
-    fresh_terminal(snapshot.panel.id, snapshot.cwd)
 }
 
 pub fn fresh_terminal(panel: PanelId, cwd: PathBuf) -> PanelSnapshot {
