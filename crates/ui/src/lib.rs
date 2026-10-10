@@ -10,6 +10,7 @@ pub mod shell;
 pub mod tabs;
 pub mod terminal_view;
 pub mod theme;
+pub mod workspace_menu;
 
 #[cfg(test)]
 mod tests;
