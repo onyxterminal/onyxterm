@@ -13,6 +13,46 @@ pub enum PlatformError {
     Io(#[from] io::Error),
     #[error("lock path invalid: {0}")]
     InvalidPath(String),
+    #[error("environment variable {0} is not set")]
+    MissingEnv(&'static str),
+}
+
+pub const PROFILE_DIR_ENV: &str = "ONYXTERM_PROFILE_DIR";
+pub const DATABASE_FILE_NAME: &str = "onyxterm.db";
+
+pub fn home_dir() -> Result<PathBuf, PlatformError> {
+    non_empty_env("HOME").ok_or(PlatformError::MissingEnv("HOME"))
+}
+
+pub fn profile_dir(profile: &str) -> Result<PathBuf, PlatformError> {
+    if let Some(dir) = non_empty_env(PROFILE_DIR_ENV) {
+        return Ok(dir);
+    }
+    Ok(data_root()?.join(profile))
+}
+
+pub fn database_path(profile: &str) -> Result<PathBuf, PlatformError> {
+    Ok(profile_dir(profile)?.join(DATABASE_FILE_NAME))
+}
+
+fn non_empty_env(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn data_root() -> Result<PathBuf, PlatformError> {
+    Ok(home_dir()?.join("Library/Application Support/Onyxterm"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn data_root() -> Result<PathBuf, PlatformError> {
+    let base = match non_empty_env("XDG_DATA_HOME") {
+        Some(dir) => dir,
+        None => home_dir()?.join(".local/share"),
+    };
+    Ok(base.join("onyxterm"))
 }
 
 pub trait SingleInstanceLock: Send + Sync {
