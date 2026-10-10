@@ -59,7 +59,7 @@ pub fn workspace_menu(
         .bg(theme.surface.raised)
         .border_1()
         .border_color(theme.border_default())
-        .rounded_md()
+        .rounded(px(theme.layout.island_radius_px))
         .shadow_md()
         .flex()
         .flex_col()

@@ -35,6 +35,10 @@ fn theme_hex_to_hsla_conversion() {
     assert!(black.l.abs() < 1e-3);
     let white = hex_to_hsla("#FFFFFF", "test.white").unwrap();
     assert!((white.l - 1.0).abs() < 1e-3);
+    let translucent = hex_to_hsla("#D1D9E0B0", "test.translucent").unwrap();
+    let opaque = hex_to_hsla("#D1D9E0", "test.opaque").unwrap();
+    assert!((translucent.a - 0xB0 as f32 / 255.0).abs() < 1e-3);
+    assert!((translucent.h - opaque.h).abs() < 1e-3 && (translucent.l - opaque.l).abs() < 1e-3);
     let accent = hex_to_hsla("#0969DA", "test.accent").unwrap();
     assert!(accent.s > 0.5);
     assert!(accent.l > 0.3 && accent.l < 0.6);
@@ -423,4 +427,40 @@ fn maximize_toggles_view_without_touching_layout() {
     tab.toggle_maximized();
     tabs.close_panel(second).unwrap();
     assert!(!tabs.active().unwrap().is_maximized());
+}
+
+#[test]
+fn island_padding_and_header_inset_content_and_grid_uses_inner_size() {
+    use crate::terminal_view::content_bounds;
+    let theme = Theme::load_default().unwrap();
+    let padding = px(theme.layout.island_padding_px);
+    let header = px(theme.layout.pane_header_height_px);
+    assert_eq!(theme.layout.pane_header_height_px, 28.0);
+    assert_eq!(theme.layout.island_padding_px, 8.0);
+    assert_eq!(theme.layout.island_radius_px, 10.0);
+    assert_eq!(theme.layout.island_gap_px, 6.0);
+    assert_eq!(theme.layout.window_margin_px, 8.0);
+    let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(513.0)));
+    let inner = content_bounds(island, padding, header);
+    assert_eq!(inner.origin, gpui::point(px(108.0), px(86.0)));
+    assert_eq!(inner.size, gpui::size(px(800.0), px(469.0)));
+    let cell = gpui::size(px(8.0), px(18.0));
+    assert_eq!(grid_size_for(inner.size, cell), GridSize::new(100, 26));
+    assert_eq!(grid_size_for(island.size, cell), GridSize::new(102, 28));
+    let small = gpui::Bounds::new(gpui::point(px(0.0), px(0.0)), gpui::size(px(10.0), px(10.0)));
+    let tiny = content_bounds(small, padding, header);
+    assert_eq!(tiny.size, gpui::size(px(0.0), px(0.0)));
+}
+
+#[test]
+fn short_cwd_uses_home_mark_and_last_two_segments() {
+    use crate::shell::short_cwd;
+    use std::path::Path;
+    let home = Path::new("/Users/me");
+    assert_eq!(short_cwd(Path::new("/Users/me"), home), "~");
+    assert_eq!(short_cwd(Path::new("/Users/me/Development/onyxterm"), home), "~/Development/onyxterm");
+    assert_eq!(short_cwd(Path::new("/Users/me/Development/Personal/onyxterm"), home), "~/\u{2026}/Personal/onyxterm");
+    assert_eq!(short_cwd(Path::new("/usr"), home), "/usr");
+    assert_eq!(short_cwd(Path::new("/"), home), "/");
+    assert_eq!(short_cwd(Path::new("/opt/homebrew/bin"), home), "/\u{2026}/homebrew/bin");
 }

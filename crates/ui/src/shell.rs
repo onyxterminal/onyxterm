@@ -39,6 +39,13 @@ const DOWN_KEY: &str = "down";
 const LOGO_SIZE_PX: f32 = 18.0;
 const CLOSE_PROMPT_WIDTH_PX: f32 = 360.0;
 const BACKDROP_ALPHA: f32 = 0.35;
+const ICON_WIDTH_PX: f32 = 12.0;
+const ICON_HEIGHT_PX: f32 = 10.0;
+const RESTORE_ICON_INSET_PX: f32 = 2.0;
+const CWD_TAIL_SEGMENTS: usize = 2;
+const HOME_MARK: &str = "~";
+const ELLIPSIS: &str = "\u{2026}";
+const CLOSE_GLYPH: &str = "\u{00d7}";
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.png");
 
 static LOGO: LazyLock<Arc<Image>> =
@@ -571,33 +578,35 @@ impl Shell {
                 (format!("{}  {}", index + 1, title), index == active)
             })
             .collect();
+        let layout = theme.layout;
         div()
-            .h(px(theme.layout.tab_strip_height_px))
+            .h(px(layout.tab_strip_height_px))
             .flex_none()
-            .bg(theme.surface.subtle)
-            .border_b_1()
-            .border_color(theme.border_default())
+            .px(px(layout.window_margin_px))
             .flex()
             .flex_row()
+            .items_center()
+            .gap(px(layout.island_gap_px))
             .child(self.render_logo_button(cx))
             .children(labels.into_iter().enumerate().map(|(index, (label, is_active))| {
-                let (bg, fg) = if is_active {
-                    (theme.canvas(), theme.text_default())
+                let (bg, fg, border) = if is_active {
+                    (theme.canvas(), theme.text_default(), theme.border_default())
                 } else {
-                    (theme.surface.subtle, theme.text.muted)
+                    (theme.surface.subtle, theme.text.muted, theme.surface.subtle)
                 };
                 let hover_bg = theme.border.muted;
                 div()
                     .id(("tab", index))
-                    .h_full()
                     .px_3()
+                    .py_1()
                     .flex()
                     .items_center()
                     .cursor_pointer()
+                    .rounded(px(layout.border_radius_px))
                     .bg(bg)
                     .text_color(fg)
-                    .border_r_1()
-                    .border_color(theme.border_default())
+                    .border_1()
+                    .border_color(border)
                     .when(!is_active, |el| el.hover(move |style| style.bg(hover_bg)))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -619,14 +628,11 @@ impl Shell {
         let hover_bg = theme.border.muted;
         div()
             .id("workspace-menu-button")
-            .h_full()
-            .pl_3()
-            .pr_2()
+            .p_1()
             .flex()
             .items_center()
             .cursor_pointer()
-            .border_r_1()
-            .border_color(theme.border_default())
+            .rounded(px(theme.layout.border_radius_px))
             .hover(move |style| style.bg(hover_bg))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.toggle_workspace_menu(cx)))
             .child(img(LOGO.clone()).size(px(LOGO_SIZE_PX)))
@@ -705,8 +711,11 @@ impl Shell {
             .flex_row()
             .justify_between()
             .gap_3()
-            .bg(theme.surface.subtle)
-            .border_b_1()
+            .mx(px(theme.layout.window_margin_px))
+            .mb(px(theme.layout.island_gap_px))
+            .rounded(px(theme.layout.island_radius_px))
+            .bg(theme.canvas())
+            .border_1()
             .border_color(theme.border_default())
             .text_color(theme.text.muted)
             .child(notice.to_string())
@@ -738,7 +747,8 @@ impl Shell {
                     .bg(theme.surface.raised)
                     .border_1()
                     .border_color(theme.border_default())
-                    .rounded_md()
+                    .rounded(px(theme.layout.island_radius_px))
+                    .shadow_md()
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -792,7 +802,12 @@ impl Shell {
             LayoutNode::Split { axis, ratio, first, second } => {
                 let first = self.render_layout(first, cx);
                 let second = self.render_layout(second, cx);
-                let container = div().size_full().flex().min_w(px(0.0)).min_h(px(0.0));
+                let container = div()
+                    .size_full()
+                    .flex()
+                    .gap(px(self.state.theme.layout.island_gap_px))
+                    .min_w(px(0.0))
+                    .min_h(px(0.0));
                 match axis {
                     Axis::Horizontal => container
                         .flex_row()
@@ -813,9 +828,12 @@ impl Shell {
             return div().into_any_element();
         };
         let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
+        let header = self.render_pane_header(panel, is_focused, cx);
         div()
+            .relative()
             .size_full()
-            .p_1()
+            .overflow_hidden()
+            .rounded(px(self.state.theme.layout.island_radius_px))
             .border_1()
             .border_color(self.pane_border(is_focused))
             .bg(self.state.theme.canvas())
@@ -828,7 +846,85 @@ impl Shell {
                 }),
             )
             .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused))
+            .child(header)
             .into_any_element()
+    }
+
+    fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let title = self.panes.get(&panel).map(|pane| pane.title.clone()).filter(|title| !title.is_empty());
+        let title = title.unwrap_or_else(|| workspace_service::DEFAULT_PANEL_TITLE.to_string());
+        let cwd = short_cwd(&self.panel_cwd(panel), self.model.home());
+        let title_color = if is_focused { theme.text_default() } else { theme.text.muted };
+        let is_maximized = self.model.tabs().active().is_some_and(|tab| tab.is_maximized());
+        let actions = [
+            HeaderAction { command: CommandId::SplitRight, tooltip: "Split Right" },
+            HeaderAction { command: CommandId::SplitDown, tooltip: "Split Down" },
+            HeaderAction {
+                command: CommandId::MaximizePane,
+                tooltip: if is_maximized { "Restore Pane" } else { "Maximize Pane" },
+            },
+            HeaderAction { command: CommandId::CloseActive, tooltip: "Close Pane" },
+        ];
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(theme.layout.pane_header_height_px))
+            .px_2()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .bg(theme.canvas())
+            .rounded_t(px(theme.layout.island_radius_px))
+            .border_b_1()
+            .border_color(theme.border.muted)
+            .child(div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title))
+            .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .children(actions.into_iter().map(|action| self.header_button(panel, action, is_maximized, cx))),
+            )
+    }
+
+    fn header_button(
+        &self,
+        panel: PanelId,
+        action: HeaderAction,
+        is_maximized: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let hover_bg = theme.surface.subtle;
+        let command = action.command;
+        let tooltip = SharedString::from(action.tooltip);
+        let colors = (theme.canvas(), theme.border_default(), theme.text_default());
+        div()
+            .id(SharedString::from(format!("{}-{panel}", action.tooltip)))
+            .p_1()
+            .flex()
+            .items_center()
+            .rounded(px(theme.layout.border_radius_px))
+            .cursor_pointer()
+            .text_color(theme.text.muted)
+            .hover(move |style| style.bg(hover_bg))
+            .tooltip(move |_window, cx| cx.new(|_| Tooltip { text: tooltip.clone(), colors }).into())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |shell, _event, window, cx| {
+                    cx.stop_propagation();
+                    shell.focus_pane(panel);
+                    window.focus(&shell.focus_handle);
+                    shell.run_command(command, cx);
+                }),
+            )
+            .child(header_icon(command, is_maximized, theme.text.muted))
     }
 
     fn pane_border(&self, is_focused: bool) -> Hsla {
@@ -838,10 +934,9 @@ impl Shell {
             .tabs()
             .active()
             .is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. }));
-        match (is_split, is_focused) {
-            (false, _) => theme.canvas(),
-            (true, true) => theme.border_focus(),
-            (true, false) => theme.border_default(),
+        match is_split && is_focused {
+            true => theme.accent.primary,
+            false => theme.border_default(),
         }
     }
 }
@@ -861,19 +956,20 @@ impl Render for Shell {
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(cx);
         let theme = &self.state.theme;
+        let margin = px(theme.layout.window_margin_px);
 
         div()
             .size_full()
             .relative()
             .flex()
             .flex_col()
-            .bg(theme.canvas())
+            .bg(theme.surface.subtle)
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, _window, cx| shell.handle_key(event, cx)))
             .child(tab_strip)
             .children(notice)
-            .child(div().flex_1().min_h(px(0.0)).w_full().children(pane_area))
+            .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
             .when(palette_visible, |el| el.child(palette_overlay))
             .children(workspace_menu)
             .children(close_prompt)
@@ -902,6 +998,55 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
+}
+
+struct HeaderAction {
+    command: CommandId,
+    tooltip: &'static str,
+}
+
+struct Tooltip {
+    text: SharedString,
+    colors: (Hsla, Hsla, Hsla),
+}
+
+impl Render for Tooltip {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let (bg, border, fg) = self.colors;
+        div().px_2().py_1().rounded_md().shadow_md().bg(bg).border_1().border_color(border).text_color(fg).child(self.text.clone())
+    }
+}
+
+fn header_icon(command: CommandId, is_maximized: bool, color: Hsla) -> AnyElement {
+    let frame = || div().w(px(ICON_WIDTH_PX)).h(px(ICON_HEIGHT_PX)).border_1().border_color(color).rounded_sm();
+    match command {
+        CommandId::SplitRight => frame().flex().flex_row().child(div().w_1_2().h_full().border_r_1().border_color(color)),
+        CommandId::SplitDown => frame().flex().flex_col().child(div().h_1_2().w_full().border_b_1().border_color(color)),
+        CommandId::MaximizePane if is_maximized => frame().p(px(RESTORE_ICON_INSET_PX)).child(
+            div().size_full().border_1().border_color(color),
+        ),
+        CommandId::MaximizePane => frame(),
+        _ => div().text_color(color).child(CLOSE_GLYPH),
+    }
+    .into_any_element()
+}
+
+pub fn short_cwd(path: &Path, home: &Path) -> String {
+    let (prefix, relative) = match path.strip_prefix(home) {
+        Ok(relative) => (HOME_MARK.to_string(), relative),
+        Err(_) => (String::new(), path.strip_prefix("/").unwrap_or(path)),
+    };
+    let segments: Vec<String> =
+        relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
+    let tail_start = segments.len().saturating_sub(CWD_TAIL_SEGMENTS);
+    let shown = segments[tail_start..].join("/");
+    match (prefix.is_empty(), tail_start > 0, shown.is_empty()) {
+        (false, _, true) => prefix,
+        (false, false, false) => format!("{prefix}/{shown}"),
+        (false, true, false) => format!("{prefix}/{ELLIPSIS}/{shown}"),
+        (true, false, _) => format!("/{shown}"),
+        (true, true, _) => format!("/{ELLIPSIS}/{shown}"),
+    }
 }
 
 fn edit_field(text: &mut SharedString, keystroke: &Keystroke) {

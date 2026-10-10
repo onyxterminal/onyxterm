@@ -88,6 +88,13 @@ pub fn grid_size_for(area: Size<Pixels>, cell: Size<Pixels>) -> GridSize {
     GridSize::new(cols.max(MIN_COLS), rows.max(MIN_ROWS))
 }
 
+pub fn content_bounds(bounds: Bounds<Pixels>, padding: Pixels, header_height: Pixels) -> Bounds<Pixels> {
+    let top = header_height + padding;
+    let width = (bounds.size.width - padding * 2.0).max(px(0.0));
+    let height = (bounds.size.height - top - padding).max(px(0.0));
+    Bounds::new(bounds.origin + point(padding, top), size(width, height))
+}
+
 pub fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<Pixels>, grid: GridSize) -> (GridPoint, Side) {
     let local = position - origin;
     let col_position = (local.x / cell.width).max(0.0);
@@ -135,6 +142,8 @@ pub struct TerminalStyle {
     pub font_size: Pixels,
     pub line_height: Pixels,
     pub selection: Hsla,
+    pub padding: Pixels,
+    pub header_height: Pixels,
 }
 
 impl TerminalStyle {
@@ -145,6 +154,8 @@ impl TerminalStyle {
             font_size: px(theme.font.size_px),
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
             selection: theme.accent.primary.opacity(SELECTION_ALPHA),
+            padding: px(theme.layout.island_padding_px),
+            header_height: px(theme.layout.pane_header_height_px),
         }
     }
 
@@ -172,8 +183,12 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, is_focused: boo
     let prepare_style = style.clone();
     let prepare_handle = pane.handle.clone();
     canvas(
-        move |bounds, window, _cx| prepare_frame(&prepare_handle, bounds, &prepare_style, window),
+        move |bounds, window, _cx| {
+            let content = content_bounds(bounds, prepare_style.padding, prepare_style.header_height);
+            prepare_frame(&prepare_handle, content, &prepare_style, window)
+        },
         move |bounds, frame, window, cx| {
+            let bounds = content_bounds(bounds, style.padding, style.header_height);
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
             painter.paint(window, cx);
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);

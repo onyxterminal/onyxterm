@@ -38,7 +38,9 @@ pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
                 .bg(panel_bg)
                 .border_1()
                 .border_color(theme.border_default())
-                .rounded_md()
+                .rounded(gpui::px(theme.layout.island_radius_px))
+                .shadow_md()
+                .overflow_hidden()
                 .flex_col()
                 .child(palette_query_panel(&query, query_bg, query_text))
                 .child(palette_results_list(&matches, theme)),

@@ -115,6 +115,10 @@ pub struct LayoutTokens {
     pub pane_header_height_px: f32,
     pub border_radius_px: f32,
     pub gap_px: f32,
+    pub island_radius_px: f32,
+    pub island_gap_px: f32,
+    pub window_margin_px: f32,
+    pub island_padding_px: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -313,12 +317,17 @@ impl FontTokens {
     }
 }
 
+const HEX_WITH_ALPHA_LEN: usize = 8;
+
 pub fn hex_to_hsla(hex: &str, key: &'static str) -> Result<Hsla, ThemeError> {
     let stripped = hex.strip_prefix('#').unwrap_or(hex);
     let parsed = u32::from_str_radix(stripped, 16).map_err(|_| ThemeError::HexParse {
         key,
         value: hex.to_string(),
     })?;
-    let rgba: Rgba = gpui::rgb(parsed);
+    let rgba: Rgba = match stripped.len() {
+        HEX_WITH_ALPHA_LEN => gpui::rgba(parsed),
+        _ => gpui::rgb(parsed),
+    };
     Ok(rgba.into())
 }

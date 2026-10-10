@@ -67,3 +67,7 @@ workspace_rail_width_px = 200
 pane_header_height_px = 28
 border_radius_px = 6
 gap_px = 1
+island_radius_px = 10
+island_gap_px = 6
+window_margin_px = 8
+island_padding_px = 8

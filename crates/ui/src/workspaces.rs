@@ -85,6 +85,10 @@ impl WorkspaceModel {
         &mut self.entries[self.active].tabs
     }
 
+    pub fn home(&self) -> &Path {
+        &self.home
+    }
+
     pub fn active_root(&self) -> PathBuf {
         self.entries[self.active].workspace.root.clone().unwrap_or_else(|| self.home.clone())
     }
