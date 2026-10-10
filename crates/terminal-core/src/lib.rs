@@ -7,9 +7,10 @@ pub mod service;
 pub mod vt;
 
 pub use event::{
-    Cell, CellColor, CursorPosition, GridSize, GridSnapshot, InputModes, TerminalError, TerminalEvent,
-    TerminalOutput,
+    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
+    TerminalError, TerminalEvent, TerminalOutput,
 };
+pub use alacritty_terminal::index::Side;
 pub use pty::{NativePty, Pty, PtyHandle};
 pub use tokio::sync::broadcast;
 pub use service::{InMemoryTerminalService, ShellCommand, TerminalService};

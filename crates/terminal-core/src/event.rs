@@ -99,6 +99,38 @@ pub struct CursorPosition {
 pub struct InputModes {
     pub app_cursor: bool,
     pub bracketed_paste: bool,
+    pub alt_screen: bool,
+    pub mouse_reporting: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridPoint {
+    pub row: u16,
+    pub col: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionKind {
+    Simple,
+    Word,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionSpan {
+    pub start: GridPoint,
+    pub end: GridPoint,
+}
+
+impl SelectionSpan {
+    pub fn columns_on(&self, row: u16, cols: u16) -> Option<std::ops::Range<u16>> {
+        if row < self.start.row || row > self.end.row {
+            return None;
+        }
+        let first = if row == self.start.row { self.start.col } else { 0 };
+        let last = if row == self.end.row { self.end.col.saturating_add(1).min(cols) } else { cols };
+        (first < last).then_some(first..last)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +139,7 @@ pub struct GridSnapshot {
     pub cols: u16,
     pub cells: Vec<Cell>,
     pub cursor: Option<CursorPosition>,
+    pub selection: Option<SelectionSpan>,
 }
 
 impl GridSnapshot {
@@ -117,6 +150,7 @@ impl GridSnapshot {
             cols: size.cols,
             cells: vec![Cell::empty(); count],
             cursor: None,
+            selection: None,
         }
     }
 }

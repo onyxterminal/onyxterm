@@ -1,11 +1,12 @@
 use crate::event::{
-    Cell, CellColor, CursorPosition, GridSize, GridSnapshot, InputModes, TerminalError, TerminalEvent,
-    TerminalOutput,
+    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
+    TerminalError, TerminalEvent, TerminalOutput,
 };
 use crate::pty::PtyHandle;
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
-use alacritty_terminal::grid::{Dimensions, Grid};
-use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::Cell as AlacCell;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
+pub const UNKNOWN_EXIT_CODE: i32 = -1;
 
 const EVENTS_CAPACITY: usize = 1024;
 
@@ -61,7 +63,7 @@ impl EventListener for TermListener {
                 let _ = self.events.send(TerminalEvent::TitleChanged(text));
             }
             AlacEvent::Exit => {
-                let _ = self.events.send(TerminalEvent::Exited { code: -1 });
+                let _ = self.events.send(TerminalEvent::Exited { code: UNKNOWN_EXIT_CODE });
             }
             _ => {}
         }
@@ -123,16 +125,18 @@ impl Terminal {
         let columns = grid.columns();
         let rows = screen_lines as u16;
         let cols = columns as u16;
+        let offset = grid.display_offset() as i32;
         let mut cells = Vec::with_capacity((rows as usize) * (cols as usize));
         for line_idx in 0..screen_lines {
-            let line = &grid[Line(line_idx as i32)];
+            let line = &grid[Line(line_idx as i32 - offset)];
             for col_idx in 0..columns {
                 let cell = &line[Column(col_idx)];
                 cells.push(alac_cell_to_cell(cell));
             }
         }
         let cursor = visible_cursor(&state.term);
-        GridSnapshot { rows, cols, cells, cursor }
+        let selection = visible_selection(&state.term);
+        GridSnapshot { rows, cols, cells, cursor, selection }
     }
 
     pub fn input_modes(&self) -> InputModes {
@@ -141,7 +145,44 @@ impl Terminal {
         InputModes {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
+            alt_screen: mode.contains(TermMode::ALT_SCREEN),
+            mouse_reporting: mode.intersects(TermMode::MOUSE_MODE),
         }
+    }
+
+    pub fn display_offset(&self) -> usize {
+        self.inner.state.lock().term.grid().display_offset()
+    }
+
+    pub fn scroll_lines(&self, delta: i32) {
+        self.inner.state.lock().term.scroll_display(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        self.inner.state.lock().term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn start_selection(&self, kind: SelectionKind, point: GridPoint, side: Side) {
+        let mut state = self.inner.state.lock();
+        let location = viewport_to_grid(&state.term, point);
+        state.term.selection = Some(Selection::new(selection_type(kind), location, side));
+    }
+
+    pub fn update_selection(&self, point: GridPoint, side: Side) {
+        let mut state = self.inner.state.lock();
+        let location = viewport_to_grid(&state.term, point);
+        if let Some(selection) = state.term.selection.as_mut() {
+            selection.update(location, side);
+        }
+    }
+
+    pub fn clear_selection(&self) {
+        self.inner.state.lock().term.selection = None;
+    }
+
+    pub fn selection_text(&self) -> Option<String> {
+        let state = self.inner.state.lock();
+        state.term.selection_to_string().filter(|text| !text.is_empty())
     }
 
     pub fn scrollback_len(&self) -> usize {
@@ -176,9 +217,10 @@ impl TerminalHandle {
     pub fn attach(terminal: Terminal, pty: PtyHandle) -> Result<Self, TerminalError> {
         let reader = pty.take_reader().ok_or(TerminalError::Terminated)?;
         let inner = terminal.inner.clone();
+        let exit_source = pty.clone();
         std::thread::Builder::new()
             .name(format!("term-event-{}", terminal.id()))
-            .spawn(move || run_event_loop(inner, reader))
+            .spawn(move || run_event_loop(inner, reader, exit_source))
             .map_err(|e| TerminalError::PtyRead(format!("thread spawn failed: {e}")))?;
         Ok(Self { terminal, pty })
     }
@@ -220,9 +262,17 @@ impl TerminalHandle {
     pub fn input_modes(&self) -> InputModes {
         self.terminal.input_modes()
     }
+
+    pub fn terminal(&self) -> &Terminal {
+        &self.terminal
+    }
+
+    pub fn has_foreground_job(&self) -> bool {
+        self.pty.has_foreground_job()
+    }
 }
 
-fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>) {
+fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, pty: PtyHandle) {
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
@@ -241,7 +291,44 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>) {
             Err(_) => break,
         }
     }
-    let _ = inner.events.send(TerminalEvent::Exited { code: -1 });
+    let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
+    let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn selection_type(kind: SelectionKind) -> SelectionType {
+    match kind {
+        SelectionKind::Simple => SelectionType::Simple,
+        SelectionKind::Word => SelectionType::Semantic,
+        SelectionKind::Line => SelectionType::Lines,
+    }
+}
+
+fn viewport_to_grid(term: &Term<TermListener>, point: GridPoint) -> Point {
+    let offset = term.grid().display_offset() as i32;
+    Point::new(Line(i32::from(point.row) - offset), Column(usize::from(point.col)))
+}
+
+fn visible_selection(term: &Term<TermListener>) -> Option<SelectionSpan> {
+    let range: SelectionRange = term.selection.as_ref()?.to_range(term)?;
+    let offset = term.grid().display_offset() as i32;
+    let rows = term.grid().screen_lines() as i32;
+    let last_col = term.grid().columns().saturating_sub(1) as u16;
+    let start_row = range.start.line.0 + offset;
+    let end_row = range.end.line.0 + offset;
+    if end_row < 0 || start_row >= rows {
+        return None;
+    }
+    let start = if start_row < 0 {
+        GridPoint { row: 0, col: 0 }
+    } else {
+        GridPoint { row: start_row as u16, col: range.start.column.0 as u16 }
+    };
+    let end = if end_row >= rows {
+        GridPoint { row: (rows - 1) as u16, col: last_col }
+    } else {
+        GridPoint { row: end_row as u16, col: range.end.column.0 as u16 }
+    };
+    Some(SelectionSpan { start, end })
 }
 
 fn visible_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {

@@ -2,7 +2,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use domain::TerminalSessionId;
-use terminal_core::event::{CellColor, CursorPosition, GridSize, InputModes, TerminalEvent};
+use terminal_core::event::{
+    CellColor, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind, SelectionSpan, TerminalEvent,
+};
+use terminal_core::Side;
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
 use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
@@ -246,4 +249,116 @@ async fn shell_exit_emits_exited_event() {
         }
     }
     assert!(exited, "expected Exited event after the shell finishes");
+}
+
+fn numbered_lines(count: usize) -> Vec<u8> {
+    (0..count).flat_map(|n| format!("{n}\r\n").into_bytes()).collect()
+}
+
+fn first_char_of_row(terminal: &Terminal, row: usize) -> char {
+    let snapshot = terminal.snapshot_grid();
+    snapshot.cells[row * usize::from(snapshot.cols)].ch
+}
+
+#[test]
+fn scroll_offset_clamps_to_history_and_bottom() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 5), 100);
+    terminal.feed(&numbered_lines(20));
+    let history = terminal.scrollback_len();
+    terminal.scroll_lines(1_000);
+    assert_eq!(terminal.display_offset(), history);
+    assert_eq!(first_char_of_row(&terminal, 0), '0');
+    terminal.scroll_lines(-3);
+    assert_eq!(terminal.display_offset(), history - 3);
+    terminal.scroll_lines(-1_000);
+    assert_eq!(terminal.display_offset(), 0);
+    terminal.scroll_lines(2);
+    terminal.scroll_to_bottom();
+    assert_eq!(terminal.display_offset(), 0);
+}
+
+#[test]
+fn selection_range_maps_to_text_and_viewport_span() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(20, 3), 100);
+    terminal.feed(b"hello world");
+    terminal.start_selection(SelectionKind::Simple, GridPoint { row: 0, col: 0 }, Side::Left);
+    terminal.update_selection(GridPoint { row: 0, col: 4 }, Side::Right);
+    assert_eq!(terminal.selection_text().as_deref(), Some("hello"));
+    let span = terminal.snapshot_grid().selection.expect("selection visible");
+    assert_eq!(span.start, GridPoint { row: 0, col: 0 });
+    assert_eq!(span.end, GridPoint { row: 0, col: 4 });
+    terminal.start_selection(SelectionKind::Word, GridPoint { row: 0, col: 8 }, Side::Left);
+    assert_eq!(terminal.selection_text().as_deref(), Some("world"));
+    terminal.clear_selection();
+    assert_eq!(terminal.selection_text(), None);
+    assert_eq!(terminal.snapshot_grid().selection, None);
+}
+
+#[test]
+fn selection_follows_scrolled_viewport() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 5), 100);
+    terminal.feed(&numbered_lines(20));
+    terminal.scroll_lines(1_000);
+    terminal.start_selection(SelectionKind::Line, GridPoint { row: 0, col: 0 }, Side::Left);
+    assert_eq!(terminal.selection_text().as_deref(), Some("0\n"));
+    terminal.scroll_to_bottom();
+    assert_eq!(terminal.snapshot_grid().selection, None);
+}
+
+#[test]
+fn selection_span_reports_columns_per_row() {
+    let span = SelectionSpan { start: GridPoint { row: 1, col: 3 }, end: GridPoint { row: 3, col: 1 } };
+    assert_eq!(span.columns_on(0, 10), None);
+    assert_eq!(span.columns_on(1, 10), Some(3..10));
+    assert_eq!(span.columns_on(2, 10), Some(0..10));
+    assert_eq!(span.columns_on(3, 10), Some(0..2));
+    assert_eq!(span.columns_on(4, 10), None);
+}
+
+#[test]
+fn input_modes_track_alt_screen_and_mouse_reporting() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"\x1b[?1049h\x1b[?1000h");
+    let modes = terminal.input_modes();
+    assert!(modes.alt_screen);
+    assert!(modes.mouse_reporting);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shell_exit_reports_real_exit_code() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let command = ShellCommand {
+        program: PathBuf::from(SHELL),
+        args: vec!["-c".to_string(), "exit 3".to_string()],
+        cwd: cwd(),
+    };
+    let id = service.spawn_command(command, GridSize::new(20, 5)).expect("spawn");
+    let mut rx = service.events(id).expect("events receiver");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut code = None;
+    while Instant::now() < deadline && code.is_none() {
+        if let Ok(Ok(TerminalEvent::Exited { code: exit })) = timeout(Duration::from_millis(500), rx.recv()).await {
+            code = Some(exit);
+        }
+    }
+    assert_eq!(code, Some(3));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreground_job_detected_while_child_runs() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let command = ShellCommand { program: PathBuf::from(SHELL), args: vec!["-i".to_string()], cwd: cwd() };
+    let id = service.spawn_command(command, GridSize::new(40, 5)).expect("spawn");
+    let handle = service.handle_for(id).expect("handle");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!handle.has_foreground_job(), "idle shell owns the foreground");
+    handle.write(b"sleep 3\n").expect("write");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut detected = false;
+    while Instant::now() < deadline && !detected {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        detected = handle.has_foreground_job();
+    }
+    assert!(detected, "sleep should own the foreground process group");
+    service.terminate_session(id).expect("terminate");
 }

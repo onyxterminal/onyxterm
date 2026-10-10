@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+const EXIT_STATUS_DEADLINE: Duration = Duration::from_millis(500);
+const EXIT_STATUS_POLL: Duration = Duration::from_millis(10);
+
 pub trait Pty: Send + Sync {
     fn spawn(
         &self,
@@ -128,6 +131,31 @@ impl PtyHandle {
 
     pub fn child_pid(&self) -> Option<u32> {
         self.inner.lock().pid
+    }
+
+    pub fn has_foreground_job(&self) -> bool {
+        let guard = self.inner.lock();
+        let (Some(shell), Some(leader)) = (guard.pid, guard.master.process_group_leader()) else {
+            return false;
+        };
+        leader as u32 != shell
+    }
+
+    pub fn wait_exit_code(&self) -> Option<i32> {
+        let end = Instant::now() + EXIT_STATUS_DEADLINE;
+        loop {
+            {
+                let mut guard = self.inner.lock();
+                let child = guard.child.as_mut()?;
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Some(status.exit_code() as i32);
+                }
+            }
+            if Instant::now() >= end {
+                return None;
+            }
+            std::thread::sleep(EXIT_STATUS_POLL);
+        }
     }
 
     pub fn child_is_alive(&self) -> bool {

@@ -125,7 +125,7 @@ fn input_encodes_printable_and_named_keys() {
 
 #[test]
 fn input_uses_ss3_arrows_in_app_cursor_mode() {
-    let modes = InputModes { app_cursor: true, bracketed_paste: false };
+    let modes = InputModes { app_cursor: true, ..InputModes::default() };
     let bytes = crate::input::encode_keystroke(&keystroke(Modifiers::none(), "down", None), modes);
     assert_eq!(bytes, Some(b"\x1bOB".to_vec()));
 }
@@ -147,7 +147,7 @@ fn input_ignores_command_shortcuts() {
 fn paste_wraps_only_when_bracketed_mode_enabled() {
     let plain = crate::input::paste_bytes("a\nb", InputModes::default());
     assert_eq!(plain, b"a\rb".to_vec());
-    let modes = InputModes { app_cursor: false, bracketed_paste: true };
+    let modes = InputModes { bracketed_paste: true, ..InputModes::default() };
     let bracketed = crate::input::paste_bytes("x\x1by", modes);
     assert_eq!(bracketed, b"\x1b[200~xy\x1b[201~".to_vec());
 }
