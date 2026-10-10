@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use crate::app::AppState;
+use crate::app::{AppState, PaletteChoice};
 use crate::keymap::Combo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -16,6 +16,8 @@ pub enum CommandId {
     SplitDown,
     FocusAdjacent,
     MaximizePane,
+    SwitchWorkspace,
+    NewWorkspace,
     Copy,
     Paste,
     Quit,
@@ -103,6 +105,36 @@ pub fn open_palette(state: &mut AppState) {
     state.palette_visible = true;
     state.palette_query.clear();
     state.palette_selection = 0;
+    state.palette_choices = None;
+}
+
+pub fn open_choice_palette(state: &mut AppState, choices: Vec<PaletteChoice>) {
+    open_palette(state);
+    state.palette_choices = Some(choices);
+}
+
+pub fn filtered_choices(state: &AppState) -> Vec<&PaletteChoice> {
+    let Some(choices) = state.palette_choices.as_ref() else {
+        return Vec::new();
+    };
+    let needle = state.palette_query.trim().to_ascii_lowercase();
+    let mut scored: Vec<(&PaletteChoice, usize)> = choices
+        .iter()
+        .filter_map(|choice| fuzzy_score(&choice.title.to_ascii_lowercase(), &needle).map(|score| (choice, score)))
+        .collect();
+    scored.sort_by_key(|(_, score)| *score);
+    scored.into_iter().map(|(choice, _)| choice).collect()
+}
+
+pub fn palette_selected_choice(state: &AppState) -> Option<String> {
+    filtered_choices(state).get(state.palette_selection).map(|choice| choice.key.clone())
+}
+
+fn palette_len(state: &AppState) -> usize {
+    match state.palette_choices {
+        Some(_) => filtered_choices(state).len(),
+        None => state.filtered_commands().len(),
+    }
 }
 
 pub fn close_palette(state: &mut AppState) {
@@ -128,7 +160,7 @@ pub fn palette_backspace(state: &mut AppState) {
 }
 
 pub fn palette_move(state: &mut AppState, step: isize) {
-    let count = state.filtered_commands().len();
+    let count = palette_len(state);
     if count == 0 {
         state.palette_selection = 0;
         return;
@@ -138,6 +170,9 @@ pub fn palette_move(state: &mut AppState, step: isize) {
 }
 
 pub fn palette_selected(state: &AppState) -> Option<CommandId> {
+    if state.palette_choices.is_some() {
+        return None;
+    }
     state.filtered_commands().get(state.palette_selection).copied()
 }
 
@@ -156,6 +191,8 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
         Command::builder(FocusAdjacent, "Focus Next Pane", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
+        Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
+        Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(Quit, "Quit Onyxterm", "Application", no_op)
@@ -232,7 +269,10 @@ fn score_match(cmd: &Command, needle: &str) -> Option<usize> {
     if !cmd.category.is_empty() && needle.contains(cmd.category.to_ascii_lowercase().as_str()) {
         return Some(0);
     }
-    let title = cmd.title.to_ascii_lowercase();
+    fuzzy_score(&cmd.title.to_ascii_lowercase(), needle)
+}
+
+fn fuzzy_score(title: &str, needle: &str) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }

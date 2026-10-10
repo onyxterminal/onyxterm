@@ -347,3 +347,44 @@ fn font_family_maps_system_monospace_and_falls_back() {
     assert_eq!(theme.font.resolve_family(&with_sf), "SF Mono");
     assert_eq!(theme.font.resolve_family(&[]), "Menlo");
 }
+
+#[test]
+fn workspace_picker_fuzzy_filters_choices_and_returns_key() {
+    use crate::app::PaletteChoice;
+    use crate::command::{filtered_choices, open_choice_palette, palette_selected_choice};
+    let mut state = AppState::new();
+    let choice = |key: &str, title: &str| PaletteChoice { key: key.into(), title: title.into() };
+    open_choice_palette(
+        &mut state,
+        vec![choice("a", "Personal"), choice("b", "Infrastructure"), choice("c", "Backend API")],
+    );
+    assert_eq!(filtered_choices(&state).len(), 3);
+    assert_eq!(palette_selected(&state), None);
+    palette_type(&mut state, "bapi");
+    assert_eq!(palette_selected_choice(&state), Some("c".to_string()));
+    palette_backspace(&mut state);
+    palette_backspace(&mut state);
+    palette_backspace(&mut state);
+    palette_move(&mut state, 1);
+    assert_eq!(filtered_choices(&state).len(), 1);
+    open_palette(&mut state);
+    assert!(state.palette_choices.is_none());
+    assert!(palette_selected(&state).is_some());
+}
+
+#[test]
+fn palette_offers_workspace_commands() {
+    let registry = CommandRegistry::with_defaults();
+    let titles: Vec<&str> = registry.list().iter().map(|c| c.title).collect();
+    assert!(titles.contains(&"Switch Workspace"));
+    assert!(titles.contains(&"New Workspace"));
+}
+
+#[test]
+fn delete_workspace_copy_names_workspace_and_session_count() {
+    use crate::confirm::{delete_workspace_copy, sessions_ending};
+    let copy = delete_workspace_copy("Backend", 3);
+    assert!(copy.title.contains("Backend"));
+    assert!(copy.body.ends_with("3 sessions will end."));
+    assert_eq!(sessions_ending(1), "1 session will end.");
+}

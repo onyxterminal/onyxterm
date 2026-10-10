@@ -2,14 +2,17 @@
 #![forbid(unsafe_code)]
 
 use crate::app::AppState;
+use crate::app::PaletteChoice;
 use crate::command::{
-    close_palette, open_palette, palette_backspace, palette_move, palette_selected, palette_type, CommandId,
+    close_palette, open_choice_palette, open_palette, palette_backspace, palette_move, palette_selected,
+    palette_selected_choice, palette_type, CommandId,
 };
+use crate::confirm::{close_pane_copy, delete_workspace_copy, ConfirmCopy, Confirmation};
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
-use crate::workspace_menu::{workspace_menu, WorkspaceMenuItem};
+use crate::workspace_menu::{workspace_menu, MenuField, WorkspaceMenuActions, WorkspaceMenuItem};
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
 use gpui::{
@@ -79,8 +82,9 @@ pub struct Shell {
     focus_handle: FocusHandle,
     model: WorkspaceModel,
     panes: HashMap<PanelId, Pane>,
-    pending_close: Option<PanelId>,
+    pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
+    menu_field: Option<MenuField>,
     notice: Option<String>,
     _quit_hook: Subscription,
 }
@@ -98,8 +102,9 @@ impl Shell {
             focus_handle: cx.focus_handle(),
             model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
             panes: HashMap::new(),
-            pending_close: None,
+            pending: None,
             is_workspace_menu_open: false,
+            menu_field: None,
             notice: restore_notice(&restored.warnings),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
@@ -174,6 +179,8 @@ impl Shell {
             CommandId::CloseActive => self.request_close_focused(cx),
             CommandId::Copy => self.copy_selection(cx),
             CommandId::Paste => self.paste_clipboard(cx),
+            CommandId::SwitchWorkspace => self.open_workspace_picker(),
+            CommandId::NewWorkspace => self.start_new_workspace(cx),
             CommandId::Quit => cx.quit(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
@@ -185,12 +192,12 @@ impl Shell {
 
     fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        if self.pending_close.is_some() {
-            self.handle_close_prompt_key(keystroke, cx);
+        if self.pending.is_some() {
+            self.handle_confirmation_key(keystroke, cx);
             return;
         }
-        if self.is_workspace_menu_open && keystroke.key == ESCAPE_KEY {
-            self.close_workspace_menu(cx);
+        if self.is_workspace_menu_open {
+            self.handle_menu_key(keystroke, cx);
             return;
         }
         if let Some(id) = self.resolve_combo(event) {
@@ -239,18 +246,104 @@ impl Shell {
 
     fn run_palette_selection(&mut self, cx: &mut Context<Self>) {
         let selected = palette_selected(&self.state);
+        let choice = palette_selected_choice(&self.state);
         close_palette(&mut self.state);
+        if let Some(key) = choice {
+            self.select_workspace_by_key(&key, cx);
+        }
         if let Some(id) = selected {
             self.run_command(id, cx);
         }
     }
 
-    fn handle_close_prompt_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    fn handle_confirmation_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
         match keystroke.key.as_str() {
-            ESCAPE_KEY => self.cancel_close(cx),
-            ENTER_KEY => self.confirm_close(cx),
+            ESCAPE_KEY => self.cancel_confirmation(cx),
+            ENTER_KEY => self.accept_confirmation(cx),
             _ => {}
         }
+    }
+
+    fn handle_menu_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+        let Some(field) = self.menu_field.as_mut() else {
+            if keystroke.key == ESCAPE_KEY {
+                self.close_workspace_menu(cx);
+            }
+            return;
+        };
+        match keystroke.key.as_str() {
+            ESCAPE_KEY => self.menu_field = None,
+            ENTER_KEY => self.commit_menu_field(cx),
+            _ => edit_field(&mut field.text, keystroke),
+        }
+        cx.notify();
+    }
+
+    fn commit_menu_field(&mut self, cx: &mut Context<Self>) {
+        let Some(field) = self.menu_field.take() else {
+            return;
+        };
+        let name = field.text.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        match field.renaming.and_then(|key| self.workspace_by_key(&key)) {
+            Some(id) => {
+                self.model.rename_workspace(id, name);
+                self.persist();
+            }
+            None => {
+                let id = self.model.create_workspace(name);
+                self.select_workspace(id, cx);
+            }
+        }
+    }
+
+    fn open_workspace_picker(&mut self) {
+        let choices = self
+            .model
+            .entries()
+            .iter()
+            .map(|entry| PaletteChoice { key: entry.workspace.id.to_string(), title: entry.workspace.name.clone() })
+            .collect();
+        open_choice_palette(&mut self.state, choices);
+    }
+
+    fn start_new_workspace(&mut self, cx: &mut Context<Self>) {
+        self.is_workspace_menu_open = true;
+        self.menu_field = Some(MenuField { renaming: None, text: SharedString::default() });
+        cx.notify();
+    }
+
+    fn start_rename_workspace(&mut self, key: &SharedString, cx: &mut Context<Self>) {
+        let Some(name) = self.workspace_by_key(key).and_then(|id| self.model.workspace_name(id)) else {
+            return;
+        };
+        self.menu_field = Some(MenuField { renaming: Some(key.clone()), text: name.to_string().into() });
+        cx.notify();
+    }
+
+    fn request_delete_workspace(&mut self, key: &SharedString, cx: &mut Context<Self>) {
+        if !self.model.can_delete_workspace() {
+            return;
+        }
+        if let Some(id) = self.workspace_by_key(key) {
+            self.pending = Some(Confirmation::DeleteWorkspace(id));
+            self.close_workspace_menu(cx);
+        }
+    }
+
+    fn delete_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+        for panel in self.model.workspace_panels(id) {
+            self.discard_pane(panel, cx);
+        }
+        self.model.delete_workspace(id);
+        self.show_active_workspace(cx);
+        self.persist();
+    }
+
+    fn workspace_by_key(&self, key: &str) -> Option<WorkspaceId> {
+        self.model.entries().iter().map(|entry| entry.workspace.id).find(|id| id.to_string() == key)
     }
 
     fn copy_selection(&self, cx: &mut Context<Self>) {
@@ -281,31 +374,45 @@ impl Shell {
         };
         let is_busy = self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
         if is_busy {
-            self.pending_close = Some(panel);
+            self.pending = Some(Confirmation::ClosePane(panel));
             return;
         }
         self.close_pane(panel, cx);
     }
 
-    fn cancel_close(&mut self, cx: &mut Context<Self>) {
-        self.pending_close = None;
+    fn cancel_confirmation(&mut self, cx: &mut Context<Self>) {
+        self.pending = None;
         cx.notify();
     }
 
-    fn confirm_close(&mut self, cx: &mut Context<Self>) {
-        if let Some(panel) = self.pending_close.take() {
-            self.close_pane(panel, cx);
+    fn accept_confirmation(&mut self, cx: &mut Context<Self>) {
+        match self.pending.take() {
+            Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
+            Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
+            None => {}
         }
         cx.notify();
     }
 
+    fn confirmation_copy(&self, confirmation: Confirmation) -> ConfirmCopy {
+        match confirmation {
+            Confirmation::ClosePane(_) => close_pane_copy(),
+            Confirmation::DeleteWorkspace(id) => {
+                let live = self.model.workspace_panels(id).iter().filter(|p| self.panes.contains_key(p)).count();
+                delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live)
+            }
+        }
+    }
+
     fn toggle_workspace_menu(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = !self.is_workspace_menu_open;
+        self.menu_field = None;
         cx.notify();
     }
 
     fn close_workspace_menu(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = false;
+        self.menu_field = None;
         cx.notify();
     }
 
@@ -367,8 +474,8 @@ impl Shell {
     }
 
     fn close_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        if self.pending_close == Some(panel) {
-            self.pending_close = None;
+        if self.pending == Some(Confirmation::ClosePane(panel)) {
+            self.pending = None;
         }
         if let Err(err) = self.model.remove_panel(panel) {
             tracing::warn!(?err, "close pane failed");
@@ -523,13 +630,19 @@ impl Shell {
                 is_active: entry.workspace.id == active,
             })
             .collect();
-        let shell = cx.entity().downgrade();
-        let on_select = Rc::new(move |id: &SharedString, _window: &mut Window, cx: &mut gpui::App| {
-            let id = id.clone();
-            if let Err(err) = shell.update(cx, |shell, cx| shell.select_workspace_by_key(&id, cx)) {
-                tracing::debug!(?err, "workspace select after shell dropped");
-            }
-        });
+        let actions = WorkspaceMenuActions {
+            select: self.menu_handler(cx, |shell, key, cx| shell.select_workspace_by_key(key, cx)),
+            rename: self.menu_handler(cx, |shell, key, cx| shell.start_rename_workspace(key, cx)),
+            delete: self.menu_handler(cx, |shell, key, cx| shell.request_delete_workspace(key, cx)),
+            create: {
+                let shell = cx.entity().downgrade();
+                Rc::new(move |_window: &mut Window, cx: &mut gpui::App| {
+                    if let Err(err) = shell.update(cx, |shell, cx| shell.start_new_workspace(cx)) {
+                        tracing::debug!(?err, "workspace menu after shell dropped");
+                    }
+                })
+            },
+        };
         div()
             .absolute()
             .inset_0()
@@ -541,13 +654,27 @@ impl Shell {
                     .top(px(theme.layout.tab_strip_height_px))
                     .left(px(theme.layout.gap_px))
                     .occlude()
-                    .child(workspace_menu(items, theme, on_select)),
+                    .child(workspace_menu(items, self.menu_field.clone(), theme, actions)),
             )
     }
 
+    fn menu_handler(
+        &self,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Shell, &SharedString, &mut Context<Shell>) + 'static,
+    ) -> crate::workspace_menu::SelectHandler {
+        let shell = cx.entity().downgrade();
+        let action = Rc::new(action);
+        Rc::new(move |key: &SharedString, _window: &mut Window, cx: &mut gpui::App| {
+            let action = action.clone();
+            if let Err(err) = shell.update(cx, |shell, cx| action(shell, key, cx)) {
+                tracing::debug!(?err, "workspace menu after shell dropped");
+            }
+        })
+    }
+
     fn select_workspace_by_key(&mut self, key: &str, cx: &mut Context<Self>) {
-        let id = self.model.entries().iter().map(|entry| entry.workspace.id).find(|id| id.to_string() == key);
-        if let Some(id) = id {
+        if let Some(id) = self.workspace_by_key(key) {
             self.select_workspace(id, cx);
         }
     }
@@ -577,7 +704,7 @@ impl Shell {
             )
     }
 
-    fn render_close_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let backdrop = Hsla { a: BACKDROP_ALPHA, ..gpui::black() };
         div()
@@ -599,12 +726,8 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap_3()
-                    .child("Terminate running process?")
-                    .child(
-                        div()
-                            .text_color(theme.text.muted)
-                            .child("A command is still running in this pane. Closing it will end the process."),
-                    )
+                    .child(copy.title)
+                    .child(div().text_color(theme.text.muted).child(copy.body))
                     .child(
                         div()
                             .flex()
@@ -615,18 +738,18 @@ impl Shell {
                                 self.prompt_button("close-cancel", "Cancel", (theme.surface.subtle, theme.text_default()))
                                     .on_mouse_down(
                                         MouseButton::Left,
-                                        cx.listener(|shell, _event, _window, cx| shell.cancel_close(cx)),
+                                        cx.listener(|shell, _event, _window, cx| shell.cancel_confirmation(cx)),
                                     ),
                             )
                             .child(
                                 self.prompt_button(
                                     "close-confirm",
-                                    "Close and terminate",
+                                    copy.action,
                                     (theme.status.failed, theme.text.inverse),
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(|shell, _event, _window, cx| shell.confirm_close(cx)),
+                                    cx.listener(|shell, _event, _window, cx| shell.accept_confirmation(cx)),
                                 ),
                             ),
                     ),
@@ -712,7 +835,7 @@ impl Render for Shell {
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
-        let close_prompt = self.pending_close.map(|_| self.render_close_prompt(cx));
+        let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(cx);
         let theme = &self.state.theme;
 
@@ -756,6 +879,22 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
+}
+
+fn edit_field(text: &mut SharedString, keystroke: &Keystroke) {
+    let modifiers = keystroke.modifiers;
+    if keystroke.key == BACKSPACE_KEY {
+        let mut edited = text.to_string();
+        edited.pop();
+        *text = edited.into();
+        return;
+    }
+    if modifiers.control || modifiers.platform {
+        return;
+    }
+    if let Some(typed) = keystroke.key_char.as_deref() {
+        *text = format!("{text}{typed}").into();
+    }
 }
 
 fn write_to(handle: &TerminalHandle, bytes: &[u8]) {

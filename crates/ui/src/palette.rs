@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::app::AppState;
-use crate::command::CommandRegistry;
+use crate::command::{filtered_choices, CommandRegistry};
 use crate::theme::Theme;
 use gpui::{div, Div, Hsla, ParentElement, Styled};
 
@@ -18,18 +18,10 @@ pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
     let query_bg = theme.surface.subtle;
     let query_text = theme.text.default;
     let selection = state.palette_selection;
-    let matches: Vec<(String, String, bool)> = state
-        .registry
-        .search(&state.palette_query)
+    let matches: Vec<(String, String, bool)> = palette_entries(state)
         .into_iter()
         .enumerate()
-        .map(|(idx, cmd)| {
-            (
-                cmd.title.to_string(),
-                cmd.category.to_string(),
-                idx == selection,
-            )
-        })
+        .map(|(idx, (title, category))| (title, category, idx == selection))
         .collect();
 
     div()
@@ -51,6 +43,23 @@ pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
                 .child(palette_query_panel(&query, query_bg, query_text))
                 .child(palette_results_list(&matches, theme)),
         )
+}
+
+const CHOICE_CATEGORY: &str = "Workspace";
+
+pub fn palette_entries(state: &AppState) -> Vec<(String, String)> {
+    if state.palette_choices.is_some() {
+        return filtered_choices(state)
+            .into_iter()
+            .map(|choice| (choice.title.clone(), CHOICE_CATEGORY.to_string()))
+            .collect();
+    }
+    state
+        .registry
+        .search(&state.palette_query)
+        .into_iter()
+        .map(|cmd| (cmd.title.to_string(), cmd.category.to_string()))
+        .collect()
 }
 
 fn palette_query_panel(query: &str, bg: Hsla, fg: Hsla) -> Div {

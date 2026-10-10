@@ -5,6 +5,12 @@ use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteChoice {
+    pub key: String,
+    pub title: String,
+}
+
 #[derive(Debug)]
 pub struct AppState {
     pub theme: Theme,
@@ -13,6 +19,7 @@ pub struct AppState {
     pub palette_visible: bool,
     pub palette_query: String,
     pub palette_selection: usize,
+    pub palette_choices: Option<Vec<PaletteChoice>>,
 }
 
 impl AppState {
@@ -24,6 +31,7 @@ impl AppState {
             palette_visible: false,
             palette_query: String::new(),
             palette_selection: 0,
+            palette_choices: None,
         }
     }
 
