@@ -83,6 +83,18 @@ fn layout_close_leaf_collapses_parent() {
 }
 
 #[test]
+fn layout_close_leaf_reaches_nested_second_branch() {
+    let p1 = PanelId::new();
+    let p2 = PanelId::new();
+    let p3 = PanelId::new();
+    let mut root = domain::LayoutNode::leaf(p1);
+    root.split_with(p1, Axis::Horizontal, 0.5, p2).unwrap();
+    root.split_with(p2, Axis::Vertical, 0.5, p3).unwrap();
+    assert!(root.close_leaf(&mut |id| id == p3).unwrap());
+    assert_eq!(root.leaves(), vec![p1, p2]);
+}
+
+#[test]
 fn layout_validate_rejects_duplicate_panel() {
     let p = PanelId::new();
     let inner = domain::LayoutNode::Split {

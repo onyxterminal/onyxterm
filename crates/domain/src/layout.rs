@@ -165,7 +165,10 @@ impl LayoutNode {
                     *self = survivor;
                     return Ok(true);
                 }
-                first.close_leaf(pred).or_else(|_| second.close_leaf(pred))
+                if first.close_leaf(pred)? {
+                    return Ok(true);
+                }
+                second.close_leaf(pred)
             }
         }
     }
