@@ -9,6 +9,7 @@ mod migrations;
 mod repository;
 mod restore;
 mod schema;
+mod snapshot;
 mod sqlite;
 mod tab_repo;
 mod workspace_repo;
@@ -17,6 +18,7 @@ pub use error::PersistenceError;
 pub use repository::Repository;
 pub use restore::{RestoreSnapshot, RestoreWarning};
 pub use schema::SCHEMA_SQL;
+pub use snapshot::{LoadedSnapshot, PanelSnapshot, TabSnapshot, WorkspaceSnapshot};
 pub use sqlite::SqlitePool;
 
 pub use agent_repo::{AgentRepo, SqliteAgentRepo};
