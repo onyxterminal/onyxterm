@@ -3,16 +3,20 @@
 
 pub mod app;
 pub mod command;
+pub mod input;
 pub mod keymap;
 pub mod palette;
 pub mod shell;
+pub mod tabs;
+pub mod terminal_view;
 pub mod theme;
 
 #[cfg(test)]
 mod tests;
 
-use crate::app::AppState;
 use gpui::{Bounds, WindowOptions};
+use std::sync::Arc;
+use terminal_core::InMemoryTerminalService;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -27,10 +31,9 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-pub fn run_app() -> Result<(), UiError> {
+pub fn run_app(terminals: Arc<InMemoryTerminalService>) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
-        let state = AppState::new();
         let options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Onyxterm".into()),
@@ -48,7 +51,11 @@ pub fn run_app() -> Result<(), UiError> {
             show: true,
             ..Default::default()
         };
-        let _ = shell::open_shell_window(options, state, cx);
+        if let Err(err) = shell::open_shell_window(options, terminals, cx) {
+            tracing::error!(?err, "failed to open main window");
+            cx.quit();
+        }
+        cx.on_window_closed(|cx| cx.quit()).detach();
     });
     Ok(())
 }

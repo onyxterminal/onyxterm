@@ -11,5 +11,6 @@ pub use event::{
     TerminalOutput,
 };
 pub use pty::{NativePty, Pty, PtyHandle};
+pub use tokio::sync::broadcast;
 pub use service::{InMemoryTerminalService, ShellCommand, TerminalService};
 pub use vt::{Terminal, TerminalHandle, DEFAULT_SCROLLBACK};

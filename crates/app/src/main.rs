@@ -3,6 +3,11 @@
 
 use platform::{FileLock, SingleInstanceLock};
 use std::path::PathBuf;
+use std::sync::Arc;
+use terminal_core::{InMemoryTerminalService, NativePty};
+
+const EXIT_ALREADY_RUNNING: i32 = 2;
+const EXIT_UI_FAILED: i32 = 1;
 
 fn main() {
     observability::init_tracing();
@@ -14,8 +19,13 @@ fn main() {
         Ok(guard) => guard,
         Err(err) => {
             tracing::error!(?err, "another onyxterm instance is already running");
-            std::process::exit(2);
+            std::process::exit(EXIT_ALREADY_RUNNING);
         }
     };
-    println!("Onyxterm {}", ui::version());
+    tracing::info!(version = ui::version(), "starting onyxterm");
+    let terminals = Arc::new(InMemoryTerminalService::new(Box::new(NativePty::new())));
+    if let Err(err) = ui::run_app(terminals) {
+        tracing::error!(?err, "onyxterm ui failed");
+        std::process::exit(EXIT_UI_FAILED);
+    }
 }
