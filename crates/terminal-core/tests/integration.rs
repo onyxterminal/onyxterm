@@ -362,3 +362,24 @@ async fn foreground_job_detected_while_child_runs() {
     assert!(detected, "sleep should own the foreground process group");
     service.terminate_session(id).expect("terminate");
 }
+
+#[test]
+fn current_dir_follows_shell_cd() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let target = std::fs::canonicalize(std::env::temp_dir()).expect("temp dir");
+    let command = ShellCommand {
+        program: PathBuf::from(SHELL),
+        args: vec!["-c".to_string(), format!("cd '{}' && sleep 2", target.display())],
+        cwd: PathBuf::from("/"),
+    };
+    let id = service.spawn_command(command, GridSize::new(20, 5)).expect("spawn");
+    let handle = service.handle_for(id).expect("handle");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut seen = None;
+    while Instant::now() < deadline && seen.as_ref() != Some(&target) {
+        std::thread::sleep(Duration::from_millis(50));
+        seen = handle.current_dir();
+    }
+    assert_eq!(seen, Some(target));
+    service.terminate_session(id).expect("terminate");
+}

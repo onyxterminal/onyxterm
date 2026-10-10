@@ -133,6 +133,10 @@ impl PtyHandle {
         self.inner.lock().pid
     }
 
+    pub fn current_dir(&self) -> Option<PathBuf> {
+        process_cwd(self.child_pid()?)
+    }
+
     pub fn has_foreground_job(&self) -> bool {
         let guard = self.inner.lock();
         let (Some(shell), Some(leader)) = (guard.pid, guard.master.process_group_leader()) else {
@@ -235,6 +239,32 @@ impl PtyHandle {
         guard.writer = None;
         Ok(())
     }
+}
+
+#[cfg(target_os = "macos")]
+fn process_cwd(pid: u32) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut info: libc::proc_vnodepathinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    let raw: Vec<u8> = info.pvi_cdir.vip_path.iter().flatten().map(|c| *c as u8).take_while(|b| *b != 0).collect();
+    (!raw.is_empty()).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(&raw)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_cwd(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
 }
 
 fn to_pty_size(size: GridSize) -> PtySize {

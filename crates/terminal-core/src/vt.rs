@@ -267,6 +267,10 @@ impl TerminalHandle {
         &self.terminal
     }
 
+    pub fn current_dir(&self) -> Option<std::path::PathBuf> {
+        self.pty.current_dir()
+    }
+
     pub fn has_foreground_job(&self) -> bool {
         self.pty.has_foreground_job()
     }
