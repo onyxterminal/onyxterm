@@ -86,6 +86,8 @@ impl Default for Keymap {
         map.bind(Combo::new(Modifiers::command(), "t"), NewTab);
         map.bind(Combo::new(Modifiers::command(), "w"), CloseActive);
         map.bind(Combo::new(Modifiers::command(), "k"), OpenPalette);
+        map.bind(Combo::new(Modifiers::command(), "c"), Copy);
+        map.bind(Combo::new(Modifiers::command(), "v"), Paste);
         map.bind(Combo::new(Modifiers::command(), "}"), NextTab);
         map.bind(Combo::new(Modifiers::command(), "{"), PrevTab);
         map.bind(Combo::new(cmd_alt, "right"), SplitRight);

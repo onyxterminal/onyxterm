@@ -16,6 +16,8 @@ pub enum CommandId {
     SplitDown,
     FocusAdjacent,
     MaximizePane,
+    Copy,
+    Paste,
     Quit,
 }
 
@@ -93,6 +95,7 @@ fn palette_open(state: &AppState) -> bool {
 pub fn open_palette(state: &mut AppState) {
     state.palette_visible = true;
     state.palette_query.clear();
+    state.palette_selection = 0;
 }
 
 pub fn close_palette(state: &mut AppState) {
@@ -101,18 +104,41 @@ pub fn close_palette(state: &mut AppState) {
 
 pub fn toggle_palette(state: &mut AppState) {
     if state.palette_visible {
-        state.palette_visible = false;
-    } else {
-        state.palette_visible = true;
-        state.palette_query.clear();
+        close_palette(state);
+        return;
     }
+    open_palette(state);
+}
+
+pub fn palette_type(state: &mut AppState, text: &str) {
+    state.palette_query.push_str(text);
+    state.palette_selection = 0;
+}
+
+pub fn palette_backspace(state: &mut AppState) {
+    state.palette_query.pop();
+    state.palette_selection = 0;
+}
+
+pub fn palette_move(state: &mut AppState, step: isize) {
+    let count = state.filtered_commands().len();
+    if count == 0 {
+        state.palette_selection = 0;
+        return;
+    }
+    let current = state.palette_selection.min(count - 1) as isize;
+    state.palette_selection = (current + step).rem_euclid(count as isize) as usize;
+}
+
+pub fn palette_selected(state: &AppState) -> Option<CommandId> {
+    state.filtered_commands().get(state.palette_selection).copied()
 }
 
 pub fn default_commands() -> Vec<Command> {
     use CommandId::*;
     vec![
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
-        Command::builder(CloseActive, "Close Active", "Tabs", no_op).build(),
+        Command::builder(CloseActive, "Close Pane", "Panes", no_op).build(),
         Command::builder(OpenPalette, "Open Palette", "Palette", toggle_palette).build(),
         Command::builder(ClosePalette, "Close Palette", "Palette", close_palette)
             .enabled_when(palette_open)
@@ -121,8 +147,10 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(PrevTab, "Previous Tab", "Tabs", no_op).build(),
         Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),
         Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
-        Command::builder(FocusAdjacent, "Focus Adjacent Pane", "Panes", no_op).build(),
+        Command::builder(FocusAdjacent, "Focus Next Pane", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
+        Command::builder(Copy, "Copy", "Edit", no_op).build(),
+        Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(Quit, "Quit Onyxterm", "Application", no_op)
             .enabled_when(always_enabled)
             .build(),
