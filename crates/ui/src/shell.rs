@@ -12,21 +12,26 @@ use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
-use crate::workspace_menu::{workspace_menu, MenuField, WorkspaceMenuActions, WorkspaceMenuItem, CARET};
+use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
 use gpui::{
-    div, img, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle, Hsla, Image, ImageFormat,
+    div, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
     Window, WindowOptions,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use terminal_core::broadcast::{error::RecvError, Receiver};
 use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
 use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
+
+mod dialogs;
+mod pane_header;
+mod tab_strip;
+
+use tab_strip::TabField;
 
 const DEFAULT_SHELL: &str = "/bin/zsh";
 const LOGIN_FLAG: &str = "-l";
@@ -36,21 +41,9 @@ const ENTER_KEY: &str = "enter";
 const BACKSPACE_KEY: &str = "backspace";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
-const LOGO_SIZE_PX: f32 = 18.0;
-const CLOSE_PROMPT_WIDTH_PX: f32 = 360.0;
-const BACKDROP_ALPHA: f32 = 0.35;
-const ICON_WIDTH_PX: f32 = 12.0;
-const ICON_HEIGHT_PX: f32 = 10.0;
-const RESTORE_ICON_INSET_PX: f32 = 2.0;
 const CWD_TAIL_SEGMENTS: usize = 2;
-const DOUBLE_CLICK: usize = 2;
 const HOME_MARK: &str = "~";
 const ELLIPSIS: &str = "\u{2026}";
-const CLOSE_GLYPH: &str = "\u{00d7}";
-const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.png");
-
-static LOGO: LazyLock<Arc<Image>> =
-    LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
 
 struct Pane {
     session: TerminalSessionId,
@@ -575,295 +568,10 @@ impl Shell {
         cx.notify();
     }
 
-    fn render_tab_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let active = self.model.tabs().active_index();
-        let labels: Vec<(String, bool)> = self
-            .model
-            .tabs()
-            .iter()
-            .enumerate()
-            .map(|(index, tab)| {
-                let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
-                let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
-                    Some(field) => format!("{}{CARET}", field.text),
-                    None => format!("{}  {}", index + 1, tab.name().unwrap_or(title)),
-                };
-                (label, index == active)
-            })
-            .collect();
-        let layout = theme.layout;
-        div()
-            .h(px(layout.tab_strip_height_px))
-            .flex_none()
-            .px(px(layout.window_margin_px))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(layout.island_gap_px))
-            .child(self.render_logo_button(cx))
-            .children(labels.into_iter().enumerate().map(|(index, (label, is_active))| {
-                let (bg, fg, border) = if is_active {
-                    (theme.canvas(), theme.text_default(), theme.border_default())
-                } else {
-                    (theme.surface.subtle, theme.text.muted, theme.surface.subtle)
-                };
-                let hover_bg = theme.border.muted;
-                let is_editing = self.tab_field.as_ref().is_some_and(|field| field.index == index);
-                let border = if is_editing { theme.border_focus() } else { border };
-                div()
-                    .id(("tab", index))
-                    .px_3()
-                    .py_1()
-                    .flex()
-                    .items_center()
-                    .cursor_pointer()
-                    .rounded(px(layout.border_radius_px))
-                    .bg(bg)
-                    .text_color(fg)
-                    .border_1()
-                    .border_color(border)
-                    .when(!is_active, |el| el.hover(move |style| style.bg(hover_bg)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
-                            shell.click_tab(index, event.click_count, window, cx)
-                        }),
-                    )
-                    .child(label)
-            }))
-    }
-
-    fn click_tab(&mut self, index: usize, click_count: usize, window: &mut Window, cx: &mut Context<Self>) {
-        cx.stop_propagation();
-        if self.tab_field.as_ref().is_some_and(|field| field.index == index) {
-            return;
-        }
-        self.commit_tab_field();
-        self.activate_tab(index, window, cx);
-        if click_count == DOUBLE_CLICK {
-            self.start_rename_tab(index);
-        }
-    }
-
-    fn start_rename_tab(&mut self, index: usize) {
-        let Some(tab) = self.model.tabs().iter().nth(index) else {
-            return;
-        };
-        let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
-        let text = tab.name().unwrap_or(title).to_string().into();
-        self.tab_field = Some(TabField { index, text });
-    }
-
-    fn handle_tab_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        match keystroke.key.as_str() {
-            ESCAPE_KEY => self.tab_field = None,
-            ENTER_KEY => self.commit_tab_field(),
-            _ => {
-                if let Some(field) = self.tab_field.as_mut() {
-                    edit_field(&mut field.text, keystroke);
-                }
-            }
-        }
-        cx.notify();
-    }
-
-    fn commit_tab_field(&mut self) {
-        let Some(field) = self.tab_field.take() else {
-            return;
-        };
-        let Some(tab) = self.model.tabs_mut().get_mut(field.index) else {
-            return;
-        };
-        tab.rename(Some(field.text.to_string()));
-        self.persist();
-    }
-
-    fn commit_tab_field_on_click(&mut self, cx: &mut Context<Self>) {
-        if self.tab_field.is_some() {
-            self.commit_tab_field();
-            cx.notify();
-        }
-    }
-
-    fn activate_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.model.tabs_mut().activate(index);
-        self.persist();
-        window.focus(&self.focus_handle);
-        cx.notify();
-    }
-
-    fn render_logo_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let hover_bg = theme.border.muted;
-        div()
-            .id("workspace-menu-button")
-            .p_1()
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .rounded(px(theme.layout.border_radius_px))
-            .hover(move |style| style.bg(hover_bg))
-            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.toggle_workspace_menu(cx)))
-            .child(img(LOGO.clone()).size(px(LOGO_SIZE_PX)))
-    }
-
-    fn render_workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let active = self.model.active_id();
-        let items = self
-            .model
-            .entries()
-            .iter()
-            .map(|entry| WorkspaceMenuItem {
-                id: entry.workspace.id.to_string().into(),
-                name: entry.workspace.name.clone().into(),
-                is_active: entry.workspace.id == active,
-                is_editable: !entry.is_scratch,
-            })
-            .collect();
-        let actions = WorkspaceMenuActions {
-            select: self.menu_handler(cx, |shell, key, cx| shell.select_workspace_by_key(key, cx)),
-            rename: self.menu_handler(cx, |shell, key, cx| shell.start_rename_workspace(key, cx)),
-            delete: self.menu_handler(cx, |shell, key, cx| shell.request_delete_workspace(key, cx)),
-            create: {
-                let shell = cx.entity().downgrade();
-                Rc::new(move |_window: &mut Window, cx: &mut gpui::App| {
-                    if let Err(err) = shell.update(cx, |shell, cx| shell.start_new_workspace(cx)) {
-                        tracing::debug!(?err, "workspace menu after shell dropped");
-                    }
-                })
-            },
-        };
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.close_workspace_menu(cx)))
-            .child(
-                div()
-                    .absolute()
-                    .top(px(theme.layout.tab_strip_height_px))
-                    .left(px(theme.layout.gap_px))
-                    .occlude()
-                    .child(workspace_menu(items, self.menu_field.clone(), theme, actions)),
-            )
-    }
-
-    fn menu_handler(
-        &self,
-        cx: &mut Context<Self>,
-        action: impl Fn(&mut Shell, &SharedString, &mut Context<Shell>) + 'static,
-    ) -> crate::workspace_menu::SelectHandler {
-        let shell = cx.entity().downgrade();
-        let action = Rc::new(action);
-        Rc::new(move |key: &SharedString, _window: &mut Window, cx: &mut gpui::App| {
-            let action = action.clone();
-            if let Err(err) = shell.update(cx, |shell, cx| action(shell, key, cx)) {
-                tracing::debug!(?err, "workspace menu after shell dropped");
-            }
-        })
-    }
-
     fn select_workspace_by_key(&mut self, key: &str, cx: &mut Context<Self>) {
         if let Some(id) = self.workspace_by_key(key) {
             self.select_workspace(id, cx);
         }
-    }
-
-    fn render_notice(&self, notice: &str, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        div()
-            .flex_none()
-            .px_3()
-            .py_1()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .gap_3()
-            .mx(px(theme.layout.window_margin_px))
-            .mb(px(theme.layout.island_gap_px))
-            .rounded(px(theme.layout.island_radius_px))
-            .bg(theme.canvas())
-            .border_1()
-            .border_color(theme.border_default())
-            .text_color(theme.text.muted)
-            .child(notice.to_string())
-            .child(
-                div()
-                    .id("notice-dismiss")
-                    .cursor_pointer()
-                    .text_color(theme.accent.primary)
-                    .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.dismiss_notice(cx)))
-                    .child("Dismiss"),
-            )
-    }
-
-    fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let backdrop = Hsla { a: BACKDROP_ALPHA, ..gpui::black() };
-        div()
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(backdrop)
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .w(px(CLOSE_PROMPT_WIDTH_PX))
-                    .p_4()
-                    .bg(theme.surface.raised)
-                    .border_1()
-                    .border_color(theme.border_default())
-                    .rounded(px(theme.layout.island_radius_px))
-                    .shadow_md()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(copy.title)
-                    .child(div().text_color(theme.text.muted).child(copy.body))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                self.prompt_button("close-cancel", "Cancel", (theme.surface.subtle, theme.text_default()))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|shell, _event, _window, cx| shell.cancel_confirmation(cx)),
-                                    ),
-                            )
-                            .child(
-                                self.prompt_button(
-                                    "close-confirm",
-                                    copy.action,
-                                    (theme.status.failed, theme.text.inverse),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|shell, _event, _window, cx| shell.accept_confirmation(cx)),
-                                ),
-                            ),
-                    ),
-            )
-    }
-
-    fn prompt_button(&self, id: &'static str, label: &'static str, (bg, fg): (Hsla, Hsla)) -> gpui::Stateful<gpui::Div> {
-        div()
-            .id(id)
-            .px_3()
-            .py_1()
-            .rounded_md()
-            .cursor_pointer()
-            .bg(bg)
-            .text_color(fg)
-            .border_1()
-            .border_color(self.state.theme.border_default())
-            .child(label)
     }
 
     fn render_layout(&self, node: &LayoutNode, cx: &mut Context<Self>) -> AnyElement {
@@ -918,96 +626,6 @@ impl Shell {
             .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused))
             .child(header)
             .into_any_element()
-    }
-
-    fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let title = self.panes.get(&panel).map(|pane| pane.title.clone()).filter(|title| !title.is_empty());
-        let title = title.unwrap_or_else(|| workspace_service::DEFAULT_PANEL_TITLE.to_string());
-        let cwd = short_cwd(&self.panel_cwd(panel), self.model.home());
-        let title_color = if is_focused { theme.text_default() } else { theme.text.muted };
-        let is_maximized = self.model.tabs().active().is_some_and(|tab| tab.is_maximized());
-        let actions = [
-            HeaderAction { command: CommandId::SplitRight, tooltip: "Split Right" },
-            HeaderAction { command: CommandId::SplitDown, tooltip: "Split Down" },
-            HeaderAction {
-                command: CommandId::MaximizePane,
-                tooltip: if is_maximized { "Restore Pane" } else { "Maximize Pane" },
-            },
-            HeaderAction { command: CommandId::CloseActive, tooltip: "Close Pane" },
-        ];
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .h(px(theme.layout.pane_header_height_px))
-            .px_2()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .bg(theme.canvas())
-            .rounded_t(px(theme.layout.island_radius_px))
-            .border_b_1()
-            .border_color(theme.border.muted)
-            .child(div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title))
-            .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd))
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .children(actions.into_iter().map(|action| self.header_button(panel, action, is_maximized, cx))),
-            )
-    }
-
-    fn header_button(
-        &self,
-        panel: PanelId,
-        action: HeaderAction,
-        is_maximized: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let hover_bg = theme.surface.subtle;
-        let command = action.command;
-        let tooltip = SharedString::from(action.tooltip);
-        let colors = (theme.canvas(), theme.border_default(), theme.text_default());
-        div()
-            .id(SharedString::from(format!("{}-{panel}", action.tooltip)))
-            .p_1()
-            .flex()
-            .items_center()
-            .rounded(px(theme.layout.border_radius_px))
-            .cursor_pointer()
-            .text_color(theme.text.muted)
-            .hover(move |style| style.bg(hover_bg))
-            .tooltip(move |_window, cx| cx.new(|_| Tooltip { text: tooltip.clone(), colors }).into())
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |shell, _event, window, cx| {
-                    cx.stop_propagation();
-                    shell.focus_pane(panel);
-                    window.focus(&shell.focus_handle);
-                    shell.run_command(command, cx);
-                }),
-            )
-            .child(header_icon(command, is_maximized, theme.text.muted))
-    }
-
-    fn pane_border(&self, is_focused: bool) -> Hsla {
-        let theme = &self.state.theme;
-        let is_split = self
-            .model
-            .tabs()
-            .active()
-            .is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. }));
-        match is_split && is_focused {
-            true => theme.accent.primary,
-            false => theme.border_default(),
-        }
     }
 }
 
@@ -1069,42 +687,6 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
-}
-
-struct TabField {
-    index: usize,
-    text: SharedString,
-}
-
-struct HeaderAction {
-    command: CommandId,
-    tooltip: &'static str,
-}
-
-struct Tooltip {
-    text: SharedString,
-    colors: (Hsla, Hsla, Hsla),
-}
-
-impl Render for Tooltip {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let (bg, border, fg) = self.colors;
-        div().px_2().py_1().rounded_md().shadow_md().bg(bg).border_1().border_color(border).text_color(fg).child(self.text.clone())
-    }
-}
-
-fn header_icon(command: CommandId, is_maximized: bool, color: Hsla) -> AnyElement {
-    let frame = || div().w(px(ICON_WIDTH_PX)).h(px(ICON_HEIGHT_PX)).border_1().border_color(color).rounded_sm();
-    match command {
-        CommandId::SplitRight => frame().flex().flex_row().child(div().w_1_2().h_full().border_r_1().border_color(color)),
-        CommandId::SplitDown => frame().flex().flex_col().child(div().h_1_2().w_full().border_b_1().border_color(color)),
-        CommandId::MaximizePane if is_maximized => frame().p(px(RESTORE_ICON_INSET_PX)).child(
-            div().size_full().border_1().border_color(color),
-        ),
-        CommandId::MaximizePane => frame(),
-        _ => div().text_color(color).child(CLOSE_GLYPH),
-    }
-    .into_any_element()
 }
 
 pub fn short_cwd(path: &Path, home: &Path) -> String {
