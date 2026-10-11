@@ -824,3 +824,26 @@ mod pane_titles {
         service.terminate_session(id).expect("terminate");
     }
 }
+
+#[test]
+fn unnamed_tabs_are_numbered_by_position() {
+    let mut tabs = Tabs::default();
+    let (a, b, c) = (PanelId::new(), PanelId::new(), PanelId::new());
+    tabs.open(a);
+    tabs.open(b);
+    tabs.open(c);
+    assert_eq!(tabs.labels(), ["#1", "#2", "#3"]);
+    tabs.close_panel(b).unwrap();
+    assert_eq!(tabs.labels(), ["#1", "#2"]);
+}
+
+#[test]
+fn named_tab_shows_its_name_until_cleared() {
+    let mut tabs = Tabs::default();
+    tabs.open(PanelId::new());
+    tabs.open(PanelId::new());
+    tabs.get_mut(1).unwrap().rename(Some("logs".to_string()));
+    assert_eq!(tabs.labels(), ["#1", "logs"]);
+    tabs.get_mut(1).unwrap().rename(Some("   ".to_string()));
+    assert_eq!(tabs.labels(), ["#1", "#2"]);
+}

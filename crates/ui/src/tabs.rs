@@ -14,6 +14,10 @@ pub enum SplitSide {
 
 pub type SplitPath = Vec<SplitSide>;
 
+pub fn numbered_tab_label(index: usize) -> String {
+    format!("#{}", index + 1)
+}
+
 pub fn clamp_split_ratio(offset: f32, extent: f32, min_pane: f32) -> f32 {
     if extent <= min_pane * 2.0 {
         return SPLIT_RATIO;
@@ -70,6 +74,10 @@ impl Tab {
 
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    pub fn label(&self, index: usize) -> String {
+        self.name().map_or_else(|| numbered_tab_label(index), str::to_string)
     }
 
     pub fn rename(&mut self, name: Option<String>) {
@@ -171,6 +179,10 @@ impl Tabs {
 
     pub fn iter(&self) -> impl Iterator<Item = &Tab> {
         self.tabs.iter()
+    }
+
+    pub fn labels(&self) -> Vec<String> {
+        self.tabs.iter().enumerate().map(|(index, tab)| tab.label(index)).collect()
     }
 
     pub fn active(&self) -> Option<&Tab> {

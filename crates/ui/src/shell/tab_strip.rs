@@ -1,5 +1,6 @@
 use super::pane_drag::bounds_probe;
 use super::{edit_field, Shell, ENTER_KEY, ESCAPE_KEY};
+use crate::tabs::numbered_tab_label;
 use crate::workspace_menu::CARET;
 use gpui::{div, img, prelude::*, px, Context, Image, ImageFormat, Keystroke, MouseButton, SharedString, Window};
 use std::sync::{Arc, LazyLock};
@@ -15,18 +16,21 @@ impl Shell {
     pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let active = self.model.tabs().active_index();
-        let labels: Vec<(String, bool)> = self
+        let labels: Vec<(String, bool, bool)> = self
             .model
             .tabs()
-            .iter()
+            .labels()
+            .into_iter()
             .enumerate()
-            .map(|(index, tab)| {
-                let title = self.pane_display_title(tab.focused());
-                let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
-                    Some(field) => format!("{}{CARET}", field.text),
-                    None => tab.name().unwrap_or(&title).to_string(),
-                };
-                (label, index == active)
+            .map(|(index, label)| {
+                let is_active = index == active;
+                match self.tab_field.as_ref().filter(|field| field.index == index) {
+                    Some(field) if field.text.is_empty() => {
+                        (format!("{CARET}{}", numbered_tab_label(index)), is_active, true)
+                    }
+                    Some(field) => (format!("{}{CARET}", field.text), is_active, false),
+                    None => (label, is_active, false),
+                }
             })
             .collect();
         let layout = theme.layout;
@@ -50,12 +54,13 @@ impl Shell {
                 }
             })
             .child(self.render_logo_button(cx))
-            .children(labels.into_iter().enumerate().map(|(index, (label, is_active))| {
+            .children(labels.into_iter().enumerate().map(|(index, (label, is_active, is_placeholder))| {
                 let (bg, fg, border) = if is_active {
                     (theme.canvas(), theme.text_default(), theme.border_default())
                 } else {
                     (theme.surface.subtle, theme.text.muted, theme.surface.subtle)
                 };
+                let fg = if is_placeholder { theme.text.muted } else { fg };
                 let hover_bg = theme.border.muted;
                 let is_editing = self.tab_field.as_ref().is_some_and(|field| field.index == index);
                 let border = if is_editing { theme.border_focus() } else { border };
@@ -101,7 +106,7 @@ impl Shell {
         let Some(tab) = self.model.tabs().iter().nth(index) else {
             return;
         };
-        let text = tab.name().map(str::to_string).unwrap_or_else(|| self.pane_display_title(tab.focused())).into();
+        let text = tab.name().map(str::to_string).unwrap_or_default().into();
         self.tab_field = Some(TabField { index, text });
     }
 
