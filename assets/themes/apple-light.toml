@@ -181,4 +181,4 @@ min_pane_px = 120
 animation_ms = 150
 traffic_light_left_px = 14
 traffic_light_top_px = 12
-traffic_lights_width_px = 68
+traffic_lights_width_px = 74
