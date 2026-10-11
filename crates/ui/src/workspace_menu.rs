@@ -96,7 +96,7 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
     let group = SharedString::from(format!("workspace-row-{}", item.id));
     let style = row_style(group.clone());
     let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme)
-        .when(item.is_editable, |count| count.group_hover(group.clone(), |count| count.hidden()));
+        .when(item.is_editable, |count| count.group_hover(group.clone(), |style| style.hidden()));
     let (select, select_id) = (actions.select.clone(), item.id.clone());
     menu_row(item.id.clone(), style, theme)
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
@@ -115,7 +115,7 @@ fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &
         .flex_row()
         .items_center()
         .gap(px(ROW_ACTION_GAP_PX))
-        .group_hover(group, |actions| actions.flex())
+        .group_hover(group, |style| style.flex())
         .child(row_button(format!("rename-{id}"), Icon::Pencil, theme, move |window, cx| {
             rename(&rename_id, window, cx)
         }))

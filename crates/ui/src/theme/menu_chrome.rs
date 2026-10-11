@@ -63,7 +63,7 @@ pub fn menu_shortcut(text: impl Into<SharedString>, style: &MenuRowStyle, theme:
         .flex_none()
         .text_size(px(theme.ui_font.shortcut_px))
         .text_color(color)
-        .group_hover(style.group.clone(), move |label| label.text_color(selected))
+        .group_hover(style.group.clone(), move |style| style.text_color(selected))
         .child(text.into())
 }
 

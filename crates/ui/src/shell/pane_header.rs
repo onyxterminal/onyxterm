@@ -45,7 +45,7 @@ impl Shell {
             .flex_row()
             .items_center()
             .gap(px(BUTTON_GAP_PX))
-            .when(!is_focused, |buttons| buttons.invisible().group_hover(group.clone(), |buttons| buttons.visible()))
+            .when(!is_focused, |buttons| buttons.invisible().group_hover(group.clone(), |style| style.visible()))
             .child(self.gear_button(panel, cx))
             .child(self.close_button(panel, cx));
         div()
