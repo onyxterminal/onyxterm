@@ -519,7 +519,21 @@ mod tests {
     #[test]
     fn empty_insert_does_not_mark_dirty_or_clear_redo() {
         let mut editor = editor_with("abc", &[1]);
+        editor.apply(EditorAction::InsertText("x".into()), Instant::now());
+        editor.apply(EditorAction::Undo, Instant::now());
+        editor.mark_saved();
         editor.apply(EditorAction::InsertText("".into()), Instant::now());
         assert!(!editor.buffer().is_dirty());
+        editor.apply(EditorAction::Redo, Instant::now());
+        assert_eq!(text(&editor), "axbc");
+        assert_eq!(heads(&editor), vec![2]);
+    }
+
+    #[test]
+    fn paste_normalises_crlf_in_a_crlf_buffer() {
+        let mut editor = Editor::new(Buffer::from_text("a\r\nb"));
+        editor.set_selections(Selections::single(Selection::cursor(0)));
+        editor.paste("x\r\ny", Instant::now());
+        assert_eq!(editor.buffer().to_saved_text(), "x\r\nya\r\nb");
     }
 }
