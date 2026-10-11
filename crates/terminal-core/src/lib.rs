@@ -11,6 +11,7 @@ pub use event::{
     TerminalError, TerminalEvent, TerminalOutput,
 };
 pub use alacritty_terminal::index::Side;
+pub use alacritty_terminal::vi_mode::ViMotion;
 pub use pty::{ForegroundJob, NativePty, Pty, PtyHandle};
 pub use tokio::sync::broadcast;
 pub use service::{InMemoryTerminalService, ShellCommand, TerminalService};

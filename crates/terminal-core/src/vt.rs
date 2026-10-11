@@ -10,6 +10,7 @@ use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::Cell as AlacCell;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::vi_mode::ViMotion;
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
 use domain::TerminalSessionId;
 use parking_lot::Mutex;
@@ -195,6 +196,61 @@ impl Terminal {
         state.term.selection_to_string().filter(|text| !text.is_empty())
     }
 
+    pub fn is_vi_mode(&self) -> bool {
+        self.inner.state.lock().term.mode().contains(TermMode::VI)
+    }
+
+    pub fn enter_vi_mode(&self) {
+        let mut state = self.inner.state.lock();
+        if !state.term.mode().contains(TermMode::VI) {
+            state.term.toggle_vi_mode();
+        }
+    }
+
+    pub fn exit_vi_mode(&self) {
+        let mut state = self.inner.state.lock();
+        if state.term.mode().contains(TermMode::VI) {
+            state.term.toggle_vi_mode();
+        }
+        state.term.selection = None;
+        state.term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn vi_motion(&self, motion: ViMotion) {
+        self.inner.state.lock().term.vi_motion(motion);
+    }
+
+    pub fn vi_scroll_lines(&self, lines: i32) {
+        let mut state = self.inner.state.lock();
+        let target = state.term.vi_mode_cursor.scroll(&state.term, lines);
+        state.term.scroll_display(Scroll::Delta(lines));
+        state.term.vi_goto_point(target.point);
+    }
+
+    pub fn vi_goto_top(&self) {
+        let mut state = self.inner.state.lock();
+        let line = state.term.topmost_line();
+        vi_goto_line(&mut state.term, line);
+    }
+
+    pub fn vi_goto_bottom(&self) {
+        let mut state = self.inner.state.lock();
+        let line = state.term.bottommost_line();
+        vi_goto_line(&mut state.term, line);
+    }
+
+    pub fn toggle_vi_selection(&self, kind: SelectionKind) {
+        let mut state = self.inner.state.lock();
+        let ty = selection_type(kind);
+        if state.term.selection.as_ref().is_some_and(|selection| selection.ty == ty) {
+            state.term.selection = None;
+            return;
+        }
+        let mut selection = Selection::new(ty, state.term.vi_mode_cursor.point, Side::Left);
+        selection.include_all();
+        state.term.selection = Some(selection);
+    }
+
     pub fn scrollback_len(&self) -> usize {
         let state = self.inner.state.lock();
         let total = state.term.grid().total_lines();
@@ -325,6 +381,11 @@ fn selection_type(kind: SelectionKind) -> SelectionType {
     }
 }
 
+fn vi_goto_line(term: &mut Term<TermListener>, line: Line) {
+    term.vi_goto_point(Point::new(line, Column(0)));
+    term.vi_motion(ViMotion::FirstOccupied);
+}
+
 fn viewport_to_grid(term: &Term<TermListener>, point: GridPoint) -> Point {
     let offset = term.grid().display_offset() as i32;
     Point::new(Line(i32::from(point.row) - offset), Column(usize::from(point.col)))
@@ -354,12 +415,24 @@ fn visible_selection(term: &Term<TermListener>) -> Option<SelectionSpan> {
 }
 
 fn visible_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {
+    if term.mode().contains(TermMode::VI) {
+        return visible_vi_cursor(term);
+    }
     let grid = term.grid();
     if !term.mode().contains(TermMode::SHOW_CURSOR) || grid.display_offset() != 0 {
         return None;
     }
     let point = grid.cursor.point;
     Some(CursorPosition { row: point.line.0 as u16, col: point.column.0 as u16 })
+}
+
+fn visible_vi_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {
+    let point = term.vi_mode_cursor.point;
+    let row = point.line.0 + term.grid().display_offset() as i32;
+    if row < 0 || row >= term.grid().screen_lines() as i32 {
+        return None;
+    }
+    Some(CursorPosition { row: row as u16, col: point.column.0 as u16 })
 }
 
 fn alac_cell_to_cell(c: &AlacCell) -> Cell {

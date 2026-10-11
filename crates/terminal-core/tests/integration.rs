@@ -5,7 +5,7 @@ use domain::TerminalSessionId;
 use terminal_core::event::{
     CellColor, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind, SelectionSpan, TerminalEvent,
 };
-use terminal_core::Side;
+use terminal_core::{Side, ViMotion};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
 use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
@@ -303,6 +303,32 @@ fn selection_follows_scrolled_viewport() {
     assert_eq!(terminal.selection_text().as_deref(), Some("0\n"));
     terminal.scroll_to_bottom();
     assert_eq!(terminal.snapshot_grid().selection, None);
+}
+
+#[test]
+fn vi_mode_moves_its_own_cursor_selects_and_restores_on_exit() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 5), 100);
+    terminal.feed(&numbered_lines(20));
+    terminal.enter_vi_mode();
+    assert!(terminal.is_vi_mode());
+    assert_eq!(terminal.snapshot_grid().cursor, Some(CursorPosition { row: 4, col: 0 }));
+    terminal.vi_goto_top();
+    assert_eq!(terminal.display_offset(), terminal.scrollback_len());
+    assert_eq!(terminal.snapshot_grid().cursor, Some(CursorPosition { row: 0, col: 0 }));
+    terminal.toggle_vi_selection(SelectionKind::Line);
+    terminal.vi_motion(ViMotion::Down);
+    assert_eq!(terminal.selection_text().as_deref(), Some("0\n1\n"));
+    terminal.toggle_vi_selection(SelectionKind::Line);
+    assert_eq!(terminal.selection_text(), None);
+    terminal.vi_goto_bottom();
+    assert_eq!(terminal.display_offset(), 0);
+    terminal.vi_scroll_lines(2);
+    assert_eq!(terminal.display_offset(), 2);
+    terminal.toggle_vi_selection(SelectionKind::Simple);
+    terminal.exit_vi_mode();
+    assert!(!terminal.is_vi_mode());
+    assert_eq!(terminal.display_offset(), 0);
+    assert_eq!(terminal.selection_text(), None);
 }
 
 #[test]
