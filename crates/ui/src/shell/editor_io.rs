@@ -1,7 +1,7 @@
 use super::Shell;
 use crate::document::{document_title, load_error_text, DocumentPane, EditorPane, EditorState};
 use crate::editor_keys::{key_input, should_defer_to_input_handler};
-use crate::editor_view::{scroll_to_reveal, PointerEvent, PointerHandler};
+use crate::editor_view::{scroll_to_reveal, HorizontalViewport, PointerEvent, PointerHandler};
 use domain::PanelId;
 use editor_core::{io, standard_action, Buffer, ClickMode, Editor, EditorAction};
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
@@ -119,18 +119,10 @@ impl Shell {
         let viewport_height = f32::from(layout.viewport.height);
         let text_width = f32::from(layout.viewport.width);
         let new_scroll_top = scroll_to_reveal(scroll_top, line_index, line_height, viewport_height);
-        let mut new_scroll_left = scroll_left;
-        let margin = f32::from(layout.line_height);
-        if let Some(laid) = layout.laid_line(line_index) {
-            let x = f32::from(laid.x_at_char(rel));
-            let left = scroll_left;
-            let right = left + text_width;
-            if x < left + margin {
-                new_scroll_left = (x - margin).max(0.0);
-            } else if x > right - margin {
-                new_scroll_left = (x - text_width + margin).max(0.0);
-            }
-        }
+        let horizontal = HorizontalViewport { scroll_left, text_width, margin: f32::from(layout.line_height) };
+        let new_scroll_left = layout
+            .laid_line(line_index)
+            .map_or(scroll_left, |laid| horizontal.scroll_left_revealing(f32::from(laid.x_revealing_char(rope, rel))));
         let mut view_mut = pane.view.borrow_mut();
         view_mut.scroll_top = new_scroll_top;
         view_mut.scroll_left = new_scroll_left;

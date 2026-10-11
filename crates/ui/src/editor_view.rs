@@ -17,8 +17,14 @@ const REVEAL_MARGIN_LINES: f32 = 3.0;
 const MIN_GUTTER_COLUMNS: usize = 2;
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
 const NEWLINE_EXTRA_CELLS: f32 = 1.0;
-pub const SHAPE_MARGIN_COLUMNS: usize = 64;
-pub const WHOLE_LINE_MAX_CHARS: usize = 4096;
+const SHAPE_MARGIN_COLUMNS: usize = 64;
+const WHOLE_LINE_MAX_CHARS: usize = 4096;
+const CONTINUATION_HIGH_BITS: u64 = 0xC0C0_C0C0_C0C0_C0C0;
+const CONTINUATION_TAG_BYTES: u64 = 0x8080_8080_8080_8080;
+const WORD_BYTES: usize = 8;
+const BITS_PER_BYTE: usize = 8;
+const TAB_BYTES: u64 = 0x0909_0909_0909_0909;
+const LOW_SEVEN_BITS: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 
 #[derive(Debug, Default)]
 pub struct EditorView {
@@ -96,16 +102,31 @@ impl DisplayLine {
 impl LaidLine {
     pub fn x_at_char(&self, char: usize) -> Pixels {
         if char < self.window.start {
-            return self.window_x - self.cell_width * (self.window.start - char) as f32;
+            return self.cell_width * char as f32;
         }
         if char > self.window.end {
             return self.window_x + self.shaped.width + self.cell_width * (char - self.window.end) as f32;
         }
-        self.window_x + self.shaped.x_for_index(self.display.byte_at_char(char - self.window.start))
+        self.text_x() + self.shaped.x_for_index(self.display.byte_at_char(char - self.window.start))
+    }
+
+    pub fn text_x(&self) -> Pixels {
+        self.window_x
+    }
+
+    pub fn is_windowed(&self) -> bool {
+        self.len_chars > WHOLE_LINE_MAX_CHARS
+    }
+
+    pub fn x_revealing_char(&self, rope: &Rope, char: usize) -> Pixels {
+        if self.is_shaped_at(char) {
+            return self.x_at_char(char);
+        }
+        self.cell_width * display_column_at(rope.line(self.line).chunks(), char) as f32
     }
 
     pub fn char_at_x(&self, x: Pixels) -> usize {
-        let byte = self.shaped.closest_index_for_x(x - self.window_x);
+        let byte = self.shaped.closest_index_for_x(x - self.text_x());
         self.window.start + self.display.char_at_byte(byte)
     }
 
@@ -177,21 +198,87 @@ fn next_display_column(column: usize, ch: char) -> usize {
     column + 1
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone, Copy)]
 struct ColumnCursor {
     char: usize,
     column: usize,
 }
 
 impl ColumnCursor {
-    fn skipped_char_count(&self, chunk: &str, line_len: usize, columns_before_window: usize) -> Option<usize> {
-        if chunk.as_bytes().contains(&b'\t') {
-            return None;
-        }
-        let count = chunk.chars().count();
-        let is_within_line = self.char + count <= line_len;
-        (is_within_line && self.column + count <= columns_before_window).then_some(count)
+    fn after_char(self, ch: char) -> Self {
+        Self { char: self.char + 1, column: next_display_column(self.column, ch) }
     }
+
+    fn after_chunk(self, chunk: &str) -> Self {
+        let bytes = chunk.as_bytes();
+        if !bytes.contains(&b'\t') {
+            let chars = chunk.chars().count();
+            return Self { char: self.char + chars, column: self.column + chars };
+        }
+        let tabbed = column_after_tabbed(bytes, self.column);
+        Self { char: self.char + tabbed.char, column: tabbed.column }
+    }
+
+    fn is_within(self, limit: ColumnCursor) -> bool {
+        self.char <= limit.char && self.column <= limit.column
+    }
+}
+
+fn zero_byte_mask(word: u64) -> u64 {
+    !(((word & LOW_SEVEN_BITS) + LOW_SEVEN_BITS) | word | LOW_SEVEN_BITS)
+}
+
+fn padded_word(bytes: &[u8]) -> u64 {
+    let mut word = [0; WORD_BYTES];
+    word[..bytes.len()].copy_from_slice(bytes);
+    u64::from_le_bytes(word)
+}
+
+fn words_of(bytes: &[u8]) -> impl Iterator<Item = u64> + '_ {
+    let words = bytes.chunks_exact(WORD_BYTES);
+    let tail = words.remainder();
+    let full = words.map(|word| u64::from_le_bytes(word.try_into().unwrap_or_default()));
+    full.chain((!tail.is_empty()).then(|| padded_word(tail)))
+}
+
+fn column_after_tabbed(bytes: &[u8], start_column: usize) -> ColumnCursor {
+    let offset = start_column % TAB_WIDTH;
+    let mut column = start_column - offset;
+    let mut run_start = 0;
+    let mut continuations = 0;
+    for (word_index, word) in words_of(bytes).enumerate() {
+        let continuation_mask = zero_byte_mask((word & CONTINUATION_HIGH_BITS) ^ CONTINUATION_TAG_BYTES);
+        let mut tab_mask = zero_byte_mask(word ^ TAB_BYTES);
+        while tab_mask != 0 {
+            let bit = tab_mask.trailing_zeros();
+            let continuations_in_word = (continuation_mask & ((1 << bit) - 1)).count_ones() as usize;
+            let byte_index = word_index * WORD_BYTES + bit as usize / BITS_PER_BYTE;
+            let char_index = byte_index - continuations - continuations_in_word + offset;
+            column += next_display_column(char_index - run_start, '\t');
+            run_start = char_index + 1;
+            tab_mask &= tab_mask - 1;
+        }
+        continuations += continuation_mask.count_ones() as usize;
+    }
+    let chars = bytes.len() - continuations;
+    ColumnCursor { char: chars, column: column + chars + offset - run_start }
+}
+
+pub fn display_column_at<'a>(chunks: impl Iterator<Item = &'a str>, char: usize) -> usize {
+    let limit = ColumnCursor { char, column: usize::MAX };
+    let mut cursor = ColumnCursor::default();
+    for chunk in chunks {
+        let skipped = cursor.after_chunk(chunk);
+        if skipped.is_within(limit) {
+            cursor = skipped;
+            continue;
+        }
+        for ch in chunk.chars().take(char - cursor.char) {
+            cursor = cursor.after_char(ch);
+        }
+        break;
+    }
+    cursor.column
 }
 
 fn shaped_columns(line_len: usize, visible: VisibleColumns) -> Range<usize> {
@@ -206,11 +293,12 @@ pub fn line_window<'a>(chunks: impl Iterator<Item = &'a str>, line_len: usize, v
     let columns = shaped_columns(line_len, visible);
     let mut cursor = ColumnCursor::default();
     let mut window: Option<(usize, DisplayLineBuilder)> = None;
+    let skip_limit = ColumnCursor { char: line_len, column: columns.start };
     'chunks: for chunk in chunks {
         if window.is_none() {
-            if let Some(count) = cursor.skipped_char_count(chunk, line_len, columns.start) {
-                cursor.char += count;
-                cursor.column += count;
+            let skipped = cursor.after_chunk(chunk);
+            if skipped.is_within(skip_limit) {
+                cursor = skipped;
                 continue;
             }
         }
@@ -218,15 +306,14 @@ pub fn line_window<'a>(chunks: impl Iterator<Item = &'a str>, line_len: usize, v
             if ch == '\n' || cursor.char == line_len || cursor.column >= columns.end {
                 break 'chunks;
             }
-            let next = next_display_column(cursor.column, ch);
-            if window.is_none() && next > columns.start {
+            let next = cursor.after_char(ch);
+            if window.is_none() && next.column > columns.start {
                 window = Some((cursor.char, DisplayLineBuilder::starting_at(cursor.column)));
             }
             if let Some((_, builder)) = window.as_mut() {
                 builder.push(ch);
             }
-            cursor.char += 1;
-            cursor.column = next;
+            cursor = next;
         }
     }
     let (start_char, builder) = window.unwrap_or_else(|| (cursor.char, DisplayLineBuilder::starting_at(cursor.column)));
@@ -266,6 +353,26 @@ pub fn max_scroll_top(line_count: usize, line_height: f32) -> f32 {
 
 pub fn max_scroll_left(widest_line_width: f32, cell_width: f32, text_width: f32) -> f32 {
     (widest_line_width + cell_width - text_width).max(0.0)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct HorizontalViewport {
+    pub scroll_left: f32,
+    pub text_width: f32,
+    pub margin: f32,
+}
+
+impl HorizontalViewport {
+    pub fn scroll_left_revealing(&self, x: f32) -> f32 {
+        let right = self.scroll_left + self.text_width;
+        if x < self.scroll_left + self.margin {
+            return (x - self.margin).max(0.0);
+        }
+        if x > right - self.margin {
+            return (x - self.text_width + self.margin).max(0.0);
+        }
+        self.scroll_left
+    }
 }
 
 pub fn scroll_to_reveal(scroll_top: f32, line: usize, line_height: f32, viewport_height: f32) -> f32 {
@@ -531,17 +638,17 @@ fn prepare_state(
     let first_line = range.start;
     let text_width = f32::from(text_rect.size.width);
     let shaper = LineShaper { rope: &frame.rope, style, cell_width: cell.width, window };
-    let lay = |scroll_left: f32| {
-        let visible = visible_columns(scroll_left, text_width, f32::from(cell.width));
-        range.clone().map(|line| shaper.lay(line, visible)).collect::<Vec<_>>()
-    };
-    let mut lines = lay(view_ref.scroll_left);
+    let visible = visible_columns(view_ref.scroll_left, text_width, f32::from(cell.width));
+    let mut lines: Vec<_> = range.clone().map(|line| shaper.lay(line, visible)).collect();
     let widest = lines.iter().map(|laid| f32::from(laid.width())).fold(0.0, f32::max);
     let max_left = max_scroll_left(widest, f32::from(cell.width), text_width);
     let clamped_left = view_ref.scroll_left.clamp(0.0, max_left);
     if clamped_left != view_ref.scroll_left {
         view_ref.scroll_left = clamped_left;
-        lines = lay(clamped_left);
+        let visible = visible_columns(clamped_left, text_width, f32::from(cell.width));
+        for laid in lines.iter_mut().filter(|laid| laid.is_windowed()) {
+            *laid = shaper.lay(laid.line, visible);
+        }
     }
     let text_offset_x = -view_ref.scroll_left;
     let text_offset_y = -view_ref.scroll_top % line_height_f;
@@ -716,7 +823,7 @@ impl<'a> FramePainter<'a> {
         if laid.display.text.is_empty() {
             return;
         }
-        let origin = point(self.text_origin.x, y);
+        let origin = point(self.text_origin.x + laid.text_x(), y);
         if let Err(err) = laid.shaped.paint(origin, self.line_height, window, cx) {
             tracing::warn!(?err, "editor line paint failed");
         }
@@ -935,17 +1042,121 @@ mod tests {
         assert_eq!(split, whole);
     }
 
+    const TEN_MEGABYTES: usize = 10 * 1024 * 1024;
+    const WINDOW_TIME_BUDGET: std::time::Duration = std::time::Duration::from_millis(2);
+
     #[test]
     #[ignore]
     fn windowing_the_end_of_a_ten_megabyte_line_is_fast() {
-        const TEN_MEGABYTES: usize = 10 * 1024 * 1024;
-        const BUDGET: std::time::Duration = std::time::Duration::from_millis(2);
-        const RUNS: usize = 9;
         let mut text = String::from("\t");
         text.extend(std::iter::repeat_n('x', TEN_MEGABYTES));
+        assert!(median_window_time(&text) < WINDOW_TIME_BUDGET);
+    }
+
+    const TEST_CELL: f32 = 8.0;
+
+    fn laid_window(window: Range<usize>, start_display_column: usize, len_chars: usize) -> LaidLine {
+        LaidLine {
+            line: 0,
+            start_char: 0,
+            len_chars,
+            window_x: px(TEST_CELL * start_display_column as f32),
+            cell_width: px(TEST_CELL),
+            window,
+            shaped: ShapedLine::default(),
+            display: display_line(""),
+        }
+    }
+
+    fn walked_window_start(text: &str, first_column: usize) -> (usize, usize) {
+        let mut column = 0;
+        for (index, ch) in text.chars().enumerate() {
+            let next = next_display_column(column, ch);
+            if next > first_column {
+                return (index, column);
+            }
+            column = next;
+        }
+        (text.chars().count(), column)
+    }
+
+    fn tab_dense_line(repeats: usize) -> String {
+        "\tab\u{e9}cd\t\tx".repeat(repeats)
+    }
+
+    fn ascii_tab_dense_line(repeats: usize) -> String {
+        "\tabcd\t\tx\u{8}".repeat(repeats)
+    }
+
+    #[test]
+    fn long_line_text_paints_at_the_x_of_its_window_start() {
+        let laid = laid_window(900..1000, 950, 20_000);
+        assert_eq!(laid.text_x(), laid.x_at_char(laid.window.start));
+        assert_eq!(laid.text_x(), px(TEST_CELL * 950.0));
+    }
+
+    #[test]
+    fn chars_before_the_window_are_placed_one_cell_each_from_the_line_start() {
+        let laid = laid_window(929..1100, 936, 20_000);
+        assert_eq!(laid.x_at_char(0), px(0.0));
+        assert_eq!(laid.x_at_char(5), px(TEST_CELL * 5.0));
+    }
+
+    #[test]
+    fn display_column_at_expands_tabs_across_chunks() {
+        let text = long_line("\t\tab\t");
+        let (head, tail) = text.split_at(3);
+        assert_eq!(display_column_at([head, tail].into_iter(), 5), 12);
+        assert_eq!(display_column_at(std::iter::once(text.as_str()), 6), 13);
+    }
+
+    #[test]
+    fn tab_dense_window_matches_a_char_by_char_walk() {
+        assert_tab_dense_window_matches_a_walk(&tab_dense_line(2000));
+        assert_tab_dense_window_matches_a_walk(&ascii_tab_dense_line(2000));
+    }
+
+    fn assert_tab_dense_window_matches_a_walk(text: &str) {
+        let len = text.chars().count();
+        let rope = Rope::from_str(text);
+        for first in [0, 70, 1000, 7777, 20_000] {
+            let visible = VisibleColumns { first, count: 80 };
+            let window = line_window(rope.line(0).chunks(), len, visible);
+            let (start_char, start_column) = walked_window_start(text, first.saturating_sub(SHAPE_MARGIN_COLUMNS));
+            assert_eq!(window.chars.start, start_char, "first {first}");
+            assert_eq!(window.start_display_column, start_column, "first {first}");
+        }
+    }
+
+    #[test]
+    fn caret_revealed_at_its_exact_column_lands_inside_the_next_window() {
+        let mut text = "x".repeat(WHOLE_LINE_MAX_CHARS * 2);
+        text.push_str(&"\t".repeat(4000));
         let rope = Rope::from_str(&text);
         let len = line_len(&rope, 0);
-        let visible = VisibleColumns { first: len, count: 200 };
+        let text_width = 800.0;
+        let caret_x = TEST_CELL * display_column_at(rope.line(0).chunks(), len) as f32;
+        let viewport = HorizontalViewport { scroll_left: 0.0, text_width, margin: 20.0 };
+        let scroll_left = viewport.scroll_left_revealing(caret_x);
+        let visible = visible_columns(scroll_left, text_width, TEST_CELL);
+        let window = line_window(rope.line(0).chunks(), len, visible);
+        assert_eq!(window.chars.end, len);
+    }
+
+    #[test]
+    fn horizontal_reveal_keeps_the_caret_a_margin_inside_the_viewport() {
+        let viewport = HorizontalViewport { scroll_left: 100.0, text_width: 300.0, margin: 20.0 };
+        assert_eq!(viewport.scroll_left_revealing(200.0), 100.0);
+        assert_eq!(viewport.scroll_left_revealing(110.0), 90.0);
+        assert_eq!(viewport.scroll_left_revealing(500.0), 220.0);
+        assert_eq!(viewport.scroll_left_revealing(5.0), 0.0);
+    }
+
+    fn median_window_time(text: &str) -> std::time::Duration {
+        const RUNS: usize = 9;
+        let rope = Rope::from_str(text);
+        let len = line_len(&rope, 0);
+        let visible = VisibleColumns { first: len * TAB_WIDTH, count: 200 };
         let mut timings: Vec<_> = (0..RUNS)
             .map(|_| {
                 let started = std::time::Instant::now();
@@ -956,10 +1167,17 @@ mod tests {
             })
             .collect();
         timings.sort();
-        let median = timings[RUNS / 2];
-        let (fastest, slowest) = (timings[0], timings[RUNS - 1]);
-        println!("windowed a {TEN_MEGABYTES}-byte line: median {median:?}, min {fastest:?}, max {slowest:?}");
-        assert!(median < BUDGET, "median took {median:?}");
+        let (fastest, median, slowest) = (timings[0], timings[RUNS / 2], timings[RUNS - 1]);
+        println!("windowed a {}-byte line: median {median:?}, min {fastest:?}, max {slowest:?}", text.len());
+        median
+    }
+
+    #[test]
+    #[ignore]
+    fn windowing_the_end_of_a_ten_megabyte_tab_separated_line_is_fast() {
+        const TAB_SEPARATED_CELL: &str = "\tcell_42";
+        let text = TAB_SEPARATED_CELL.repeat(TEN_MEGABYTES / TAB_SEPARATED_CELL.len());
+        assert!(median_window_time(&text) < WINDOW_TIME_BUDGET);
     }
 
     #[test]
