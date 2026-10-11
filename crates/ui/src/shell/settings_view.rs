@@ -2,9 +2,8 @@ use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::settings::{filtered_fonts, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
     FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
-use crate::theme::custom::{hex_color_field, normalized_hex, ColorField};
 use crate::theme::menu_chrome::field_text;
-use crate::theme::{hex_to_hsla, Theme, ThemeKind};
+use crate::theme::{Theme, ThemeKind};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, Keystroke, MouseButton, ScrollStrategy, SharedString,
     Stateful, Window};
 use std::ops::Range;
@@ -12,10 +11,11 @@ use std::ops::Range;
 const FONT_ROWS: usize = 9;
 const FONT_ROW_PX: f32 = 34.0;
 const CARD_WINDOW_MARGIN_PX: f32 = 24.0;
+const CARD_WIDTH_PX: f32 = 520.0;
+const THEME_EDITOR_WIDTH_PX: f32 = 600.0;
 const SYSTEM_MONOSPACE: &str = "ui-monospace";
 const SYSTEM_MONOSPACE_LABEL: &str = "System monospace";
 const FONT_SEARCH_PLACEHOLDER: &str = "Search installed fonts\u{2026}";
-const HEX_PLACEHOLDER: &str = "#RRGGBB";
 
 #[derive(Clone, Copy)]
 enum SettingAction { ThemePicker, Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, Close }
@@ -78,7 +78,7 @@ impl Shell {
         cx.notify();
     }
 
-    fn apply_settings(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
         self.state.theme = self.state.settings.theme_tokens();
         let family = self.state.theme.font.resolve_family(&cx.text_system().all_font_names());
         self.style = TerminalStyle::from_theme(&self.state.theme, family);
@@ -123,7 +123,7 @@ impl Shell {
         self.state.theme_picker_visible = false;
         self.state.theme_editor_visible = true;
         self.state.theme_editor_terminal_colors = false;
-        self.state.theme_color_field = None;
+        self.state.color_picker = None;
         self.state.settings_error = None;
         if !was_custom {
             self.save_setting(CUSTOM_BASE_KEY, self.state.settings.custom_base.key());
@@ -134,36 +134,16 @@ impl Shell {
         cx.notify();
     }
 
-    fn save_custom_colors(&mut self) {
+    pub(super) fn save_custom_colors(&mut self) {
         match serde_json::to_string(&self.state.settings.custom_colors) {
             Ok(value) => self.save_setting(CUSTOM_COLORS_KEY, &value),
             Err(err) => self.state.settings_error = Some(format!("Could not encode colors: {err}")),
         }
     }
 
-    fn edit_custom_color(&mut self, field: ColorField, cx: &mut Context<Self>) {
-        self.state.theme_color_input = hex_color_field(self.state.settings.custom_colors.get(field));
-        self.state.theme_color_field = Some(field);
-        self.state.settings_error = None;
-        cx.notify();
-    }
-
-    fn commit_custom_color(&mut self, cx: &mut Context<Self>) {
-        let Some(field) = self.state.theme_color_field else { return; };
-        match self.state.settings.set_custom_color(field, &normalized_hex(self.state.theme_color_input.text())) {
-            Ok(()) => {
-                self.state.theme_color_field = None;
-                self.state.settings_error = None;
-                self.apply_settings(cx);
-                self.save_custom_colors();
-            }
-            Err(message) => self.state.settings_error = Some(message.into()),
-        }
-    }
-
     pub(super) fn settings_field(&self) -> Option<FieldTarget> {
         if self.state.theme_editor_visible {
-            return self.state.theme_color_field.map(|_| FieldTarget::HexColor);
+            return self.state.color_picker.as_ref().map(|_| FieldTarget::HexColor);
         }
         if self.state.theme_picker_visible {
             return None;
@@ -198,22 +178,6 @@ impl Shell {
             ENTER_KEY => self.select_theme(ThemeKind::ALL[self.state.theme_picker_selection], cx),
             _ => {}
         }
-    }
-
-    fn handle_theme_editor_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
-        if self.state.theme_color_field.is_none() {
-            if key.key == ESCAPE_KEY { self.state.theme_editor_visible = false; }
-            return true;
-        }
-        match key.key.as_str() {
-            ESCAPE_KEY => {
-                self.state.theme_color_field = None;
-                self.state.settings_error = None;
-            }
-            ENTER_KEY => self.commit_custom_color(cx),
-            _ => return self.type_into_field(FieldTarget::HexColor, key, cx),
-        }
-        true
     }
 
     fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
@@ -260,9 +224,12 @@ impl Shell {
             else if self.state.font_picker_visible { ("font-picker-card", self.render_font_picker(cx)) }
             else { ("settings-card", self.render_settings_card(cx)) };
         let max_height = window.viewport_size().height - px(CARD_WINDOW_MARGIN_PX * 2.0);
+        let card_width = if self.state.theme_editor_visible { THEME_EDITOR_WIDTH_PX } else { CARD_WIDTH_PX };
+        let picker_drag_listener = self.picker_drag_listener(cx);
         div().absolute().inset_0().flex().items_center().justify_center()
             .bg(theme.chrome.backdrop).occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
+                shell.finish_color_picker(cx);
                 shell.state.settings_visible = false;
                 shell.state.font_picker_visible = false;
                 shell.state.theme_picker_visible = false;
@@ -270,12 +237,13 @@ impl Shell {
                 cx.notify();
             }))
             .child(card.id(card_id).max_h(max_height).overflow_y_scroll()
-                .w(px(520.0 * scale)).p(px(22.0 * scale))
+                .w(px(card_width * scale)).p(px(22.0 * scale))
                 .rounded(px(12.0 * scale)).bg(theme.surface.raised)
                 .border_1().border_color(theme.border.default).occlude()
                 .font_family(SharedString::from(theme.ui_font.family.clone()))
                 .text_size(px(theme.ui_font.dialog_body_px))
                 .on_mouse_down(MouseButton::Left, |_event, _window, cx| cx.stop_propagation()))
+            .children(picker_drag_listener)
     }
 
     fn render_settings_card(&self, cx: &mut Context<Self>) -> Div {
@@ -396,70 +364,5 @@ impl Shell {
             }))
             .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
                 .child("Choose a preset, then use Customize to make it your own."))
-    }
-
-    fn render_theme_editor(&self, cx: &mut Context<Self>) -> Div {
-        let theme = &self.state.theme;
-        let scale = self.state.settings.ui_scale;
-        let fields: &[ColorField] = if self.state.theme_editor_terminal_colors {
-            &ColorField::TERMINAL
-        } else {
-            &ColorField::APPEARANCE
-        };
-        div().child(div().flex().items_center().justify_between().mb(px(10.0 * scale))
-                .child(div().text_size(px(theme.ui_font.palette_input_px)).child("Custom theme"))
-                .child(div().id("custom-done").cursor_pointer().child("Done")
-                    .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
-                        cx.stop_propagation();
-                        shell.state.theme_color_field = None;
-                        shell.state.theme_editor_visible = false;
-                        cx.notify();
-                    }))))
-            .child(div().flex().gap(px(12.0 * scale)).pb(px(10.0 * scale))
-                .child(self.theme_editor_tab("Appearance", false, cx))
-                .child(self.theme_editor_tab("Terminal colors", true, cx)))
-            .children(fields.iter().enumerate().map(|(index, field)| {
-                let field = *field;
-                let saved = self.state.settings.custom_colors.get(field);
-                let color = hex_to_hsla(saved, "custom swatch").expect("validated custom color");
-                let editing = self.state.theme_color_field == Some(field);
-                let label = if editing { field_text(&self.state.theme_color_input, HEX_PLACEHOLDER, theme) }
-                    else { div().child(saved.to_string()) };
-                div().id(("custom-color", index)).h(px(42.0 * scale))
-                    .flex().items_center().justify_between()
-                    .border_b_1().border_color(theme.border.muted).cursor_pointer()
-                    .child(div().child(field.label()))
-                    .child(div().flex().items_center().gap(px(10.0 * scale))
-                        .child(div().text_color(theme.text.muted).child(label))
-                        .child(div().w(px(24.0 * scale)).h(px(22.0 * scale))
-                            .rounded(px(4.0 * scale)).bg(color)
-                            .border_1().border_color(theme.border.default)))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
-                        cx.stop_propagation(); shell.edit_custom_color(field, cx);
-                    }))
-            }))
-            .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
-                .child(self.state.settings_error.clone().unwrap_or_else(||
-                    if self.state.theme_color_field.is_some() {
-                        "Type a color like #RRGGBB, then press Enter. Escape cancels.".into()
-                    } else { "Click a color to edit it. Changes are saved automatically.".into() })))
-    }
-
-    fn theme_editor_tab(&self, label: &'static str, terminal: bool, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = &self.state.theme;
-        let scale = self.state.settings.ui_scale;
-        let active = self.state.theme_editor_terminal_colors == terminal;
-        div().id(label).h(px(28.0 * scale)).px(px(10.0 * scale))
-            .flex().items_center().rounded(px(5.0 * scale)).cursor_pointer()
-            .bg(if active { theme.accent.primary } else { theme.chrome.control_fill })
-            .text_color(if active { theme.text.inverse } else { theme.text.default })
-            .child(label)
-            .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
-                cx.stop_propagation();
-                shell.state.theme_editor_terminal_colors = terminal;
-                shell.state.theme_color_field = None;
-                shell.state.settings_error = None;
-                cx.notify();
-            }))
     }
 }

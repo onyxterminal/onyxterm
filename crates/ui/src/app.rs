@@ -1,12 +1,12 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::color_picker::ColorPicker;
 use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::settings::Settings;
 use crate::text_field::TextField;
-use crate::theme::custom::ColorField;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteChoice {
@@ -26,7 +26,7 @@ pub struct AppState {
     pub theme_picker_selection: usize,
     pub theme_editor_visible: bool,
     pub theme_editor_terminal_colors: bool,
-    pub theme_color_field: Option<ColorField>,
+    pub color_picker: Option<ColorPicker>,
     pub theme_color_input: TextField,
     pub settings_error: Option<String>,
     pub registry: CommandRegistry,
@@ -54,7 +54,7 @@ impl AppState {
             theme_picker_selection: 0,
             theme_editor_visible: false,
             theme_editor_terminal_colors: false,
-            theme_color_field: None,
+            color_picker: None,
             theme_color_input: TextField::default(),
             settings_error: None,
             registry: CommandRegistry::with_defaults(),

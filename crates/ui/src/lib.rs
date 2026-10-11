@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod color_picker;
 pub mod command;
 pub mod confirm;
 pub mod input;

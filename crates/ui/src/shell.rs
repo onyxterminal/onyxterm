@@ -40,6 +40,8 @@ mod pane_options;
 mod pane_status;
 mod splits;
 mod settings_view;
+mod color_picker_view;
+mod theme_editor;
 mod tab_strip;
 mod text_input;
 
@@ -111,6 +113,7 @@ pub struct Shell {
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     gear_bounds: pane_options::GearBounds,
+    picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
     _quit_hook: Subscription,
@@ -145,6 +148,7 @@ impl Shell {
             pane_menu: None,
             pane_field: None,
             gear_bounds: pane_options::GearBounds::default(),
+            picker_bounds: pane_drag::BoundsMap::default(),
             palette_scroll: UniformListScrollHandle::new(),
             font_list_scroll: UniformListScrollHandle::new(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {

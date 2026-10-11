@@ -95,7 +95,7 @@ impl Shell {
         let before = field.text().to_string();
         let result = edit(field, &mut clipboard);
         if field.text() != before {
-            self.reset_field_results(target);
+            self.on_field_edited(target, cx);
         }
         cx.notify();
         Some(result)
@@ -110,7 +110,7 @@ impl Shell {
         self.with_field(target, cx, edit)
     }
 
-    fn reset_field_results(&mut self, target: FieldTarget) {
+    fn on_field_edited(&mut self, target: FieldTarget, cx: &mut Context<Self>) {
         match target {
             FieldTarget::FontQuery => {
                 self.state.font_picker_selection = 0;
@@ -120,7 +120,8 @@ impl Shell {
                 self.state.palette_selection = 0;
                 self.scroll_palette_to_top();
             }
-            FieldTarget::HexColor | FieldTarget::MenuName | FieldTarget::PaneName | FieldTarget::TabName => {}
+            FieldTarget::HexColor => self.preview_typed_hex(cx),
+            FieldTarget::MenuName | FieldTarget::PaneName | FieldTarget::TabName => {}
         }
     }
 

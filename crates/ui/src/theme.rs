@@ -4,6 +4,7 @@
 pub mod icons;
 pub mod menu_chrome;
 pub mod custom;
+pub mod hsv;
 
 use gpui::{point, px, BoxShadow, Hsla, Rgba, WindowBackgroundAppearance};
 use serde::{Deserialize, Deserializer};

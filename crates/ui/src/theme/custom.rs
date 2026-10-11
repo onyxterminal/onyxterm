@@ -1,4 +1,5 @@
-use super::{hex_to_hsla, Theme};
+use super::hsv::Rgb;
+use super::{hex_to_hsla, Theme, ThemeKind};
 use crate::text_field::TextField;
 use gpui::{Hsla, Rgba};
 use serde::{Deserialize, Serialize};
@@ -135,6 +136,16 @@ fn shifted_lightness(mut color: Hsla, shift: f32) -> Hsla {
     color
 }
 
+pub fn preset_colors(field: ColorField) -> Vec<Rgb> {
+    let mut colors = Vec::new();
+    for kind in ThemeKind::ALL.into_iter().filter(|kind| *kind != ThemeKind::Custom) {
+        let preset = CustomColors::from_theme(&Theme::load(kind).expect("built-in theme must load"));
+        let color = Rgb::from_hex(preset.get(field)).expect("built-in colors are valid hex");
+        if !colors.contains(&color) { colors.push(color); }
+    }
+    colors
+}
+
 pub fn hex_color_field(saved: &str) -> TextField {
     TextField::new(saved).with_filter(is_hex_color_char).with_max_chars(HEX_COLOR_CHARS).with_all_selected()
 }
@@ -148,9 +159,7 @@ fn is_hex_color_char(typed: char) -> bool {
 }
 
 fn valid_hex(value: &str) -> bool {
-    value.len() == HEX_COLOR_CHARS
-        && value.starts_with(HEX_PREFIX)
-        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    Rgb::from_hex(value).is_some()
 }
 
 fn hex(value: Hsla) -> String {
@@ -162,7 +171,6 @@ fn hex(value: Hsla) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::ThemeKind;
 
     #[test]
     fn custom_colors_roundtrip_and_apply() {
@@ -177,6 +185,15 @@ mod tests {
         assert_eq!(theme.name, "custom");
         assert_eq!(hex(theme.accent.primary), "#FF00AA");
         assert_eq!(theme.border.focus, theme.accent.primary);
+    }
+
+    #[test]
+    fn presets_list_each_builtin_value_once() {
+        let presets = preset_colors(ColorField::Accent);
+        let nord = Theme::load(ThemeKind::Nord).unwrap();
+        assert!(presets.contains(&Rgb::from_hex(&hex(nord.accent.primary)).unwrap()));
+        assert!(presets.len() < ThemeKind::ALL.len());
+        assert!(presets.iter().enumerate().all(|(index, color)| !presets[..index].contains(color)));
     }
 
     #[test]

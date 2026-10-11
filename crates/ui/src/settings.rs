@@ -76,6 +76,11 @@ impl Settings {
         }
     }
 
+    pub fn reset_custom_colors(&mut self) {
+        let base = Theme::load(self.custom_base).expect("built-in theme must load");
+        self.custom_colors = CustomColors::from_theme(&base);
+    }
+
     pub fn set_custom_color(&mut self, field: ColorField, value: &str) -> Result<(), &'static str> {
         self.custom_colors.set(field, value)
     }
@@ -157,5 +162,18 @@ mod tests {
         assert_eq!(restored.custom_base, ThemeKind::Nord);
         assert_eq!(restored.custom_colors, original.custom_colors);
         assert_eq!(restored.theme_tokens().name, "custom");
+    }
+
+    #[test]
+    fn reset_restores_every_custom_color_from_the_base_theme() {
+        let mut settings = Settings { theme: ThemeKind::Dracula, ..Default::default() };
+        settings.customize_current_theme();
+        let pristine = settings.custom_colors.clone();
+        settings.set_custom_color(ColorField::Accent, "#00FF00").unwrap();
+        settings.set_custom_color(ColorField::Blue, "#123456").unwrap();
+        settings.reset_custom_colors();
+        assert_eq!(settings.custom_colors, pristine);
+        assert_eq!(settings.custom_base, ThemeKind::Dracula);
+        assert_eq!(settings.theme, ThemeKind::Custom);
     }
 }
