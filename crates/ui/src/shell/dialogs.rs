@@ -1,14 +1,14 @@
 use super::Shell;
 use crate::confirm::ConfirmCopy;
 use crate::workspace_menu::{workspace_menu, WorkspaceMenuActions, WorkspaceMenuItem};
-use gpui::{div, prelude::*, px, Context, Hsla, MouseButton, SharedString, Window};
+use gpui::{div, prelude::*, px, Context, Div, Hsla, MouseButton, SharedString, Window};
 use std::rc::Rc;
 
 const CLOSE_PROMPT_WIDTH_PX: f32 = 360.0;
 const BACKDROP_ALPHA: f32 = 0.35;
 
 impl Shell {
-    pub(super) fn render_workspace_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_workspace_menu(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let active = self.model.active_id();
         let items = self
@@ -93,7 +93,7 @@ impl Shell {
             )
     }
 
-    pub(super) fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let backdrop = Hsla { a: BACKDROP_ALPHA, ..gpui::black() };
         div()

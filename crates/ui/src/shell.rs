@@ -9,6 +9,7 @@ use crate::command::{
 };
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
+use crate::motion::fade_in;
 use pane_drag::DraggedPane;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
@@ -724,6 +725,7 @@ impl Render for Shell {
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
         let margin = px(theme.layout.window_margin_px);
+        let animation_ms = theme.layout.animation_ms;
 
         div()
             .size_full()
@@ -745,9 +747,9 @@ impl Render for Shell {
             .child(tab_strip)
             .children(notice)
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
-            .when(palette_visible, |el| el.child(palette_overlay))
-            .children(workspace_menu)
-            .children(close_prompt)
+            .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
+            .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
+            .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
     }
 }
 
