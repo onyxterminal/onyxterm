@@ -42,7 +42,7 @@ impl Edit {
         self.changes.is_empty()
     }
 
-    pub fn apply(&self, buffer: &mut Buffer) -> Edit {
+    pub(crate) fn apply(&self, buffer: &mut Buffer) -> Edit {
         let removed: Vec<String> =
             self.changes.iter().map(|change| buffer.rope().slice(change.range.clone()).to_string()).collect();
         for change in self.changes.iter().rev() {
