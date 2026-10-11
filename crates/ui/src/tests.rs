@@ -510,3 +510,25 @@ fn menu_bar_lists_native_sections_and_window_shortcuts() {
     assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::control(), "f")), Some(CommandId::ToggleFullScreen));
     assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "w")), Some(CommandId::CloseTab));
 }
+
+#[test]
+fn shortcuts_match_the_physical_key_under_an_arabic_layout() {
+    let map = Keymap::default();
+    let cmd = Modifiers::command();
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0646}", None)), Some(CommandId::OpenPalette));
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0635}", None)), Some(CommandId::CloseActive));
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0641}", None)), Some(CommandId::NewTab));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{0648}", None)), Some(CommandId::MaximizePane));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{0629}", None)), Some(CommandId::NextTab));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{062c}", None)), Some(CommandId::PrevTab));
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "k", None)), Some(CommandId::OpenPalette));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::none(), "\u{0646}", Some("\u{0646}"))), None);
+    let control_c = crate::keymap::physical_combo(&keystroke(Modifiers::control(), "\u{0630}", None));
+    assert_eq!(control_c, Some(Combo::new(Modifiers::control(), "c")));
+}
+
+#[test]
+fn arabic_text_reaches_the_shell_as_arabic() {
+    let typed = "\u{0646}";
+    assert_eq!(encode(Modifiers::none(), typed, Some(typed)), Some(typed.as_bytes().to_vec()));
+}

@@ -10,7 +10,6 @@ use crate::command::{
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
-use crate::keymap::Combo;
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
@@ -170,8 +169,7 @@ impl Shell {
     }
 
     fn resolve_combo(&self, event: &KeyDownEvent) -> Option<CommandId> {
-        let combo = Combo::new(event.keystroke.modifiers, event.keystroke.key.as_str());
-        self.state.keymap.resolve(&combo)
+        self.state.keymap.resolve_keystroke(&event.keystroke)
     }
 
     fn run_command(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
