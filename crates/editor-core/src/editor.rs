@@ -1,4 +1,4 @@
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, CRLF, LF};
 use crate::edit::{Bias, Change, Edit};
 use crate::history::{EditKind, History, Record};
 use crate::motion::{line_end, line_start, move_selection, next_grapheme, prev_grapheme, word_left, word_right, Motion};
@@ -6,8 +6,9 @@ use crate::selection::{Selection, Selections};
 use ropey::Rope;
 use std::time::Instant;
 
-const NEWLINE: &str = "\n";
+const NEWLINE: &str = LF;
 const INDENT: &str = "    ";
+const INDENT_WIDTH: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Granularity {
@@ -75,7 +76,7 @@ impl Editor {
                 let rope = self.buffer.rope();
                 self.selections = self.selections.map(|selection| move_selection(rope, selection, motion, extend));
             }
-            EditorAction::InsertText(text) => self.replace_selections(&text, EditKind::Typing, now),
+            EditorAction::InsertText(text) => self.replace_selections(&text.replace(CRLF, LF), EditKind::Typing, now),
             EditorAction::Newline => self.insert_newline(now),
             EditorAction::DeleteBackward(granularity) => self.delete(granularity, true, now),
             EditorAction::DeleteForward(granularity) => self.delete(granularity, false, now),
@@ -100,18 +101,18 @@ impl Editor {
     }
 
     fn replace_selections(&mut self, text: &str, kind: EditKind, now: Instant) {
-        let changes = self
+        let per_selection: Vec<Option<Change>> = self
             .selections
             .as_slice()
             .iter()
-            .map(|selection| Change { range: selection.range(), text: text.to_string() })
+            .map(|selection| Some(Change { range: selection.range(), text: text.to_string() }))
             .collect();
-        self.commit(Edit::new(changes), kind, now, Placement::AfterInsert);
+        self.commit(per_selection, kind, now, Placement::AfterInsert);
     }
 
     fn insert_newline(&mut self, now: Instant) {
         let rope = self.buffer.rope();
-        let changes = self
+        let per_selection: Vec<Option<Change>> = self
             .selections
             .as_slice()
             .iter()
@@ -122,28 +123,28 @@ impl Editor {
                     .chars()
                     .take_while(|ch| *ch == ' ' || *ch == '\t')
                     .collect();
-                Change { range: selection.range(), text: format!("{NEWLINE}{indent}") }
+                Some(Change { range: selection.range(), text: format!("{NEWLINE}{indent}") })
             })
             .collect();
-        self.commit(Edit::new(changes), EditKind::Other, now, Placement::AfterInsert);
+        self.commit(per_selection, EditKind::Other, now, Placement::AfterInsert);
     }
 
     fn delete(&mut self, granularity: Granularity, is_backward: bool, now: Instant) {
         let rope = self.buffer.rope();
-        let changes = self
+        let per_selection: Vec<Option<Change>> = self
             .selections
             .as_slice()
             .iter()
             .map(|selection| {
                 if !selection.is_empty() {
-                    return Change { range: selection.range(), text: String::new() };
+                    return Some(Change { range: selection.range(), text: String::new() });
                 }
                 let target = deletion_target(rope, selection.head, granularity, is_backward);
-                Change { range: target.min(selection.head)..target.max(selection.head), text: String::new() }
+                let range = target.min(selection.head)..target.max(selection.head);
+                (!range.is_empty()).then(|| Change { range, text: String::new() })
             })
-            .filter(|change| !change.range.is_empty())
             .collect();
-        self.commit(Edit::new(changes), EditKind::Typing, now, Placement::AfterInsert);
+        self.commit(per_selection, EditKind::Typing, now, Placement::AfterInsert);
     }
 
     pub fn copy_text(&self) -> Option<String> {
@@ -159,31 +160,37 @@ impl Editor {
     }
 
     pub fn paste(&mut self, text: &str, now: Instant) {
+        let text = text.replace(CRLF, LF);
         let lines: Vec<&str> = text.split(NEWLINE).collect();
         if self.selections.len() > 1 && lines.len() == self.selections.len() {
-            let changes = self
+            let per_selection: Vec<Option<Change>> = self
                 .selections
                 .as_slice()
                 .iter()
                 .zip(lines)
-                .map(|(selection, line)| Change { range: selection.range(), text: line.to_string() })
+                .map(|(selection, line)| Some(Change { range: selection.range(), text: line.to_string() }))
                 .collect();
-            self.commit(Edit::new(changes), EditKind::Other, now, Placement::AfterInsert);
+            self.commit(per_selection, EditKind::Other, now, Placement::AfterInsert);
             return;
         }
-        self.replace_selections(text, EditKind::Other, now);
+        self.replace_selections(&text, EditKind::Other, now);
     }
 
     fn cut(&mut self, now: Instant) -> Option<String> {
         let text = self.copy_text()?;
-        let changes = self
+        let per_selection: Vec<Option<Change>> = self
             .selections
             .as_slice()
             .iter()
-            .filter(|selection| !selection.is_empty())
-            .map(|selection| Change { range: selection.range(), text: String::new() })
+            .map(|selection| {
+                if selection.is_empty() {
+                    None
+                } else {
+                    Some(Change { range: selection.range(), text: String::new() })
+                }
+            })
             .collect();
-        self.commit(Edit::new(changes), EditKind::Other, now, Placement::AfterInsert);
+        self.commit(per_selection, EditKind::Other, now, Placement::AfterInsert);
         Some(text)
     }
 
@@ -193,31 +200,43 @@ impl Editor {
             return;
         }
         let rope = self.buffer.rope();
-        let changes = touched_lines(rope, &self.selections)
+        let per_selection: Vec<Option<Change>> = touched_lines(rope, &self.selections)
             .into_iter()
             .map(|line| {
                 let start = rope.line_to_char(line);
-                Change { range: start..start, text: INDENT.to_string() }
+                Some(Change { range: start..start, text: INDENT.to_string() })
             })
             .collect();
-        self.commit(Edit::new(changes), EditKind::Other, now, Placement::Mapped);
+        self.commit(per_selection, EditKind::Other, now, Placement::Mapped);
     }
 
     fn outdent(&mut self, now: Instant) {
         let rope = self.buffer.rope();
-        let changes = touched_lines(rope, &self.selections)
+        let per_selection: Vec<Option<Change>> = touched_lines(rope, &self.selections)
             .into_iter()
-            .filter_map(|line| {
+            .map(|line| {
                 let start = rope.line_to_char(line);
-                let spaces = rope.line(line).chars().take(INDENT.len()).take_while(|ch| *ch == ' ').count();
+                let spaces = rope.line(line).chars().take(INDENT_WIDTH).take_while(|ch| *ch == ' ').count();
                 let removable = if spaces == 0 && rope.line(line).chars().next() == Some('\t') { 1 } else { spaces };
                 (removable > 0).then(|| Change { range: start..start + removable, text: String::new() })
             })
             .collect();
-        self.commit(Edit::new(changes), EditKind::Other, now, Placement::Mapped);
+        self.commit(per_selection, EditKind::Other, now, Placement::Mapped);
     }
 
-    fn commit(&mut self, edit: Edit, kind: EditKind, now: Instant, placement: Placement) {
+    fn commit(
+        &mut self,
+        per_selection: Vec<Option<Change>>,
+        kind: EditKind,
+        now: Instant,
+        placement: Placement,
+    ) {
+        let per_selection: Vec<Option<Change>> = per_selection
+            .into_iter()
+            .map(|c| c.filter(|c| !(c.range.is_empty() && c.text.is_empty())))
+            .collect();
+        let changes: Vec<Change> = per_selection.iter().filter_map(|c| c.clone()).collect();
+        let edit = Edit::new(changes);
         if edit.is_empty() {
             return;
         }
@@ -225,11 +244,18 @@ impl Editor {
         let inverse = edit.apply(&mut self.buffer);
         let after = match placement {
             Placement::AfterInsert => {
-                let newest_head = edit.map(before.newest().head, Bias::Right);
-                let cursors: Vec<Selection> =
-                    inverse.changes().iter().map(|change| Selection::cursor(change.range.end)).collect();
-                let newest = cursors.iter().position(|cursor| cursor.head == newest_head).unwrap_or(cursors.len() - 1);
-                Selections::new(cursors, newest)
+                let newest_before = before.newest_index();
+                let cursors: Vec<Selection> = before
+                    .as_slice()
+                    .iter()
+                    .zip(per_selection.iter())
+                    .map(|(selection, change)| match change {
+                        Some(c) if !c.range.is_empty() => Selection::cursor(edit.map(c.range.end, Bias::Left)),
+                        Some(c) => Selection::cursor(edit.map(c.range.start, Bias::Right)),
+                        None => Selection::cursor(edit.map(selection.head, Bias::Right)),
+                    })
+                    .collect();
+                Selections::new(cursors, newest_before)
             }
             Placement::Mapped => before.map(|selection| {
                 Selection::new(edit.map(selection.anchor, Bias::Right), edit.map(selection.head, Bias::Right))
@@ -460,5 +486,40 @@ mod tests {
         editor.paste("x\ny", Instant::now());
         assert_eq!(text(&editor), "ax\nyb");
         assert_eq!(heads(&editor), vec![4]);
+    }
+
+    #[test]
+    fn backspace_at_offset_zero_keeps_every_cursor() {
+        let mut editor = editor_with("ab\ncd", &[0, 4]);
+        editor.apply(EditorAction::DeleteBackward(Granularity::Char), Instant::now());
+        assert_eq!(text(&editor), "ab\nd");
+        assert_eq!(heads(&editor), vec![0, 3]);
+    }
+
+    #[test]
+    fn cut_keeps_empty_cursors_in_place() {
+        let mut editor = Editor::new(Buffer::from_text("one two"));
+        editor.set_selections(Selections::new(vec![Selection::new(0, 3), Selection::cursor(6)], 0));
+        let cut = editor.apply(EditorAction::Cut, Instant::now());
+        assert_eq!(cut.as_deref(), Some("one"));
+        assert_eq!(text(&editor), " two");
+        assert_eq!(heads(&editor), vec![0, 3]);
+    }
+
+    #[test]
+    fn typing_with_a_selection_then_a_cursor_keeps_newest_by_origin() {
+        let mut editor = Editor::new(Buffer::from_text("abcdef"));
+        editor.set_selections(Selections::new(vec![Selection::new(0, 3), Selection::cursor(3)], 0));
+        editor.apply(EditorAction::InsertText("x".into()), Instant::now());
+        assert_eq!(text(&editor), "xxdef");
+        assert_eq!(heads(&editor), vec![1, 2]);
+        assert_eq!(editor.selections().newest().head, 1);
+    }
+
+    #[test]
+    fn empty_insert_does_not_mark_dirty_or_clear_redo() {
+        let mut editor = editor_with("abc", &[1]);
+        editor.apply(EditorAction::InsertText("".into()), Instant::now());
+        assert!(!editor.buffer().is_dirty());
     }
 }

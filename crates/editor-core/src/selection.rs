@@ -70,6 +70,10 @@ impl Selections {
         self.items[self.newest]
     }
 
+    pub fn newest_index(&self) -> usize {
+        self.newest
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }

@@ -1,8 +1,8 @@
 use ropey::Rope;
 use std::ops::Range;
 
-const CRLF: &str = "\r\n";
-const LF: &str = "\n";
+pub(crate) const CRLF: &str = "\r\n";
+pub(crate) const LF: &str = "\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
