@@ -1,0 +1,184 @@
+[meta]
+name = "dracula"
+version = "2"
+kind = "dark"
+
+[surface]
+canvas = "#282A36"
+subtle = "#20212B"
+raised = "#343746"
+sunken = "#222430"
+
+[text]
+default = "#F8F8F2"
+muted = "#C9C9D2"
+subtle = "#A1A2B0"
+inverse = "#24212F"
+
+[border]
+default = "rgba(248,248,242,0.17)"
+muted = "rgba(248,248,242,0.10)"
+focus = "#BD93F9"
+
+[accent]
+primary = "#BD93F9"
+primary_hover = "#D0B0FF"
+primary_active = "#AA78EF"
+
+[status]
+running = "#34C759"
+exited = "#828996"
+failed = "#D70015"
+stopping = "#FF9500"
+starting = "#78AFFF"
+unknown = "#C7C7CC"
+idle = "#C7C7CC"
+
+[chrome]
+control_fill = "rgba(255,255,255,0.07)"
+icon_hover_fill = "rgba(255,255,255,0.08)"
+menu_fill = "rgba(52,55,70,0.98)"
+menu_border = "rgba(255,255,255,0.18)"
+palette_fill = "rgba(52,55,70,0.98)"
+selected_shortcut = "rgba(36,33,47,0.78)"
+destructive = "#D70015"
+backdrop = "rgba(0,0,0,0.48)"
+
+[ui_font]
+family = ".SystemUIFont"
+tab_px = 12.0
+button_px = 12.0
+pane_title_px = 11.5
+menu_px = 13.0
+shortcut_px = 12.0
+palette_input_px = 16.0
+hint_px = 11.0
+section_label_px = 11.0
+dialog_title_px = 13.0
+dialog_body_px = 12.0
+
+[top_bar]
+leading_gap_px = 10.0
+control_height_px = 26.0
+control_radius_px = 6.0
+logo_px = 14.0
+separator_width_px = 1.0
+separator_height_px = 16.0
+tab_padding_x_px = 14.0
+tab_gap_px = 2.0
+item_gap_px = 8.0
+
+[pane_header]
+padding_x_px = 10.0
+status_dot_px = 6.0
+icon_button_px = 20.0
+icon_button_radius_px = 5.0
+icon_px = 12.0
+
+[menu]
+width_px = 240.0
+radius_px = 10.0
+padding_px = 5.0
+border_px = 0.5
+row_height_px = 26.0
+row_radius_px = 5.0
+row_padding_x_px = 9.0
+offset_px = 4.0
+section_label_height_px = 22.0
+
+[palette]
+width_px = 600.0
+top_px = 72.0
+radius_px = 12.0
+border_px = 0.5
+search_height_px = 48.0
+search_icon_px = 18.0
+row_height_px = 32.0
+row_radius_px = 6.0
+footer_height_px = 30.0
+max_rows = 9
+
+[dialog]
+width_px = 360.0
+radius_px = 12.0
+button_height_px = 24.0
+button_radius_px = 6.0
+
+[island]
+focus_ring_px = 1.0
+unfocused_border_px = 0.5
+dim_unfocused = true
+unfocused_opacity = 0.55
+pane_padding_x_px = 14.0
+pane_padding_top_px = 6.0
+pane_padding_bottom_px = 12.0
+
+[[shadow.card]]
+y = 1.0
+blur = 3.0
+color = "rgba(255,255,255,0.07)"
+
+[[shadow.tab]]
+spread = 0.5
+color = "rgba(255,255,255,0.13)"
+
+[[shadow.tab]]
+y = 1.0
+blur = 2.0
+color = "rgba(255,255,255,0.08)"
+
+[[shadow.menu]]
+y = 12.0
+blur = 32.0
+color = "rgba(0,0,0,0.14)"
+
+[[shadow.palette]]
+y = 18.0
+blur = 48.0
+color = "rgba(0,0,0,0.48)"
+
+[font]
+family = "ui-monospace"
+fallback = "SF Mono, Menlo, monospace"
+size_px = 13
+line_height = 1.4
+
+[scrollback]
+default_lines = 10000
+max_lines = 100000
+
+[ansi]
+black = "#44475A"
+red = "#FF5555"
+green = "#50FA7B"
+yellow = "#F1FA8C"
+blue = "#8BE9FD"
+magenta = "#BD93F9"
+cyan = "#8BE9FD"
+white = "#F8F8F2"
+bright_black = "#6272A4"
+bright_red = "#FF7979"
+bright_green = "#74FF9B"
+bright_yellow = "#FFFFA5"
+bright_blue = "#A9F1FF"
+bright_magenta = "#D2B0FF"
+bright_cyan = "#A9F1FF"
+bright_white = "#FFFFFF"
+
+[input]
+option_as_meta = true
+
+[layout]
+tab_strip_height_px = 38
+workspace_rail_width_px = 200
+pane_header_height_px = 26
+border_radius_px = 6
+gap_px = 1
+island_radius_px = 10
+island_gap_px = 6
+window_margin_px = 6
+min_pane_px = 120
+animation_ms = 150
+traffic_light_left_px = 14
+traffic_light_top_px = 12
+traffic_lights_width_px = 74

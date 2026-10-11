@@ -3,21 +3,44 @@
 
 pub mod icons;
 pub mod menu_chrome;
+pub mod custom;
 
 use gpui::{point, px, BoxShadow, Hsla, Rgba, WindowBackgroundAppearance};
 use serde::{Deserialize, Deserializer};
 
 const LIGHT_THEME_TOML: &str = include_str!("../../../assets/themes/apple-light.toml");
 const DARK_THEME_TOML: &str = include_str!("../../../assets/themes/onyx-dark.toml");
+const NORD_THEME_TOML: &str = include_str!("../../../assets/themes/nord.toml");
+const DRACULA_THEME_TOML: &str = include_str!("../../../assets/themes/dracula.toml");
+const SOLARIZED_DARK_THEME_TOML: &str = include_str!("../../../assets/themes/solarized-dark.toml");
+const SOLARIZED_LIGHT_THEME_TOML: &str = include_str!("../../../assets/themes/solarized-light.toml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThemeKind { Light, Dark }
+pub enum ThemeKind { Light, Dark, Nord, Dracula, SolarizedDark, SolarizedLight, Custom }
 
 impl ThemeKind {
-    pub fn key(self) -> &'static str { match self { Self::Light => "light", Self::Dark => "dark" } }
-    pub fn from_key(key: &str) -> Self { if key == "dark" { Self::Dark } else { Self::Light } }
-    pub fn label(self) -> &'static str { match self { Self::Light => "Light", Self::Dark => "Dark" } }
-    pub fn next(self) -> Self { match self { Self::Light => Self::Dark, Self::Dark => Self::Light } }
+    pub const ALL: [Self; 7] = [Self::Light, Self::Dark, Self::Nord, Self::Dracula,
+        Self::SolarizedDark, Self::SolarizedLight, Self::Custom];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Light => "light", Self::Dark => "dark", Self::Nord => "nord",
+            Self::Dracula => "dracula", Self::SolarizedDark => "solarized-dark",
+            Self::SolarizedLight => "solarized-light", Self::Custom => "custom",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Self {
+        Self::ALL.into_iter().find(|kind| kind.key() == key).unwrap_or(Self::Light)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Light => "Apple Light", Self::Dark => "Onyx Dark", Self::Nord => "Nord",
+            Self::Dracula => "Dracula", Self::SolarizedDark => "Solarized Dark",
+            Self::SolarizedLight => "Solarized Light", Self::Custom => "Custom",
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -246,7 +269,14 @@ impl Theme {
     }
 
     pub fn load(kind: ThemeKind) -> Result<Self, ThemeError> {
-        let source = match kind { ThemeKind::Light => LIGHT_THEME_TOML, ThemeKind::Dark => DARK_THEME_TOML };
+        let source = match kind {
+            ThemeKind::Light => LIGHT_THEME_TOML,
+            ThemeKind::Dark | ThemeKind::Custom => DARK_THEME_TOML,
+            ThemeKind::Nord => NORD_THEME_TOML,
+            ThemeKind::Dracula => DRACULA_THEME_TOML,
+            ThemeKind::SolarizedDark => SOLARIZED_DARK_THEME_TOML,
+            ThemeKind::SolarizedLight => SOLARIZED_LIGHT_THEME_TOML,
+        };
         let raw: RawTheme = toml::from_str(source)?;
         Self::from_raw(raw)
     }

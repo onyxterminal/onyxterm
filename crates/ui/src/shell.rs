@@ -264,7 +264,11 @@ impl Shell {
             return true;
         }
         if self.state.settings_visible {
-            if self.state.font_picker_visible {
+            if self.state.theme_editor_visible {
+                self.handle_theme_editor_key(keystroke, cx);
+            } else if self.state.theme_picker_visible {
+                self.handle_theme_picker_key(keystroke, cx);
+            } else if self.state.font_picker_visible {
                 self.handle_font_picker_key(keystroke, cx);
             } else if keystroke.key == ESCAPE_KEY { self.state.settings_visible = false; }
             cx.notify();

@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+use crate::theme::custom::{ColorField, CustomColors};
 use crate::theme::{Theme, ThemeKind};
 
 pub const THEME_KEY: &str = "appearance.theme";
@@ -7,10 +8,14 @@ pub const FONT_KEY: &str = "terminal.font_family";
 pub const FONT_SIZE_KEY: &str = "terminal.font_size";
 pub const UI_SCALE_KEY: &str = "appearance.ui_scale";
 pub const DIM_UNFOCUSED_KEY: &str = "appearance.dim_unfocused_panes";
+pub const CUSTOM_BASE_KEY: &str = "theme.custom.base";
+pub const CUSTOM_COLORS_KEY: &str = "theme.custom.colors";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub theme: ThemeKind,
+    pub custom_base: ThemeKind,
+    pub custom_colors: CustomColors,
     pub font_family: String,
     pub font_size: f32,
     pub ui_scale: f32,
@@ -19,7 +24,9 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { theme: ThemeKind::Light, font_family: "ui-monospace".into(), font_size: 13.0,
+        Self { theme: ThemeKind::Light, custom_base: ThemeKind::Dark,
+            custom_colors: CustomColors::from_theme(&Theme::load(ThemeKind::Dark).expect("built-in dark theme")),
+            font_family: "JetBrains Mono".into(), font_size: 13.0,
             ui_scale: 1.0, dim_unfocused_panes: true }
     }
 }
@@ -30,6 +37,15 @@ impl Settings {
         for (key, value) in pairs {
             match key.as_str() {
                 THEME_KEY => settings.theme = ThemeKind::from_key(value),
+                CUSTOM_BASE_KEY => {
+                    let base = ThemeKind::from_key(value);
+                    settings.custom_base = if base == ThemeKind::Custom { ThemeKind::Dark } else { base };
+                }
+                CUSTOM_COLORS_KEY => {
+                    if let Ok(colors) = serde_json::from_str::<CustomColors>(value) {
+                        if colors.is_valid() { settings.custom_colors = colors; }
+                    }
+                }
                 FONT_KEY if !value.trim().is_empty() && value.len() <= 128 => settings.font_family = value.clone(),
                 FONT_SIZE_KEY => settings.font_size = bounded(value, 10.0, 28.0, settings.font_size),
                 UI_SCALE_KEY => settings.ui_scale = bounded(value, 0.75, 1.5, settings.ui_scale),
@@ -41,12 +57,27 @@ impl Settings {
     }
 
     pub fn theme_tokens(&self) -> Theme {
-        let mut theme = Theme::load(self.theme).expect("built-in theme must load");
+        let base = if self.theme == ThemeKind::Custom { self.custom_base } else { self.theme };
+        let mut theme = Theme::load(base).expect("built-in theme must load");
+        if self.theme == ThemeKind::Custom { self.custom_colors.apply(&mut theme); }
         theme.font.family = self.font_family.clone();
         theme.font.size_px = self.font_size;
         theme.scale_ui(self.ui_scale);
         theme.island.dim_unfocused = self.dim_unfocused_panes;
         theme
+    }
+
+    pub fn customize_current_theme(&mut self) {
+        if self.theme != ThemeKind::Custom {
+            self.custom_base = self.theme;
+            let base = Theme::load(self.theme).expect("built-in theme must load");
+            self.custom_colors = CustomColors::from_theme(&base);
+            self.theme = ThemeKind::Custom;
+        }
+    }
+
+    pub fn set_custom_color(&mut self, field: ColorField, value: &str) -> Result<(), &'static str> {
+        self.custom_colors.set(field, value)
     }
 }
 
@@ -99,5 +130,32 @@ mod tests {
         let installed = vec!["Menlo".into(), "Arial".into(), "SF Mono".into(), "menlo".into()];
         assert_eq!(filtered_fonts(&installed, "mono"), vec!["SF Mono"]);
         assert_eq!(filtered_fonts(&installed, ""), vec!["Arial", "Menlo", "SF Mono"]);
+    }
+
+    #[test]
+    fn every_builtin_theme_loads() {
+        for kind in ThemeKind::ALL {
+            assert_eq!(ThemeKind::from_key(kind.key()), kind);
+            let theme = Theme::load(kind).unwrap();
+            assert!(theme.surface.canvas != theme.text.default, "{:?} lacks contrast", kind);
+        }
+    }
+
+    #[test]
+    fn custom_theme_survives_settings_roundtrip() {
+        let mut original = Settings { theme: ThemeKind::Nord, ..Default::default() };
+        original.customize_current_theme();
+        original.set_custom_color(ColorField::Background, "#123456").unwrap();
+        original.set_custom_color(ColorField::Red, "#EF1234").unwrap();
+        let stored = vec![
+            (THEME_KEY.into(), original.theme.key().into()),
+            (CUSTOM_BASE_KEY.into(), original.custom_base.key().into()),
+            (CUSTOM_COLORS_KEY.into(), serde_json::to_string(&original.custom_colors).unwrap()),
+        ];
+        let restored = Settings::from_pairs(&stored);
+        assert_eq!(restored.theme, ThemeKind::Custom);
+        assert_eq!(restored.custom_base, ThemeKind::Nord);
+        assert_eq!(restored.custom_colors, original.custom_colors);
+        assert_eq!(restored.theme_tokens().name, "custom");
     }
 }

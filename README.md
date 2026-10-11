@@ -21,6 +21,17 @@ open ~/Applications/Onyxterm.app
 Once installed, Onyxterm launches from Finder, Spotlight, or the Dock. To regenerate
 `assets/icons/Onyxterm.icns` from `assets/logo.png`, run `scripts/make-icon.sh`.
 
+## Appearance settings
+
+Open **Onyxterm → Settings** or press **⌘,**. Choose an installed terminal font, adjust
+terminal text and UI size, and toggle dimming for unfocused panes. JetBrains Mono is
+bundled and selected by default. Its font license is in
+`assets/fonts/jetbrains-mono/OFL.txt`.
+
+Choose from Apple Light, Onyx Dark, Nord, Dracula, Solarized Dark, and Solarized Light.
+Select **Customize** to copy the current theme, then edit its appearance and terminal
+colors using `#RRGGBB` values. Settings and the custom theme are saved per profile.
+
 ## Releases
 
 Bump the version and cut a tag:

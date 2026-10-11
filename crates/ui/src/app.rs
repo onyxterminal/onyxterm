@@ -5,6 +5,7 @@ use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::settings::Settings;
+use crate::theme::custom::ColorField;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteChoice {
@@ -20,6 +21,12 @@ pub struct AppState {
     pub font_picker_visible: bool,
     pub font_picker_query: String,
     pub font_picker_selection: usize,
+    pub theme_picker_visible: bool,
+    pub theme_picker_selection: usize,
+    pub theme_editor_visible: bool,
+    pub theme_editor_terminal_colors: bool,
+    pub theme_color_field: Option<ColorField>,
+    pub theme_color_input: String,
     pub settings_error: Option<String>,
     pub registry: CommandRegistry,
     pub keymap: Keymap,
@@ -42,6 +49,12 @@ impl AppState {
             font_picker_visible: false,
             font_picker_query: String::new(),
             font_picker_selection: 0,
+            theme_picker_visible: false,
+            theme_picker_selection: 0,
+            theme_editor_visible: false,
+            theme_editor_terminal_colors: false,
+            theme_color_field: None,
+            theme_color_input: String::new(),
             settings_error: None,
             registry: CommandRegistry::with_defaults(),
             keymap: Keymap::default(),
