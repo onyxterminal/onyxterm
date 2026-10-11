@@ -10,7 +10,9 @@ pub mod menus;
 pub mod motion;
 pub mod palette;
 pub mod pane_drop;
+pub mod pane_layout;
 pub mod pane_menu;
+pub mod pane_motion;
 pub mod pane_title;
 pub mod shell;
 pub mod tabs;
@@ -19,6 +21,8 @@ pub mod theme;
 pub mod workspace_menu;
 pub mod workspaces;
 
+#[cfg(test)]
+mod pane_motion_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
