@@ -48,26 +48,24 @@ pub fn discard_pane_copy(name: &str) -> ConfirmCopy {
     }
 }
 
-pub fn discard_tab_copy(unsaved: usize) -> ConfirmCopy {
+pub fn discard_tab_copy(unsaved: usize, has_running_processes: bool) -> ConfirmCopy {
+    let mut body = format!("This tab has {}.", unsaved_files(unsaved));
+    if has_running_processes {
+        body.push_str(" Running processes in this tab will be terminated.");
+    }
     ConfirmCopy {
         title: "Discard unsaved changes?".to_string(),
-        body: format!("This tab has {}.", unsaved_files(unsaved)),
+        body,
         action: "Close tab",
         is_destructive: true,
     }
 }
 
 pub fn delete_workspace_copy(name: &str, sessions: usize, unsaved: usize) -> ConfirmCopy {
-    let sessions_text = if sessions > 0 { Some(sessions_ending(sessions)) } else { None };
-    let unsaved_text = if unsaved > 0 { Some(unsaved_files(unsaved)) } else { None };
-    let body = match (sessions_text, unsaved_text) {
-        (None, None) => "Its tabs and layout are removed.".to_string(),
-        (Some(s), None) => format!("Its tabs and layout are removed. {s}"),
-        (None, Some(u)) => format!("Its tabs and layout are removed. {u}."),
-        (Some(s), Some(u)) => {
-            let prefix = s.trim_end_matches('.');
-            format!("Its tabs and layout are removed. {prefix} and {u}.")
-        }
+    let consequences = consequence_phrases(sessions, unsaved).join(" and ");
+    let body = match consequences.is_empty() {
+        true => "Its tabs and layout are removed.".to_string(),
+        false => format!("Its tabs and layout are removed. {}.", consequences),
     };
     ConfirmCopy {
         title: format!("Delete workspace \u{201c}{name}\u{201d}?"),
@@ -78,27 +76,45 @@ pub fn delete_workspace_copy(name: &str, sessions: usize, unsaved: usize) -> Con
 }
 
 pub fn quit_copy(sessions: usize, unsaved: usize) -> ConfirmCopy {
-    let body = match (sessions, unsaved) {
-        (0, 0) => String::new(),
-        (_, 0) => sessions_ending(sessions),
-        (0, _) => format!("{}.", unsaved_files(unsaved)),
-        (_, _) => {
-            let prefix = sessions_ending(sessions).trim_end_matches('.').to_string();
-            format!("{prefix} and {}.", unsaved_files(unsaved))
-        }
+    let consequences = consequence_phrases(sessions, unsaved).join(" and ");
+    let body = match consequences.is_empty() {
+        true => String::new(),
+        false => format!("{}.", consequences),
     };
     ConfirmCopy {
         title: "Quit Onyxterm?".into(),
         body,
         action: "Quit",
-        is_destructive: false,
+        is_destructive: unsaved > 0,
     }
 }
 
 pub fn sessions_ending(count: usize) -> String {
+    format!("{}.", sessions_end_phrase(count))
+}
+
+fn consequence_phrases(sessions: usize, unsaved: usize) -> Vec<String> {
+    let mut phrases = Vec::new();
+    if sessions > 0 {
+        phrases.push(sessions_end_phrase(sessions));
+    }
+    if unsaved > 0 {
+        phrases.push(unsaved_lost_phrase(unsaved));
+    }
+    phrases
+}
+
+fn sessions_end_phrase(count: usize) -> String {
     match count {
-        1 => "1 session will end.".to_string(),
-        n => format!("{n} sessions will end."),
+        1 => "1 session will end".to_string(),
+        n => format!("{n} sessions will end"),
+    }
+}
+
+fn unsaved_lost_phrase(count: usize) -> String {
+    match count {
+        1 => "1 unsaved file will be lost".to_string(),
+        n => format!("{n} unsaved files will be lost"),
     }
 }
 

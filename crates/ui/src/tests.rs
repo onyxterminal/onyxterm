@@ -443,10 +443,44 @@ fn discard_pane_copy_names_the_file_and_is_destructive() {
 #[test]
 fn discard_tab_copy_counts_unsaved_files() {
     use crate::confirm::discard_tab_copy;
-    let copy = discard_tab_copy(2);
+    let copy = discard_tab_copy(2, false);
     assert!(copy.body.contains("2 unsaved files"));
     assert!(copy.is_destructive);
     assert_eq!(copy.action, "Close tab");
+}
+
+#[test]
+fn discard_tab_copy_warns_about_running_processes_only_when_present() {
+    use crate::confirm::discard_tab_copy;
+    assert_eq!(discard_tab_copy(1, false).body, "This tab has 1 unsaved file.");
+    assert_eq!(
+        discard_tab_copy(1, true).body,
+        "This tab has 1 unsaved file. Running processes in this tab will be terminated."
+    );
+}
+
+#[test]
+fn quit_copy_full_bodies_are_complete_sentences() {
+    use crate::confirm::quit_copy;
+    assert_eq!(quit_copy(0, 2).body, "2 unsaved files will be lost.");
+    assert_eq!(quit_copy(0, 1).body, "1 unsaved file will be lost.");
+    assert_eq!(quit_copy(1, 1).body, "1 session will end and 1 unsaved file will be lost.");
+    assert_eq!(quit_copy(2, 0).body, "2 sessions will end.");
+    assert!(quit_copy(0, 1).is_destructive);
+    assert!(!quit_copy(1, 0).is_destructive);
+}
+
+#[test]
+fn delete_workspace_copy_full_bodies_are_complete_sentences() {
+    use crate::confirm::delete_workspace_copy;
+    assert_eq!(
+        delete_workspace_copy("Code", 0, 3).body,
+        "Its tabs and layout are removed. 3 unsaved files will be lost."
+    );
+    assert_eq!(
+        delete_workspace_copy("Code", 2, 1).body,
+        "Its tabs and layout are removed. 2 sessions will end and 1 unsaved file will be lost."
+    );
 }
 
 #[test]

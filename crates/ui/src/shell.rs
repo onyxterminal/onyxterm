@@ -606,14 +606,17 @@ impl Shell {
             self.pending = Some(Confirmation::DiscardTab(id));
             return;
         }
-        let is_busy = leaves
-            .iter()
-            .any(|panel| self.panes.get(panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job()));
-        if is_busy {
+        if self.has_running_processes(&leaves) {
             self.pending = Some(Confirmation::CloseTab(id));
             return;
         }
         self.close_tab(id, cx);
+    }
+
+    fn has_running_processes(&self, panels: &[PanelId]) -> bool {
+        panels
+            .iter()
+            .any(|panel| self.panes.get(panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job()))
     }
 
     fn unsaved_count(&self, panels: impl Iterator<Item = PanelId>) -> usize {
@@ -654,18 +657,18 @@ impl Shell {
             Confirmation::ClosePane(_) => close_pane_copy(),
             Confirmation::CloseTab(_) => close_tab_copy(),
             Confirmation::DiscardPane(panel) => {
-                let name = self.documents.get(&panel).map(|doc| document_title(doc.path())).unwrap_or_default();
+                let name = self.documents.get(&panel).map(|doc| document_title(doc.path())).unwrap_or_else(|| "This file".to_string());
                 discard_pane_copy(&name)
             }
             Confirmation::DiscardTab(id) => {
-                let unsaved = self
+                let leaves = self
                     .model
                     .tabs()
                     .iter()
                     .find(|tab| tab.id() == id)
-                    .map(|tab| self.unsaved_count(tab.layout().leaves().into_iter()))
-                    .unwrap_or(0);
-                discard_tab_copy(unsaved)
+                    .map(|tab| tab.layout().leaves())
+                    .unwrap_or_default();
+                discard_tab_copy(self.unsaved_count(leaves.iter().copied()), self.has_running_processes(&leaves))
             }
             Confirmation::Quit { sessions, unsaved } => quit_copy(sessions, unsaved),
             Confirmation::DeleteWorkspace(id) => {
@@ -681,13 +684,17 @@ impl Shell {
         self.panes.len()
     }
 
+    fn needs_quit_confirmation(&self) -> bool {
+        self.live_session_count() > 0 || self.unsaved_count(self.documents.keys().copied()) > 0
+    }
+
     fn request_quit(&mut self, cx: &mut Context<Self>) {
-        let sessions = self.live_session_count();
-        let unsaved = self.unsaved_count(self.documents.keys().copied());
-        if sessions == 0 && unsaved == 0 {
+        if !self.needs_quit_confirmation() {
             cx.quit();
             return;
         }
+        let sessions = self.live_session_count();
+        let unsaved = self.unsaved_count(self.documents.keys().copied());
         self.pending = Some(Confirmation::Quit { sessions, unsaved });
     }
 
@@ -1144,7 +1151,7 @@ pub fn open_shell_window(
             let Some(shell) = guarded.upgrade() else {
                 return true;
             };
-            let is_idle = shell.read(cx).live_session_count() == 0;
+            let is_idle = !shell.read(cx).needs_quit_confirmation();
             if !is_idle {
                 shell.update(cx, |shell, cx| {
                     shell.request_quit(cx);

@@ -304,8 +304,10 @@ fn register_editor_mouse_handlers(
         if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
             return;
         }
-        up_view.borrow_mut().is_selecting = false;
-        up_view.borrow_mut().last_click_mode = None;
+        let mut view_mut = up_view.borrow_mut();
+        view_mut.is_selecting = false;
+        view_mut.last_click_mode = None;
+        drop(view_mut);
         up_handler(PointerEvent::Up, window, cx);
     });
     let scroll_handler = on_pointer.clone();
