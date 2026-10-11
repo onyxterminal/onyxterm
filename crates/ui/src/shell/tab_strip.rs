@@ -262,7 +262,7 @@ fn strip_button(id: &'static str, theme: &Theme) -> Stateful<Div> {
         .items_center()
         .cursor_pointer()
         .rounded(px(theme.top_bar.control_radius_px))
-        .hover(move |button| button.bg(hover_fill))
+        .hover(move |style| style.bg(hover_fill))
 }
 
 fn strip_separator(theme: &Theme) -> Div {

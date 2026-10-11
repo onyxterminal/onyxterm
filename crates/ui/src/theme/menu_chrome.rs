@@ -50,7 +50,7 @@ pub fn menu_row(id: impl Into<ElementId>, style: MenuRowStyle, theme: &Theme) ->
         .cursor_pointer()
         .text_color(text_color)
         .when(style.is_highlighted, |row| row.bg(highlight).text_color(inverse))
-        .hover(move |row| row.bg(highlight).text_color(inverse))
+        .hover(move |style| style.bg(highlight).text_color(inverse))
 }
 
 pub fn menu_shortcut(text: impl Into<SharedString>, style: &MenuRowStyle, theme: &Theme) -> Div {

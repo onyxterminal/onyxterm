@@ -139,7 +139,7 @@ fn row_button(
         .items_center()
         .justify_center()
         .rounded(px(header.icon_button_radius_px))
-        .hover(move |button| button.bg(hover_fill))
+        .hover(move |style| style.bg(hover_fill))
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
             cx.stop_propagation();
             on_click(window, cx);
