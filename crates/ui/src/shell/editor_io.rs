@@ -120,9 +120,7 @@ impl Shell {
         let text_width = f32::from(layout.viewport.width);
         let new_scroll_top = scroll_to_reveal(scroll_top, line_index, line_height, viewport_height);
         let horizontal = HorizontalViewport { scroll_left, text_width, margin: f32::from(layout.line_height) };
-        let new_scroll_left = layout
-            .laid_line(line_index)
-            .map_or(scroll_left, |laid| horizontal.scroll_left_revealing(f32::from(laid.x_revealing_char(rope, rel))));
+        let new_scroll_left = horizontal.scroll_left_revealing(f32::from(layout.x_revealing(rope, line_index, rel)));
         let mut view_mut = pane.view.borrow_mut();
         view_mut.scroll_top = new_scroll_top;
         view_mut.scroll_left = new_scroll_left;
