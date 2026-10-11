@@ -98,19 +98,19 @@ Built-in grammars are linked natively in v1. Loading `.wasm` grammars from downl
 
 Today `Pane` in `ui/src/shell.rs:62` is terminal-only, and about 15 `Shell` methods assume a PTY.
 
-- Domain: `PanelKind` gains `Editor` and `FileTree`. `ResourceRef` gains `Path(PathBuf)`. Constructors `Panel::new_editor(path)` and `Panel::new_file_tree(root)`.
-- UI: `Pane` becomes `enum Pane { Terminal(TerminalPaneState), Editor(EditorPane), FileTree(FileTreePane) }`. Every terminal-only method in the scout list (`spawn_restored`, `sync_live_cwds`, `send_key_to_terminal`, `drop_paths`, `focused_handle`, close/confirm, `panel_cwd`, `discard_pane`, `apply_batch`, `render_pane`, `islands::sync_grids`, `pane_status`, `copy_mode`, `text_input`) matches on the kind and either handles it or skips non-terminals.
+- Domain: `PanelKind` gains `Editor` and `FileTree`. `ResourceRef` gains `Document(DocumentId)`; the path is `PanelSnapshot.path: Option<PathBuf>`. Constructors `Panel::new_editor(path)` and `Panel::new_file_tree(root)`.
+- UI: non-terminal panes live in `Shell.documents: HashMap<PanelId, DocumentPane>`; terminal code paths are unchanged. Every terminal-only method in the scout list (`spawn_restored`, `sync_live_cwds`, `send_key_to_terminal`, `drop_paths`, `focused_handle`, close/confirm, `panel_cwd`, `discard_pane`, `apply_batch`, `render_pane`, `islands::sync_grids`, `pane_status`, `copy_mode`, `text_input`) matches on the kind and either handles it or skips non-terminals.
 - Key routing: `Shell::consume_key` keeps its order (dialogs → menus → palette → keymap → copy mode); after the global keymap, the key goes to the focused pane's kind instead of straight to the terminal.
 - IME: `Shell`'s `EntityInputHandler` delegates to the focused pane's kind; the editor supplies its own `bounds_for_range` from the cursor.
 - Closing an editor with unsaved changes uses the existing confirm dialog (`ui/src/confirm.rs`) with Save / Discard / Cancel. Quit with unsaved buffers asks the same.
-- `restore_policy` fallbacks (`fall_back_missing_panel_cwds`, `fill_missing_panels`, `fresh_terminal`) apply only to terminals. An editor whose file no longer exists restores as a "file not found" editor pane; a file tree whose root is gone closes.
+- `restore_policy` fallbacks (`fall_back_missing_panel_cwds`, `fill_missing_panels`, `fresh_terminal`) apply only to terminals. An editor whose file no longer exists restores as a "file not found" editor pane; a file tree whose root is gone shows a 'not found' placeholder.
 
 Done when: every existing test passes, terminals behave identically, and a stub editor pane can be split, focused, moved, closed and restored.
 
 ## Persistence
 
 - Migration v4 adds `panels.path TEXT NULL`.
-- `ResourceRef::Path(p)` stores `resource_kind = 'path'`, the panel id as `resource_id`, and `p` in `path`.
+- `ResourceRef::Document(id)` stores `resource_kind = 'Document'` and the document id; the path is stored in `panels.path`.
 - The codec (`persistence/src/codec.rs:41-79`) gains `editor` / `file_tree` kind strings and the `path` resource.
 - `PanelSnapshot` carries the path through `write_snapshot` / `load_snapshot`.
 - Restore reopens the file from disk; unsaved edits are never persisted (quit already confirmed them).

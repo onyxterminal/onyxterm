@@ -46,6 +46,8 @@ pub enum CommandId {
     PrevWorkspace,
     OpenWorkspaceMenu,
     ToggleCopyMode,
+    OpenFile,
+    OpenFolder,
 }
 
 impl CommandId {
@@ -234,6 +236,8 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(EqualizePanes, "Equalize Panes", "Panes", no_op).build(),
         Command::builder(RenamePane, "Rename Pane", "Panes", no_op).build(),
         Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),
+        Command::builder(OpenFile, "Open File…", "Files", no_op).build(),
+        Command::builder(OpenFolder, "Open Folder…", "Files", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
         Command::builder(NextWorkspace, "Next Workspace", "Workspaces", no_op).build(),

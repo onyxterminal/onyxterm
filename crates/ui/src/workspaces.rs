@@ -118,6 +118,14 @@ impl WorkspaceModel {
         self.panels.get(&id)
     }
 
+    pub fn is_document(&self, id: PanelId) -> bool {
+        self.panels.get(&id).is_some_and(|record| record.panel.is_document())
+    }
+
+    pub fn focused_document(&self) -> Option<PanelId> {
+        self.tabs().active().map(|tab| tab.focused()).filter(|panel| self.is_document(*panel))
+    }
+
     pub fn panel_mut(&mut self, id: PanelId) -> Option<&mut PanelSnapshot> {
         self.panels.get_mut(&id)
     }

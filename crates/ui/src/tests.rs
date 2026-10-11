@@ -1174,3 +1174,10 @@ fn copy_mode_maps_vim_keys_to_actions() {
     let map = Keymap::default();
     assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "c")), Some(CommandId::ToggleCopyMode));
 }
+
+#[test]
+fn cmd_shift_o_opens_folder() {
+    let keymap = Keymap::default();
+    let combo = Combo::new(Modifiers::command_shift(), "o");
+    assert_eq!(keymap.resolve(&combo), Some(CommandId::OpenFolder));
+}

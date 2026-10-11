@@ -29,6 +29,7 @@ pub fn app_menus() -> Vec<Menu> {
         menu("Onyxterm", &[Some((About, "About Onyxterm")), Some((OpenSettings, "Settings\u{2026}")), None, Some((Hide, "Hide Onyxterm")),
             Some((HideOthers, "Hide Others")), Some((ShowAll, "Show All")), None, Some((Quit, "Quit Onyxterm"))]),
         menu("File", &[Some((NewTab, "New Tab")), Some((NewWorkspace, "New Workspace\u{2026}")), None,
+            Some((OpenFile, "Open File\u{2026}")), Some((OpenFolder, "Open Folder\u{2026}")), None,
             Some((CloseActive, "Close Pane")), Some((CloseTab, "Close Tab"))]),
         menu("Edit", &[Some((Copy, "Copy")), Some((Paste, "Paste")), Some((SelectAll, "Select All"))]),
         menu("View", &[Some((SplitRight, "Split Right")), Some((SplitDown, "Split Down")),

@@ -318,3 +318,43 @@ fn workspaces_resolve_by_index_and_neighbors_wrap_in_entry_order() {
     model.switch_to(order[order.len() - 1]);
     assert_eq!(model.neighbor_workspace_id(1), order[0]);
 }
+
+fn editor_snapshot(panel: PanelId, file: &Path) -> PanelSnapshot {
+    PanelSnapshot {
+        panel: Panel::new_editor(panel, "main.rs".to_string()),
+        cwd: file.parent().map(Path::to_path_buf).unwrap_or_default(),
+        name: None,
+        path: Some(file.to_path_buf()),
+    }
+}
+
+#[test]
+fn document_panels_are_not_spawned_as_terminals() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    let terminal = open_terminal_tab(&mut model, home.path());
+    let editor = PanelId::new();
+    model.add_panel(editor_snapshot(editor, &home.path().join("main.rs")));
+    model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, editor).expect("split");
+
+    let to_spawn: Vec<PanelId> =
+        model.panels_to_spawn(|_| false).into_iter().filter(|panel| !model.is_document(*panel)).collect();
+
+    assert_eq!(to_spawn, vec![terminal]);
+    assert!(model.is_document(editor));
+    assert!(!model.is_document(terminal));
+}
+
+#[test]
+fn focused_document_has_no_terminal_handle() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    open_terminal_tab(&mut model, home.path());
+    let editor = PanelId::new();
+    model.add_panel(editor_snapshot(editor, &home.path().join("main.rs")));
+    model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, editor).expect("split");
+
+    assert_eq!(model.focused_document(), Some(editor));
+    model.tabs_mut().active_mut().expect("tab").focus_next();
+    assert_eq!(model.focused_document(), None);
+}

@@ -7,6 +7,7 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
+use crate::document::{render_document, DocumentPane};
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
@@ -99,6 +100,7 @@ pub struct Shell {
     focus_handle: FocusHandle,
     model: WorkspaceModel,
     panes: HashMap<PanelId, Pane>,
+    documents: HashMap<PanelId, DocumentPane>,
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
@@ -136,6 +138,7 @@ impl Shell {
             focus_handle: cx.focus_handle(),
             model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
             panes: HashMap::new(),
+            documents: HashMap::new(),
             pending: None,
             is_workspace_menu_open: false,
             menu_field: None,
@@ -191,9 +194,38 @@ impl Shell {
         if self.model.tabs().is_empty() {
             self.open_tab(cx);
         }
-        for panel in self.model.panels_to_spawn(|panel| self.panes.contains_key(&panel)) {
-            self.spawn_restored(panel, cx);
+        let missing = self
+            .model
+            .panels_to_spawn(|panel| self.panes.contains_key(&panel) || self.documents.contains_key(&panel));
+        for panel in missing {
+            if self.model.is_document(panel) {
+                self.restore_document(panel);
+            } else {
+                self.spawn_restored(panel, cx);
+            }
         }
+    }
+
+    fn restore_document(&mut self, panel: PanelId) {
+        if let Some(document) = self.model.panel(panel).and_then(DocumentPane::from_snapshot) {
+            self.documents.insert(panel, document);
+        }
+    }
+
+    fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
+        let id = panel.id;
+        let cwd = path.parent().map(Path::to_path_buf).unwrap_or_else(|| self.model.active_root());
+        self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path) });
+        self.restore_document(id);
+        let Some(tab) = self.model.tabs_mut().active_mut() else {
+            return;
+        };
+        if let Err(err) = tab.split_focused(Axis::Horizontal, id) {
+            tracing::warn!(?err, "open document failed");
+            self.discard_pane(id, cx);
+            return;
+        }
+        self.persist();
     }
 
     fn spawn_restored(&mut self, panel: PanelId, cx: &mut Context<Self>) {
@@ -269,6 +301,8 @@ impl Shell {
             }
             CommandId::MoveToNewTab => self.move_focused_to_new_tab(),
             CommandId::ToggleCopyMode => self.toggle_copy_mode(),
+            CommandId::OpenFile => self.prompt_open(false, cx),
+            CommandId::OpenFolder => self.prompt_open(true, cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -319,6 +353,9 @@ impl Shell {
         }
         if self.state.palette_visible {
             return !is_composed_text(keystroke, false);
+        }
+        if self.model.focused_document().is_some() {
+            return false;
         }
         if self.is_copy_mode_active() {
             return self.handle_copy_mode_key(keystroke, cx);
@@ -641,6 +678,37 @@ impl Shell {
         }
     }
 
+    fn prompt_open(&mut self, is_folder: bool, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: !is_folder,
+            directories: is_folder,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |shell, cx| {
+            let Ok(Ok(Some(mut picked))) = paths.await else {
+                return;
+            };
+            let Some(path) = picked.pop() else {
+                return;
+            };
+            let updated = shell.update(cx, |shell, cx| {
+                let title = crate::document::document_title(&path);
+                let panel = if is_folder {
+                    Panel::new_file_tree(PanelId::new(), title)
+                } else {
+                    Panel::new_editor(PanelId::new(), title)
+                };
+                shell.open_document(panel, path, cx);
+                cx.notify();
+            });
+            if let Err(err) = updated {
+                tracing::debug!(?err, "shell dropped before open finished");
+            }
+        })
+        .detach();
+    }
+
     fn split_focused(&mut self, axis: Axis, cx: &mut Context<Self>) {
         let Some(focused) = self.model.tabs().active().map(|tab| tab.focused()) else {
             return;
@@ -732,6 +800,7 @@ impl Shell {
     }
 
     fn discard_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        self.documents.remove(&panel);
         let Some(pane) = self.panes.remove(&panel) else {
             return;
         };
@@ -821,13 +890,17 @@ impl Shell {
     }
 
     fn render_pane(&self, panel: PanelId, cx: &mut Context<Self>) -> AnyElement {
-        let Some(pane) = self.panes.get(&panel) else {
+        let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
+        let content = if let Some(document) = self.documents.get(&panel) {
+            render_document(document, &self.state.theme)
+        } else if let Some(pane) = self.panes.get(&panel) {
+            terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)))
+                .into_any_element()
+        } else {
             return div().into_any_element();
         };
-        let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
         let header = self.render_pane_header(panel, is_focused, cx);
         let look = self.island_look(panel);
-        let terminal = terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)));
         islands::island_card(&self.state.theme)
             .group(islands::pane_group(panel))
             .on_mouse_down(
@@ -839,7 +912,7 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .child(islands::island_content(look, terminal))
+            .child(islands::island_content(look, content))
             .child(header)
             .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))
