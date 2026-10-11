@@ -140,6 +140,23 @@ pub(crate) fn line_end(rope: &Rope, offset: usize) -> usize {
     rope.line_to_char(line) + line_len(rope, line)
 }
 
+pub(crate) fn word_range(rope: &Rope, offset: usize) -> std::ops::Range<usize> {
+    let len = rope.len_chars();
+    let probe = if offset < len { offset } else { offset.saturating_sub(1) };
+    let Some(target) = (len > 0).then(|| class(rope.char(probe))) else {
+        return offset..offset;
+    };
+    let mut start = probe;
+    while start > 0 && class(rope.char(start - 1)) == target {
+        start -= 1;
+    }
+    let mut end = probe;
+    while end < len && class(rope.char(end)) == target {
+        end += 1;
+    }
+    start..end
+}
+
 fn horizontal(rope: &Rope, head: usize, motion: Motion) -> usize {
     match motion {
         Motion::Left => prev_grapheme(rope, head),

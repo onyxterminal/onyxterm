@@ -40,6 +40,10 @@ impl Buffer {
         self.saved_version = self.version;
     }
 
+    pub(crate) fn mark_saved_at(&mut self, version: u64) {
+        self.saved_version = version;
+    }
+
     pub fn line_ending(&self) -> LineEnding {
         self.line_ending
     }

@@ -1,7 +1,7 @@
 use crate::buffer::{Buffer, CRLF, LF};
 use crate::edit::{Bias, Change, Edit};
 use crate::history::{EditKind, History, Record};
-use crate::motion::{line_end, line_start, move_selection, next_grapheme, prev_grapheme, word_left, word_right, Motion};
+use crate::motion::{line_end, line_start, move_selection, next_grapheme, prev_grapheme, word_left, word_range, word_right, Motion};
 use crate::selection::{Selection, Selections};
 use ropey::Rope;
 use std::time::Instant;
@@ -13,6 +13,15 @@ const INDENT_WIDTH: usize = 4;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Granularity {
     Char,
+    Word,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClickMode {
+    Place,
+    Extend,
+    AddCursor,
     Word,
     Line,
 }
@@ -68,6 +77,29 @@ impl Editor {
 
     pub fn mark_saved(&mut self) {
         self.buffer.mark_saved();
+    }
+
+    pub fn mark_saved_at(&mut self, version: u64) {
+        self.buffer.mark_saved_at(version);
+    }
+
+    pub fn click(&mut self, offset: usize, mode: ClickMode) {
+        let rope = self.buffer.rope();
+        let offset = offset.min(rope.len_chars());
+        self.selections = match mode {
+            ClickMode::Place => Selections::single(Selection::cursor(offset)),
+            ClickMode::Extend => Selections::single(Selection::new(self.selections.newest().anchor, offset)),
+            ClickMode::AddCursor => self.selections.with(Selection::cursor(offset)),
+            ClickMode::Word => {
+                let range = word_range(rope, offset);
+                Selections::single(Selection::new(range.start, range.end))
+            }
+            ClickMode::Line => {
+                let start = line_start(rope, offset);
+                let end = (line_end(rope, offset) + 1).min(rope.len_chars());
+                Selections::single(Selection::new(start, end))
+            }
+        };
     }
 
     pub fn apply(&mut self, action: EditorAction, now: Instant) -> Option<String> {
@@ -535,5 +567,41 @@ mod tests {
         editor.set_selections(Selections::single(Selection::cursor(0)));
         editor.paste("x\r\ny", Instant::now());
         assert_eq!(editor.buffer().to_saved_text(), "x\r\nya\r\nb");
+    }
+
+    #[test]
+    fn mark_saved_at_an_old_version_keeps_the_buffer_dirty() {
+        let mut editor = editor_with("a", &[1]);
+        editor.apply(EditorAction::InsertText("b".into()), Instant::now());
+        let saved_version = editor.buffer().version();
+        editor.apply(EditorAction::InsertText("c".into()), Instant::now() + std::time::Duration::from_secs(1));
+        editor.mark_saved_at(saved_version);
+        assert!(editor.buffer().is_dirty());
+        editor.mark_saved_at(editor.buffer().version());
+        assert!(!editor.buffer().is_dirty());
+    }
+
+    #[test]
+    fn clicks_place_extend_add_and_select_words_and_lines() {
+        let mut editor = editor_with("foo bar\nbaz", &[0]);
+        editor.click(5, ClickMode::Place);
+        assert_eq!(editor.selections().as_slice(), &[Selection::cursor(5)]);
+        editor.click(2, ClickMode::Extend);
+        assert_eq!(editor.selections().as_slice(), &[Selection::new(5, 2)]);
+        editor.click(9, ClickMode::AddCursor);
+        assert_eq!(editor.selections().len(), 2);
+        editor.click(5, ClickMode::Word);
+        assert_eq!(editor.selections().as_slice(), &[Selection::new(4, 7)]);
+        editor.click(1, ClickMode::Line);
+        assert_eq!(editor.selections().as_slice(), &[Selection::new(0, 8)]);
+        editor.click(10, ClickMode::Line);
+        assert_eq!(editor.selections().as_slice(), &[Selection::new(8, 11)]);
+    }
+
+    #[test]
+    fn word_click_on_whitespace_selects_the_whitespace_run() {
+        let mut editor = editor_with("a   b", &[0]);
+        editor.click(2, ClickMode::Word);
+        assert_eq!(editor.selections().as_slice(), &[Selection::new(1, 4)]);
     }
 }
