@@ -61,19 +61,13 @@ impl FrameLayout {
         let Some(laid) = self.laid_line(line) else {
             return self.x_at_column(display_column_at(current.chunks(), char));
         };
-        if !laid.is_windowed() {
-            return laid.x_at_char(char);
-        }
-        let known = char.min(laid.window.end);
-        let is_known_unchanged = char >= laid.window.start && self.shares_line_prefix(rope, line, known);
-        if !is_known_unchanged {
+        let window_start = laid.window.start;
+        let is_prefix_unchanged = char >= window_start && self.shares_line_prefix(rope, line, window_start);
+        if !is_prefix_unchanged {
             return self.x_at_column(display_column_at(current.chunks(), char));
         }
-        if char <= laid.window.end {
-            return laid.x_at_char(char);
-        }
-        let edge = ColumnCursor { char: laid.window.end, column: laid.window_columns.end };
-        self.x_at_column(column_from(edge, current.slice(laid.window.end..char).chunks(), char))
+        let start = ColumnCursor { char: window_start, column: laid.window_columns.start };
+        self.x_at_column(column_from(start, current.slice(window_start..char).chunks(), char))
     }
 
     fn shares_line_prefix(&self, rope: &Rope, line: usize, chars: usize) -> bool {
@@ -101,7 +95,7 @@ impl FrameLayout {
         self.text_origin.y + self.line_height * (laid.line - self.first_line) as f32
     }
 
-    fn caret_bounds(&self, rope: &Rope, head: usize, width: Pixels) -> Option<Bounds<Pixels>> {
+    fn caret_bounds(&self, rope: &Rope, head: usize) -> Option<Bounds<Pixels>> {
         let offset = head.min(rope.len_chars());
         let laid = self.laid_line(rope.char_to_line(offset))?;
         let column = offset - laid.start_char;
@@ -109,7 +103,7 @@ impl FrameLayout {
             return None;
         }
         let x = self.text_origin.x + laid.x_at_char(column);
-        Some(Bounds::new(point(x, self.row_y(laid)), size(width, self.line_height)))
+        Some(Bounds::new(point(x, self.row_y(laid)), size(self.cell_width, self.line_height)))
     }
 }
 
@@ -709,7 +703,7 @@ fn prepare_state(
         rope: frame.rope.clone(),
         cell_width: cell.width,
     };
-    layout.cursor_bounds = layout.caret_bounds(&frame.rope, head, cell.width);
+    layout.cursor_bounds = layout.caret_bounds(&frame.rope, head);
     let layout = Rc::new(layout);
     view_ref.layout = Some(layout.clone());
     CanvasState {
@@ -1027,6 +1021,7 @@ mod tests {
         assert_eq!(window.chars, start..end);
         assert_eq!(window.columns.start, start);
         assert_eq!(window.display.text.len(), end - start);
+        assert_eq!(window.columns.end, display_column_at(std::iter::once(text.as_str()), window.chars.end));
     }
 
     #[test]
@@ -1132,12 +1127,12 @@ mod tests {
         px(TEST_CELL * display_column_at(rope.line(0).chunks(), char) as f32)
     }
 
-    fn rope_with_laid_end_window(edge_column_skew: usize) -> (Rope, LaidLine) {
+    fn rope_with_laid_end_window(start_column_skew: usize) -> (Rope, LaidLine) {
         let rope = Rope::from_str(&long_line("\t\tab\t"));
         let len = line_len(&rope, 0);
         let window_start = len - 100;
-        let start_column = display_column_at(rope.line(0).chunks(), window_start);
-        let end_column = display_column_at(rope.line(0).chunks(), len) + edge_column_skew;
+        let start_column = display_column_at(rope.line(0).chunks(), window_start) + start_column_skew;
+        let end_column = display_column_at(rope.line(0).chunks(), len) + start_column_skew;
         (rope, laid_window(window_start..len, start_column..end_column, len))
     }
 
@@ -1155,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn typing_past_the_window_edge_counts_columns_from_the_edge() {
+    fn typing_past_the_window_counts_columns_from_the_window_start() {
         let skew = 100;
         let (before, laid) = rope_with_laid_end_window(skew);
         let layout = layout_of(&before, vec![laid]);
@@ -1164,6 +1159,28 @@ mod tests {
         after.insert(len, "\ty");
         let expected = walked_x(&after, len + 2) + px(TEST_CELL * skew as f32);
         assert_eq!(layout.x_revealing(&after, 0, len + 2), expected);
+    }
+
+    #[test]
+    fn an_edit_inside_the_window_counts_columns_from_the_window_start() {
+        let skew = 100;
+        let (before, laid) = rope_with_laid_end_window(skew);
+        let edit_at = laid.window.start + 10;
+        let layout = layout_of(&before, vec![laid]);
+        let mut after = before.clone();
+        after.insert(edit_at, "\t\t");
+        let len = line_len(&after, 0);
+        assert_eq!(layout.x_revealing(&after, 0, len), walked_x(&after, len) + px(TEST_CELL * skew as f32));
+    }
+
+    #[test]
+    fn tabs_typed_at_the_end_of_a_short_line_reveal_at_their_expanded_column() {
+        let before = Rope::from_str("abc");
+        let layout = layout_of(&before, vec![laid_window(0..3, 0..3, 3)]);
+        let mut after = before.clone();
+        after.insert(3, "\t\t\t");
+        assert_eq!(layout.x_revealing(&after, 0, 6), walked_x(&after, 6));
+        assert_eq!(walked_x(&after, 6), px(TEST_CELL * 12.0));
     }
 
     #[test]
@@ -1236,6 +1253,7 @@ mod tests {
         for first in [0, 70, 1000, 7777, 20_000] {
             let visible = VisibleColumns { first, count: 80 };
             let window = line_window(rope.line(0).chunks(), len, visible);
+            assert_eq!(window.columns.end, display_column_at(rope.line(0).chunks(), window.chars.end));
             let (start_char, start_column) = walked_window_start(text, first.saturating_sub(SHAPE_MARGIN_COLUMNS));
             assert_eq!(window.chars.start, start_char, "first {first}");
             assert_eq!(window.columns.start, start_column, "first {first}");
