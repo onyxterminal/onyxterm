@@ -52,6 +52,10 @@ impl FileTree {
     }
 
     pub fn set_children(&mut self, dir: &Path, entries: Vec<Entry>) {
+        let removed_dirs = self.removed_subdirectories(dir, &entries);
+        for removed in &removed_dirs {
+            self.forget_subtree(removed);
+        }
         self.children.insert(dir.to_path_buf(), entries);
         self.rebuild_rows();
     }
@@ -110,6 +114,23 @@ impl FileTree {
             .filter(|dir| changed.iter().any(|path| path.parent() == Some(dir.as_path())))
             .cloned()
             .collect()
+    }
+
+    fn removed_subdirectories(&self, dir: &Path, entries: &[Entry]) -> Vec<PathBuf> {
+        let Some(previous) = self.children.get(dir) else {
+            return Vec::new();
+        };
+        let kept_dirs: HashSet<&PathBuf> = entries.iter().filter(|entry| entry.is_dir).map(|entry| &entry.path).collect();
+        previous
+            .iter()
+            .filter(|entry| entry.is_dir && !kept_dirs.contains(&entry.path))
+            .map(|entry| entry.path.clone())
+            .collect()
+    }
+
+    fn forget_subtree(&mut self, removed: &Path) {
+        self.children.retain(|path, _| !path.starts_with(removed));
+        self.expanded.retain(|path| !path.starts_with(removed));
     }
 
     fn rebuild_rows(&mut self) {
@@ -242,6 +263,50 @@ mod tests {
 
         assert_eq!(tree.dirs_needing_refresh(&changed), vec![PathBuf::from("/r"), PathBuf::from("/r/src")]);
         assert!(tree.dirs_needing_refresh(&[PathBuf::from("/r/docs/x")]).is_empty());
+    }
+
+    #[test]
+    fn refresh_covers_expanded_unloaded_and_loaded_collapsed_directories() {
+        let mut tree = sample_tree();
+        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+        tree.select_path(&PathBuf::from("/r/docs"));
+        assert_eq!(tree.toggle_selected(), TreeAction::Load(PathBuf::from("/r/docs")));
+
+        assert_eq!(tree.dirs_needing_refresh(&[PathBuf::from("/r/docs/x")]), vec![PathBuf::from("/r/docs")]);
+        assert_eq!(tree.dirs_needing_refresh(&[PathBuf::from("/r/src/y")]), vec![PathBuf::from("/r/src")]);
+    }
+
+    #[test]
+    fn empty_tree_ignores_navigation() {
+        let mut tree = FileTree::new(root());
+
+        assert_eq!(tree.toggle_selected(), TreeAction::None);
+        tree.collapse_or_parent();
+        tree.move_selection(1);
+        tree.move_selection(-1);
+
+        assert!(tree.selected_row().is_none());
+        assert!(tree.rows().is_empty());
+    }
+
+    #[test]
+    fn dropping_a_directory_prunes_its_loaded_and_expanded_descendants() {
+        let mut tree = sample_tree();
+        tree.select_path(&PathBuf::from("/r/src"));
+        tree.toggle_selected();
+        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "lib", true)]);
+        tree.select_path(&PathBuf::from("/r/src/lib"));
+        tree.toggle_selected();
+        tree.set_children(&PathBuf::from("/r/src/lib"), vec![entry("/r/src/lib", "mod.rs", false)]);
+
+        tree.set_children(&root(), vec![entry("/r", "docs", true), entry("/r", "a.txt", false)]);
+
+        assert_eq!(tree.expanded_dirs(), vec![root()]);
+        assert!(tree.dirs_needing_refresh(&[PathBuf::from("/r/src/x"), PathBuf::from("/r/src/lib/y")]).is_empty());
+
+        tree.set_children(&root(), vec![entry("/r", "src", true)]);
+        assert_eq!(row_names(&tree), ["src"]);
+        assert!(!tree.rows()[0].is_expanded);
     }
 
     #[test]

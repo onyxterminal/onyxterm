@@ -8,9 +8,9 @@ publish = false
 [dependencies]
 domain = { path = "../domain" }
 editor-core = { path = "../editor-core" }
+fs-service = { path = "../fs-service" }
 terminal-core = { path = "../terminal-core" }
 workspace-service = { path = "../workspace-service" }
-fs-service = { path = "../fs-service" }
 gpui = { version = "=0.2.2", features = ["runtime_shaders"] }
 toml.workspace = true
 parking_lot.workspace = true
