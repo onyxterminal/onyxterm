@@ -7,7 +7,7 @@ use crate::command::{
 };
 use crate::input::{page_scroll_lines, wheel_bytes};
 use crate::keymap::{Combo, Keymap};
-use crate::theme::{hex_to_hsla, Theme};
+use crate::theme::{hex_to_hsla, Theme, ThemeKind};
 use crate::tabs::Tabs;
 use crate::terminal_view::{
     grid_point_at, grid_size_for, selection_kind_for, split_scroll, xterm_indexed_rgb, TerminalColors,
@@ -913,6 +913,16 @@ fn rgba_colors_parse_channels_and_alpha_and_reject_garbage() {
     assert!(parse_color("rgba(0,0,0)", "test.short").is_err());
     assert!(parse_color("rgba(0,0,0,x)", "test.bad").is_err());
     assert!(parse_color("rgba(0,0,0,1", "test.open").is_err());
+}
+
+#[test]
+fn every_builtin_theme_has_editor_tokens() {
+    for kind in ThemeKind::ALL {
+        let theme = Theme::load(kind).expect("theme loads");
+        assert!(theme.editor.cursor_width_px > 0.0);
+        assert!(theme.editor.gutter_padding_px > 0.0);
+        assert!(theme.editor.selection.a > 0.0);
+    }
 }
 
 #[test]

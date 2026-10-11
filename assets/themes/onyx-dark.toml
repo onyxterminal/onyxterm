@@ -75,6 +75,15 @@ icon_button_px = 20.0
 icon_button_radius_px = 5.0
 icon_px = 12.0
 
+[editor]
+gutter_text = "rgba(255,255,255,0.28)"
+gutter_text_active = "rgba(255,255,255,0.72)"
+current_line = "rgba(255,255,255,0.04)"
+selection = "rgba(120,175,255,0.30)"
+cursor = "#78AFFF"
+gutter_padding_px = 12.0
+cursor_width_px = 2.0
+
 [menu]
 width_px = 240.0
 radius_px = 10.0

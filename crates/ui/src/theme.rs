@@ -75,6 +75,7 @@ struct RawTheme {
     palette: PaletteTokens,
     dialog: DialogTokens,
     island: IslandTokens,
+    editor: EditorTokens,
     shadow: ShadowTokens,
 }
 
@@ -261,6 +262,7 @@ pub struct Theme {
     pub palette: PaletteTokens,
     pub dialog: DialogTokens,
     pub island: IslandTokens,
+    pub editor: EditorTokens,
     pub shadow: ShadowTokens,
 }
 
@@ -299,6 +301,7 @@ impl Theme {
         scale!(self.dialog, width_px, radius_px, button_height_px, button_radius_px);
         scale!(self.island, focus_ring_px, unfocused_border_px, pane_padding_x_px,
             pane_padding_top_px, pane_padding_bottom_px);
+        scale!(self.editor, gutter_padding_px, cursor_width_px);
         for shadow in self.shadow.card.iter_mut().chain(&mut self.shadow.tab)
             .chain(&mut self.shadow.menu).chain(&mut self.shadow.palette) {
             scale!(shadow, x, y, blur, spread);
@@ -375,6 +378,7 @@ impl Theme {
             palette: raw.palette,
             dialog: raw.dialog,
             island: raw.island,
+            editor: raw.editor,
             shadow: raw.shadow,
         })
     }
@@ -585,6 +589,22 @@ pub struct IslandTokens {
     pub pane_padding_x_px: f32,
     pub pane_padding_top_px: f32,
     pub pane_padding_bottom_px: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct EditorTokens {
+    #[serde(deserialize_with = "color")]
+    pub gutter_text: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub gutter_text_active: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub current_line: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub selection: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub cursor: Hsla,
+    pub gutter_padding_px: f32,
+    pub cursor_width_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
