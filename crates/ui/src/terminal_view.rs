@@ -292,6 +292,7 @@ fn prepare_frame(handle: &TerminalHandle, bounds: Bounds<Pixels>, style: &Termin
         if let Err(err) = handle.resize(grid.rows, grid.cols) {
             tracing::warn!(?err, "terminal resize failed");
         }
+        window.request_animation_frame();
     }
     Frame { snapshot: handle.snapshot_grid(), cell }
 }
