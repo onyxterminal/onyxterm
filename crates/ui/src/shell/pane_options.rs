@@ -1,12 +1,10 @@
 use super::{edit_field, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::motion::fade_in;
 use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuItem};
+use crate::theme::menu_chrome::{menu_panel, menu_row, menu_separator, menu_shortcut, MenuRowStyle};
 use domain::PanelId;
 use super::pane_drag::{bounds_probe, BoundsMap};
 use gpui::{div, prelude::*, px, AnyElement, Context, Keystroke, MouseButton, SharedString, Window};
-
-const MENU_WIDTH_PX: f32 = 240.0;
-const MENU_OFFSET_PX: f32 = 4.0;
 
 pub(super) type GearBounds = BoundsMap<PanelId>;
 
@@ -127,7 +125,7 @@ impl Shell {
         let rows: Vec<AnyElement> = entries
             .into_iter()
             .map(|entry| match entry {
-                PaneMenuEntry::Divider => div().my_1().h(px(1.0)).bg(theme.border_default()).into_any_element(),
+                PaneMenuEntry::Divider => menu_separator(theme).into_any_element(),
                 PaneMenuEntry::Item(item) => {
                     let row = self.pane_menu_row(item, index, index == menu.selected, cx);
                     index += 1;
@@ -135,23 +133,9 @@ impl Shell {
                 }
             })
             .collect();
-        let left = (anchor.right() - px(MENU_WIDTH_PX)).max(px(0.0));
-        let top = anchor.bottom() + px(MENU_OFFSET_PX);
-        let popover = div()
-            .absolute()
-            .left(left)
-            .top(top)
-            .w(px(MENU_WIDTH_PX))
-            .py_1()
-            .occlude()
-            .bg(theme.surface.raised)
-            .border_1()
-            .border_color(theme.border_default())
-            .rounded(px(theme.layout.island_radius_px))
-            .shadow_md()
-            .flex()
-            .flex_col()
-            .children(rows);
+        let left = (anchor.right() - px(theme.menu.width_px)).max(px(0.0));
+        let top = anchor.bottom() + px(theme.menu.offset_px);
+        let popover = div().absolute().left(left).top(top).occlude().child(menu_panel(theme).children(rows));
         let backdrop = div()
             .absolute()
             .inset_0()
@@ -163,21 +147,13 @@ impl Shell {
 
     fn pane_menu_row(&self, item: PaneMenuItem, index: usize, is_selected: bool, cx: &mut Context<Self>) -> AnyElement {
         let theme = &self.state.theme;
-        let hover_bg = theme.surface.subtle;
-        div()
-            .id(("pane-menu-item", index))
-            .mx_1()
-            .px_2()
-            .py_1()
-            .flex()
-            .flex_row()
-            .justify_between()
-            .gap_3()
-            .rounded(px(theme.layout.border_radius_px))
-            .cursor_pointer()
-            .text_color(theme.text_default())
-            .when(is_selected, |row| row.bg(hover_bg))
-            .hover(move |style| style.bg(hover_bg))
+        let style = MenuRowStyle {
+            group: SharedString::from(format!("pane-menu-item-{index}")),
+            is_highlighted: is_selected,
+            is_destructive: item.is_destructive(),
+        };
+        let shortcut = item.shortcut.map(|shortcut| menu_shortcut(shortcut, &style, theme));
+        menu_row(("pane-menu-item", index), style, theme)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
@@ -185,8 +161,8 @@ impl Shell {
                     shell.run_pane_menu_item(index, window, cx);
                 }),
             )
-            .child(item.title)
-            .children(item.shortcut.map(|shortcut| div().text_color(theme.text.muted).child(shortcut)))
+            .child(div().flex_1().child(item.title))
+            .children(shortcut)
             .into_any_element()
     }
 }
