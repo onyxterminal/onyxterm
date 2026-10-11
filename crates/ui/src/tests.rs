@@ -597,3 +597,50 @@ fn drop_zone_picks_the_nearest_edge_or_the_center() {
     assert_eq!(drop_zone_at(0.5, 0.05), DropZone::Top);
     assert_eq!(drop_zone_at(0.45, 0.95), DropZone::Bottom);
 }
+
+#[test]
+fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
+    use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry};
+    let map = Keymap::default();
+    let entries = pane_menu_entries(false, &map);
+    let rows: Vec<(String, Option<String>)> = entries
+        .iter()
+        .map(|entry| match entry {
+            PaneMenuEntry::Item(item) => (item.title.to_string(), item.shortcut.clone()),
+            PaneMenuEntry::Divider => ("-".to_string(), None),
+        })
+        .collect();
+    let expected = [
+        ("Split Right", Some("\u{2325}\u{2318}\u{2192}")),
+        ("Split Down", Some("\u{2325}\u{2318}\u{2193}")),
+        ("Maximize Pane", Some("\u{21e7}\u{2318}M")),
+        ("Rename Pane", None),
+        ("Move to New Tab", None),
+        ("-", None),
+        ("Close Pane", Some("\u{2318}W")),
+    ];
+    let expected: Vec<(String, Option<String>)> =
+        expected.iter().map(|(title, shortcut)| (title.to_string(), shortcut.map(str::to_string))).collect();
+    assert_eq!(rows, expected);
+    let restore = pane_menu_entries(true, &map);
+    assert!(matches!(&restore[2], PaneMenuEntry::Item(item) if item.title == "Restore Pane"));
+    let commands = selectable_commands(&entries);
+    assert_eq!(commands.len(), 6);
+    assert_eq!(commands.last(), Some(&CommandId::CloseActive));
+    assert_eq!(step_selection(0, -1, 6), 5);
+    assert_eq!(step_selection(5, 1, 6), 0);
+    assert_eq!(step_selection(2, 1, 6), 3);
+}
+
+#[test]
+fn move_to_new_tab_detaches_a_split_pane_and_rejects_a_lone_pane() {
+    let mut tabs = Tabs::default();
+    let (a, b) = (PanelId::new(), PanelId::new());
+    tabs.open(a);
+    tabs.active_mut().unwrap().split_focused(Axis::Horizontal, b).unwrap();
+    tabs.move_panel_to_new_tab(b).unwrap();
+    assert_eq!(tabs.len(), 2);
+    assert_eq!(tabs.active().unwrap().focused(), b);
+    assert!(tabs.move_panel_to_new_tab(b).is_err());
+    assert_eq!(tabs.len(), 2);
+}

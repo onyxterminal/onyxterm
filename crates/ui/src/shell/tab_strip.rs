@@ -21,10 +21,10 @@ impl Shell {
             .iter()
             .enumerate()
             .map(|(index, tab)| {
-                let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
+                let title = self.pane_display_title(tab.focused());
                 let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
                     Some(field) => format!("{}{CARET}", field.text),
-                    None => format!("{}  {}", index + 1, tab.name().unwrap_or(title)),
+                    None => format!("{}  {}", index + 1, tab.name().unwrap_or(&title)),
                 };
                 (label, index == active)
             })
@@ -132,8 +132,9 @@ impl Shell {
     }
 
     pub(super) fn commit_tab_field_on_click(&mut self, cx: &mut Context<Self>) {
-        if self.tab_field.is_some() {
+        if self.tab_field.is_some() || self.pane_field.is_some() {
             self.commit_tab_field();
+            self.commit_pane_field();
             cx.notify();
         }
     }

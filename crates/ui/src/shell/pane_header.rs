@@ -1,32 +1,34 @@
 use super::pane_drag::{DraggedPane, PaneGhost};
 use super::{short_cwd, Shell};
 use crate::command::CommandId;
+use crate::workspace_menu::CARET;
 use domain::{LayoutNode, PanelId};
-use gpui::{div, prelude::*, px, AnyElement, Context, Hsla, MouseButton, SharedString, Window};
+use gpui::{div, prelude::*, px, Context, Hsla, MouseButton, SharedString, Window};
 
-const ICON_WIDTH_PX: f32 = 12.0;
-const ICON_HEIGHT_PX: f32 = 10.0;
-const RESTORE_ICON_INSET_PX: f32 = 2.0;
 const CLOSE_GLYPH: &str = "\u{00d7}";
+const GEAR_GLYPH: &str = "\u{2699}\u{fe0e}";
+const GEAR_TOOLTIP: &str = "Pane Options";
+const CLOSE_TOOLTIP: &str = "Close Pane";
 
 impl Shell {
     pub(super) fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
-        let title = self.panes.get(&panel).map(|pane| pane.title.clone()).filter(|title| !title.is_empty());
-        let title = title.unwrap_or_else(|| workspace_service::DEFAULT_PANEL_TITLE.to_string());
+        let title = self.pane_display_title(panel);
         let cwd = short_cwd(&self.panel_cwd(panel), self.model.home());
         let title_color = if is_focused { theme.text_default() } else { theme.text.muted };
-        let is_maximized = self.model.tabs().active().is_some_and(|tab| tab.is_maximized());
-        let actions = [
-            HeaderAction { command: CommandId::SplitRight, tooltip: "Split Right" },
-            HeaderAction { command: CommandId::SplitDown, tooltip: "Split Down" },
-            HeaderAction {
-                command: CommandId::MaximizePane,
-                tooltip: if is_maximized { "Restore Pane" } else { "Maximize Pane" },
-            },
-            HeaderAction { command: CommandId::CloseActive, tooltip: "Close Pane" },
-        ];
-        let dragged = DraggedPane::new(panel, title.clone().into());
+        let editing = self.pane_field.as_ref().filter(|field| field.panel == panel);
+        let title_element = match editing {
+            Some(field) => div()
+                .flex_shrink()
+                .min_w(px(0.0))
+                .px_1()
+                .rounded(px(theme.layout.border_radius_px))
+                .border_1()
+                .border_color(theme.border_focus())
+                .child(format!("{}{CARET}", field.text)),
+            None => div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title.clone()),
+        };
+        let dragged = DraggedPane::new(panel, title.into());
         let ghost_style = self.ghost_style();
         div()
             .id(SharedString::from(format!("pane-header-{panel}")))
@@ -45,7 +47,7 @@ impl Shell {
             .rounded_t(px(theme.layout.island_radius_px))
             .border_b_1()
             .border_color(theme.border.muted)
-            .child(div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title))
+            .child(title_element)
             .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd))
             .child(
                 div()
@@ -53,25 +55,20 @@ impl Shell {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .children(actions.into_iter().map(|action| self.header_button(panel, action, is_maximized, cx))),
+                    .child(self.gear_button(panel, cx))
+                    .child(self.close_button(panel, cx)),
             )
     }
 
-    fn header_button(
-        &self,
-        panel: PanelId,
-        action: HeaderAction,
-        is_maximized: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn header_button(&self, id: String, tooltip: &'static str, glyph: &'static str) -> gpui::Stateful<gpui::Div> {
         let theme = &self.state.theme;
         let hover_bg = theme.surface.subtle;
-        let command = action.command;
-        let tooltip = SharedString::from(action.tooltip);
+        let tooltip = SharedString::from(tooltip);
         let colors = (theme.canvas(), theme.border_default(), theme.text_default());
         div()
-            .id(SharedString::from(format!("{}-{panel}", action.tooltip)))
-            .p_1()
+            .id(SharedString::from(id))
+            .relative()
+            .px_1()
             .flex()
             .items_center()
             .rounded(px(theme.layout.border_radius_px))
@@ -79,16 +76,31 @@ impl Shell {
             .text_color(theme.text.muted)
             .hover(move |style| style.bg(hover_bg))
             .tooltip(move |_window, cx| cx.new(|_| Tooltip { text: tooltip.clone(), colors }).into())
+            .child(glyph)
+    }
+
+    fn gear_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
+        self.header_button(format!("pane-gear-{panel}"), GEAR_TOOLTIP, GEAR_GLYPH)
+            .child(self.gear_bounds_probe(panel))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
                     cx.stop_propagation();
-                    shell.focus_pane(panel);
-                    window.focus(&shell.focus_handle);
-                    shell.run_command(command, window, cx);
+                    shell.toggle_pane_menu(panel, window, cx);
                 }),
             )
-            .child(header_icon(command, is_maximized, theme.text.muted))
+    }
+
+    fn close_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
+        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, CLOSE_GLYPH).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |shell, _event, window, cx| {
+                cx.stop_propagation();
+                shell.focus_pane(panel);
+                window.focus(&shell.focus_handle);
+                shell.run_command(CommandId::CloseActive, window, cx);
+            }),
+        )
     }
 
     pub(super) fn pane_border(&self, is_focused: bool) -> Hsla {
@@ -105,11 +117,6 @@ impl Shell {
     }
 }
 
-struct HeaderAction {
-    command: CommandId,
-    tooltip: &'static str,
-}
-
 struct Tooltip {
     text: SharedString,
     colors: (Hsla, Hsla, Hsla),
@@ -120,18 +127,4 @@ impl Render for Tooltip {
         let (bg, border, fg) = self.colors;
         div().px_2().py_1().rounded_md().shadow_md().bg(bg).border_1().border_color(border).text_color(fg).child(self.text.clone())
     }
-}
-
-fn header_icon(command: CommandId, is_maximized: bool, color: Hsla) -> AnyElement {
-    let frame = || div().w(px(ICON_WIDTH_PX)).h(px(ICON_HEIGHT_PX)).border_1().border_color(color).rounded_sm();
-    match command {
-        CommandId::SplitRight => frame().flex().flex_row().child(div().w_1_2().h_full().border_r_1().border_color(color)),
-        CommandId::SplitDown => frame().flex().flex_col().child(div().h_1_2().w_full().border_b_1().border_color(color)),
-        CommandId::MaximizePane if is_maximized => frame().p(px(RESTORE_ICON_INSET_PX)).child(
-            div().size_full().border_1().border_color(color),
-        ),
-        CommandId::MaximizePane => frame(),
-        _ => div().text_color(color).child(CLOSE_GLYPH),
-    }
-    .into_any_element()
 }

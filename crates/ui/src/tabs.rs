@@ -221,6 +221,16 @@ impl Tabs {
         }
     }
 
+    pub fn move_panel_to_new_tab(&mut self, panel: PanelId) -> Result<(), DomainError> {
+        let source = self.position_of(panel).ok_or_else(|| DomainError::PanelNotFound(panel.to_string()))?;
+        if self.tabs[source].is_single_panel() {
+            return Err(DomainError::InvalidLayout(format!("{panel} is already alone in its tab")));
+        }
+        self.tabs[source].remove_panel(panel)?;
+        self.open(panel);
+        Ok(())
+    }
+
     pub fn move_panel_to_tab(&mut self, panel: PanelId, target: usize) -> Result<(), DomainError> {
         let source = self.position_of(panel).ok_or_else(|| DomainError::PanelNotFound(panel.to_string()))?;
         if source == target || target >= self.tabs.len() {

@@ -33,6 +33,7 @@ use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 mod dialogs;
 mod pane_header;
 mod pane_drag;
+mod pane_options;
 mod splits;
 mod tab_strip;
 mod text_input;
@@ -99,6 +100,9 @@ pub struct Shell {
     marked_text: Option<String>,
     split_drag: Option<splits::SplitDrag>,
     drop_target: Option<(PanelId, domain::DropZone)>,
+    pane_menu: Option<pane_options::PaneMenu>,
+    pane_field: Option<pane_options::PaneField>,
+    gear_bounds: pane_options::GearBounds,
     split_bounds: splits::SplitBounds,
     _quit_hook: Subscription,
 }
@@ -124,6 +128,9 @@ impl Shell {
             marked_text: None,
             split_drag: None,
             drop_target: None,
+            pane_menu: None,
+            pane_field: None,
+            gear_bounds: pane_options::GearBounds::default(),
             split_bounds: splits::SplitBounds::default(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
@@ -211,6 +218,12 @@ impl Shell {
             CommandId::About => show_about(window, cx),
             CommandId::CloseTab => self.request_close_tab(cx),
             CommandId::SelectAll => self.select_all(),
+            CommandId::RenamePane => {
+                if let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) {
+                    self.start_rename_pane(panel);
+                }
+            }
+            CommandId::MoveToNewTab => self.move_focused_to_new_tab(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -236,6 +249,14 @@ impl Shell {
         }
         if self.is_workspace_menu_open {
             self.handle_menu_key(keystroke, cx);
+            return true;
+        }
+        if self.is_pane_menu_open() {
+            self.handle_pane_menu_key(keystroke, window, cx);
+            return true;
+        }
+        if self.pane_field.is_some() {
+            self.handle_pane_field_key(keystroke, cx);
             return true;
         }
         if self.tab_field.is_some() {
@@ -721,6 +742,7 @@ impl Render for Shell {
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let pane_area = layout.map(|layout| self.render_layout(&layout, Vec::new(), cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
+        let pane_menu = self.render_pane_menu(cx);
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
@@ -749,6 +771,7 @@ impl Render for Shell {
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
+            .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
     }
 }

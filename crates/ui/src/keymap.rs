@@ -54,6 +54,24 @@ impl Combo {
         }
     }
 
+    pub fn glyphs(&self) -> String {
+        let flags = [
+            (self.modifiers.control, "\u{2303}"),
+            (self.modifiers.alt, "\u{2325}"),
+            (self.modifiers.shift, "\u{21e7}"),
+            (self.modifiers.platform, "\u{2318}"),
+        ];
+        let prefix: String = flags.iter().filter(|(is_held, _)| *is_held).map(|(_, glyph)| *glyph).collect();
+        let key = match self.key.as_str() {
+            "right" => "\u{2192}".to_string(),
+            "left" => "\u{2190}".to_string(),
+            "up" => "\u{2191}".to_string(),
+            "down" => "\u{2193}".to_string(),
+            other => other.to_uppercase(),
+        };
+        format!("{prefix}{key}")
+    }
+
     pub fn binding_text(&self) -> String {
         let flags = [
             (self.modifiers.control, "ctrl-"),
@@ -112,6 +130,10 @@ impl Keymap {
 
     pub fn resolve(&self, combo: &Combo) -> Option<CommandId> {
         self.bindings.get(combo).copied()
+    }
+
+    pub fn combo_for(&self, command: CommandId) -> Option<&Combo> {
+        self.order.iter().find(|combo| self.bindings.get(*combo) == Some(&command))
     }
 
     pub fn resolve_keystroke(&self, keystroke: &Keystroke) -> Option<CommandId> {

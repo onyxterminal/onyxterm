@@ -31,12 +31,14 @@ pub enum CommandId {
     About,
     CloseTab,
     SelectAll,
+    RenamePane,
+    MoveToNewTab,
 }
 
 impl CommandId {
     pub fn is_structural(self) -> bool {
         use CommandId::*;
-        matches!(self, NewTab | NextTab | PrevTab | SplitRight | SplitDown | FocusAdjacent | CloseActive | CloseTab)
+        matches!(self, NewTab | NextTab | PrevTab | SplitRight | SplitDown | FocusAdjacent | CloseActive | CloseTab | MoveToNewTab)
     }
 }
 
@@ -202,6 +204,8 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
         Command::builder(FocusAdjacent, "Focus Next Pane", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
+        Command::builder(RenamePane, "Rename Pane", "Panes", no_op).build(),
+        Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
         Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),
