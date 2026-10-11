@@ -16,7 +16,7 @@ use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
-    div, point, prelude::*, px, relative, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
+    div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
     FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
     TitlebarOptions, Window, WindowOptions,
@@ -30,6 +30,7 @@ use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
 mod pane_header;
+mod splits;
 mod tab_strip;
 mod text_input;
 
@@ -93,6 +94,8 @@ pub struct Shell {
     tab_field: Option<TabField>,
     notice: Option<String>,
     marked_text: Option<String>,
+    split_drag: Option<splits::SplitDrag>,
+    split_bounds: splits::SplitBounds,
     _quit_hook: Subscription,
 }
 
@@ -115,6 +118,8 @@ impl Shell {
             tab_field: None,
             notice: restore_notice(&restored.warnings),
             marked_text: None,
+            split_drag: None,
+            split_bounds: splits::SplitBounds::default(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -651,33 +656,6 @@ impl Shell {
         }
     }
 
-    fn render_layout(&self, node: &LayoutNode, cx: &mut Context<Self>) -> AnyElement {
-        match node {
-            LayoutNode::Leaf { panel_id } => self.render_pane(*panel_id, cx),
-            LayoutNode::Split { axis, ratio, first, second } => {
-                let first = self.render_layout(first, cx);
-                let second = self.render_layout(second, cx);
-                let container = div()
-                    .size_full()
-                    .flex()
-                    .gap(px(self.state.theme.layout.island_gap_px))
-                    .min_w(px(0.0))
-                    .min_h(px(0.0));
-                match axis {
-                    Axis::Horizontal => container
-                        .flex_row()
-                        .child(div().h_full().w(relative(*ratio)).flex_none().child(first))
-                        .child(div().h_full().flex_1().min_w(px(0.0)).child(second)),
-                    Axis::Vertical => container
-                        .flex_col()
-                        .child(div().w_full().h(relative(*ratio)).flex_none().child(first))
-                        .child(div().w_full().flex_1().min_h(px(0.0)).child(second)),
-                }
-                .into_any_element()
-            }
-        }
-    }
-
     fn pane_focus(&self, cx: &mut Context<Self>) -> PaneFocus {
         let focus_handle = self.focus_handle.clone();
         let shell = cx.entity();
@@ -728,7 +706,7 @@ impl Render for Shell {
             false => tab.layout().clone(),
         });
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
-        let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
+        let pane_area = layout.map(|layout| self.render_layout(&layout, Vec::new(), cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
@@ -745,6 +723,9 @@ impl Render for Shell {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
             .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
+            .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| shell.drag_split(event, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.end_split_drag(cx)))
+            .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)
             .children(notice)

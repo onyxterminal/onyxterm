@@ -561,3 +561,28 @@ fn dropped_paths_are_shell_escaped_and_space_separated() {
 fn theme_defaults_option_to_meta() {
     assert!(Theme::load_default().unwrap().input.option_as_meta);
 }
+
+#[test]
+fn split_ratio_follows_the_pointer_and_clamps_to_minimum_pane_size() {
+    use crate::tabs::clamp_split_ratio;
+    assert!((clamp_split_ratio(300.0, 1000.0, 120.0) - 0.3).abs() < 1e-6);
+    assert!((clamp_split_ratio(10.0, 1000.0, 120.0) - 0.12).abs() < 1e-6);
+    assert!((clamp_split_ratio(990.0, 1000.0, 120.0) - 0.88).abs() < 1e-6);
+    assert_eq!(clamp_split_ratio(50.0, 200.0, 120.0), 0.5);
+}
+
+#[test]
+fn set_split_ratio_targets_the_nested_split_by_path() {
+    use crate::tabs::{SplitSide, Tab};
+    let (a, b, c) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let mut tab = Tab::new(a);
+    tab.split_focused(Axis::Horizontal, b).unwrap();
+    tab.split_focused(Axis::Vertical, c).unwrap();
+    tab.set_split_ratio(&[SplitSide::Second], 0.25);
+    tab.set_split_ratio(&[], 0.7);
+    tab.set_split_ratio(&[SplitSide::First], 0.1);
+    let LayoutNode::Split { ratio, second, .. } = tab.layout() else { panic!("root split") };
+    assert!((ratio - 0.7).abs() < 1e-6);
+    let LayoutNode::Split { ratio: inner, .. } = second.as_ref() else { panic!("nested split") };
+    assert!((inner - 0.25).abs() < 1e-6);
+}

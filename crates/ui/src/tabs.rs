@@ -3,7 +3,37 @@
 
 use domain::{Axis, DomainError, LayoutNode, PanelId, TabId};
 
-const SPLIT_RATIO: f32 = 0.5;
+pub const SPLIT_RATIO: f32 = 0.5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SplitSide {
+    First,
+    Second,
+}
+
+pub type SplitPath = Vec<SplitSide>;
+
+pub fn clamp_split_ratio(offset: f32, extent: f32, min_pane: f32) -> f32 {
+    if extent <= min_pane * 2.0 {
+        return SPLIT_RATIO;
+    }
+    let min_ratio = min_pane / extent;
+    (offset / extent).clamp(min_ratio, 1.0 - min_ratio)
+}
+
+fn split_at_mut<'a>(node: &'a mut LayoutNode, path: &[SplitSide]) -> Option<&'a mut LayoutNode> {
+    let Some((side, rest)) = path.split_first() else {
+        return Some(node);
+    };
+    let LayoutNode::Split { first, second, .. } = node else {
+        return None;
+    };
+    let child = match side {
+        SplitSide::First => first,
+        SplitSide::Second => second,
+    };
+    split_at_mut(child, rest)
+}
 
 #[derive(Debug, Clone)]
 pub struct Tab {
@@ -62,6 +92,12 @@ impl Tab {
         self.focused = new_panel;
         self.is_maximized = false;
         Ok(())
+    }
+
+    pub fn set_split_ratio(&mut self, path: &[SplitSide], new_ratio: f32) {
+        if let Some(LayoutNode::Split { ratio, .. }) = split_at_mut(&mut self.layout, path) {
+            *ratio = new_ratio;
+        }
     }
 
     pub fn focus(&mut self, panel: PanelId) {
