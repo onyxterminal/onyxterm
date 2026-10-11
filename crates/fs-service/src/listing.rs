@@ -224,8 +224,21 @@ mod tests {
     }
 
     #[test]
+    fn root_ignore_applies_two_levels_down_and_inside_ignored_directories() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::write(root.path().join(".gitignore"), "target/").unwrap();
+        let deep = root.path().join("a").join("b");
+        let ignored_dir = deep.join("target");
+        fs::create_dir_all(&ignored_dir).unwrap();
+        fs::write(ignored_dir.join("out.bin"), "").unwrap();
+
+        assert_eq!(ignored_names(&deep), ["target"]);
+        assert_eq!(ignored_names(&ignored_dir), ["out.bin"]);
+    }
+
+    #[test]
     fn natural_cmp_leading_zeros_are_consistent() {
-        assert_eq!(natural_cmp("a01", "a1"), natural_cmp("a01", "a1"));
         assert_ne!(natural_cmp("a01", "a1"), Ordering::Equal);
         assert_eq!(natural_cmp("a01", "a1"), natural_cmp("a1", "a01").reverse());
         assert_eq!(natural_cmp("a01", "a2"), Ordering::Less);

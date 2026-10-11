@@ -71,8 +71,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::fs;
-    use std::time::Instant;
     use std::sync::mpsc::RecvTimeoutError;
+    use std::time::Instant;
 
     const BURST_FILE_COUNT: usize = 20;
     const FIRST_BATCH_TIMEOUT: Duration = Duration::from_secs(5);

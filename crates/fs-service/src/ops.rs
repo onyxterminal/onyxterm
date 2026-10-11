@@ -171,6 +171,24 @@ mod tests {
     }
 
     #[test]
+    fn rename_onto_a_different_file_differing_only_in_case_is_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("probe"), "").unwrap();
+        if root.path().join("PROBE").exists() {
+            return;
+        }
+        let source = root.path().join("a.txt");
+        let existing = root.path().join("A.txt");
+        fs::write(&source, "1").unwrap();
+        fs::write(&existing, "2").unwrap();
+
+        let result = rename(&source, "A.txt");
+
+        assert!(matches!(result, Err(OpError::AlreadyExists(path)) if path == existing));
+        assert!(source.exists());
+    }
+
+    #[test]
     #[ignore = "moves a file into the real OS trash"]
     fn trash_moves_the_file_out_of_the_folder() {
         let root = tempfile::tempdir().unwrap();
