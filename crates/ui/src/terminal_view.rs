@@ -10,7 +10,7 @@ use gpui::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use terminal_core::{Cell, CellColor, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
+use terminal_core::{Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
 
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
 const SELECTION_ALPHA: f32 = 0.25;
@@ -147,6 +147,16 @@ pub struct TerminalStyle {
 }
 
 impl TerminalStyle {
+    pub fn cell_size(&self, window: &Window) -> Size<Pixels> {
+        let text_system = window.text_system();
+        let font_id = text_system.resolve_font(&self.font());
+        let width = text_system
+            .advance(font_id, self.font_size, 'm')
+            .map(|advance| advance.width)
+            .unwrap_or(self.font_size * FALLBACK_CELL_WIDTH_RATIO);
+        size(width, self.line_height)
+    }
+
     pub fn from_theme(theme: &Theme, font_family: String) -> Self {
         Self {
             colors: TerminalColors::from_theme(theme),
@@ -162,16 +172,6 @@ impl TerminalStyle {
     fn font(&self) -> Font {
         font(self.font_family.clone())
     }
-
-    fn cell_size(&self, window: &Window) -> Size<Pixels> {
-        let text_system = window.text_system();
-        let font_id = text_system.resolve_font(&self.font());
-        let width = text_system
-            .advance(font_id, self.font_size, 'm')
-            .map(|advance| advance.width)
-            .unwrap_or(self.font_size * FALLBACK_CELL_WIDTH_RATIO);
-        size(width, self.line_height)
-    }
 }
 
 pub struct Frame {
@@ -179,7 +179,19 @@ pub struct Frame {
     cell: Size<Pixels>,
 }
 
-pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, is_focused: bool) -> Canvas<Frame> {
+pub type InputRegistration = Box<dyn FnOnce(Bounds<Pixels>, &mut Window, &mut App)>;
+
+pub struct PaneFocus {
+    pub marked_text: Option<String>,
+    pub register_input: InputRegistration,
+}
+
+pub fn cursor_bounds(content: Bounds<Pixels>, cell: Size<Pixels>, cursor: CursorPosition) -> Bounds<Pixels> {
+    let origin = content.origin + point(cell.width * f32::from(cursor.col), cell.height * f32::from(cursor.row));
+    Bounds::new(origin, cell)
+}
+
+pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<PaneFocus>) -> Canvas<Frame> {
     let prepare_style = style.clone();
     let prepare_handle = pane.handle.clone();
     canvas(
@@ -189,8 +201,15 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, is_focused: boo
         },
         move |bounds, frame, window, cx| {
             let bounds = content_bounds(bounds, style.padding, style.header_height);
+            let is_focused = focus.is_some();
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
             painter.paint(window, cx);
+            if let Some(focus) = focus {
+                if let Some(text) = focus.marked_text.as_deref() {
+                    painter.paint_marked_text(text, window, cx);
+                }
+                (focus.register_input)(bounds, window, cx);
+            }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
             register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid }, window);
         },
@@ -293,6 +312,28 @@ impl FramePainter<'_> {
         self.paint_cursor(window);
         for (row_index, row) in self.rows() {
             self.paint_text(row_index, row, window, cx);
+        }
+    }
+
+    fn paint_marked_text(&self, text: &str, window: &mut Window, cx: &mut App) {
+        let Some(cursor) = self.frame.snapshot.cursor else {
+            return;
+        };
+        let width_in_cells = text.chars().count().max(1);
+        let bounds = self.cell_bounds(usize::from(cursor.row), usize::from(cursor.col), width_in_cells);
+        window.paint_quad(fill(bounds, self.style.colors.background));
+        let underline = UnderlineStyle { thickness: px(1.0), color: None, wavy: false };
+        let run = TextRun {
+            len: text.len(),
+            font: self.style.font(),
+            color: self.style.colors.foreground,
+            background_color: None,
+            underline: Some(underline),
+            strikethrough: None,
+        };
+        let line = window.text_system().shape_line(text.to_string().into(), self.style.font_size, &[run], None);
+        if let Err(err) = line.paint(bounds.origin, self.frame.cell.height, window, cx) {
+            tracing::warn!(?err, "marked text paint failed");
         }
     }
 

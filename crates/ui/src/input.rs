@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use gpui::Keystroke;
+use std::path::PathBuf;
 use terminal_core::InputModes;
 
 const ESC: u8 = 0x1b;
@@ -9,6 +10,7 @@ const DEL: u8 = 0x7f;
 const CONTROL_MASK: u8 = 0x1f;
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
+const SHELL_SAFE_PUNCTUATION: &str = "/._-+,:@%=";
 
 pub fn encode_keystroke(keystroke: &Keystroke, modes: InputModes) -> Option<Vec<u8>> {
     let modifiers = keystroke.modifiers;
@@ -23,6 +25,24 @@ pub fn encode_keystroke(keystroke: &Keystroke, modes: InputModes) -> Option<Vec<
         return Some(prefixed_with_escape(base));
     }
     Some(base)
+}
+
+pub fn is_composed_text(keystroke: &Keystroke, option_as_meta: bool) -> bool {
+    let modifiers = keystroke.modifiers;
+    let is_meta = modifiers.alt && option_as_meta;
+    !is_named_key(&keystroke.key) && keystroke.key_char.is_some() && !modifiers.control && !modifiers.platform && !is_meta
+}
+
+pub fn dropped_paths_text(paths: &[PathBuf]) -> String {
+    paths.iter().map(|path| shell_escape(&path.to_string_lossy())).collect::<Vec<_>>().join(" ")
+}
+
+pub fn shell_escape(text: &str) -> String {
+    let is_safe = |c: char| c.is_ascii_alphanumeric() || SHELL_SAFE_PUNCTUATION.contains(c);
+    if !text.is_empty() && text.chars().all(is_safe) {
+        return text.to_string();
+    }
+    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 pub fn paste_bytes(text: &str, modes: InputModes) -> Vec<u8> {

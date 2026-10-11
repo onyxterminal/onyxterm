@@ -532,3 +532,32 @@ fn arabic_text_reaches_the_shell_as_arabic() {
     let typed = "\u{0646}";
     assert_eq!(encode(Modifiers::none(), typed, Some(typed)), Some(typed.as_bytes().to_vec()));
 }
+
+#[test]
+fn printable_keys_go_through_the_input_method_unless_option_is_meta() {
+    use crate::input::is_composed_text;
+    let none = Modifiers::none();
+    assert!(is_composed_text(&keystroke(none, "a", Some("a")), true));
+    assert!(is_composed_text(&keystroke(none, "\u{0646}", Some("\u{0646}")), true));
+    assert!(is_composed_text(&keystroke(Modifiers::alt(), "e", Some("")), false));
+    assert!(!is_composed_text(&keystroke(Modifiers::alt(), "e", Some("")), true));
+    assert!(!is_composed_text(&keystroke(none, "enter", Some("\n")), true));
+    assert!(!is_composed_text(&keystroke(Modifiers::control(), "c", None), true));
+    assert!(!is_composed_text(&keystroke(Modifiers::command(), "k", None), false));
+}
+
+#[test]
+fn dropped_paths_are_shell_escaped_and_space_separated() {
+    use crate::input::{dropped_paths_text, shell_escape};
+    use std::path::PathBuf;
+    assert_eq!(shell_escape("/usr/local/bin"), "/usr/local/bin");
+    assert_eq!(shell_escape("/tmp/My Files"), "'/tmp/My Files'");
+    assert_eq!(shell_escape("/tmp/it's"), r"'/tmp/it'\''s'");
+    let paths = [PathBuf::from("/a/b.txt"), PathBuf::from("/c/d e")];
+    assert_eq!(dropped_paths_text(&paths), "/a/b.txt '/c/d e'");
+}
+
+#[test]
+fn theme_defaults_option_to_meta() {
+    assert!(Theme::load_default().unwrap().input.option_as_meta);
+}

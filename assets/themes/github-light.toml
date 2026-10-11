@@ -61,6 +61,9 @@ bright_magenta = "#6639BA"
 bright_cyan = "#115F64"
 bright_white = "#8C959F"
 
+[input]
+option_as_meta = true
+
 [layout]
 tab_strip_height_px = 36
 workspace_rail_width_px = 200

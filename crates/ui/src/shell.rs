@@ -9,14 +9,15 @@ use crate::command::{
 };
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
-use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
+use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
-use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
+use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
-    div, point, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle,
+    div, point, prelude::*, px, relative, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
+    FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
     TitlebarOptions, Window, WindowOptions,
 };
@@ -30,6 +31,7 @@ use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 mod dialogs;
 mod pane_header;
 mod tab_strip;
+mod text_input;
 
 use tab_strip::TabField;
 
@@ -90,6 +92,7 @@ pub struct Shell {
     menu_field: Option<MenuField>,
     tab_field: Option<TabField>,
     notice: Option<String>,
+    marked_text: Option<String>,
     _quit_hook: Subscription,
 }
 
@@ -111,6 +114,7 @@ impl Shell {
             menu_field: None,
             tab_field: None,
             notice: restore_notice(&restored.warnings),
+            marked_text: None,
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -233,13 +237,17 @@ impl Shell {
             self.handle_palette_key(keystroke, window, cx);
             return true;
         }
-        self.send_key_to_terminal(keystroke, cx)
+        self.send_key_to_terminal(event, cx)
     }
 
-    fn send_key_to_terminal(&self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+    fn send_key_to_terminal(&self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        let keystroke = &event.keystroke;
         let Some(handle) = self.focused_handle() else {
             return false;
         };
+        if is_composed_text(keystroke, self.state.theme.input.option_as_meta) {
+            return event.is_held && self.repeat_text(handle, keystroke);
+        }
         if let Some(lines) = page_scroll_lines(keystroke, handle.grid_size().rows) {
             handle.terminal().scroll_lines(lines);
             cx.notify();
@@ -251,6 +259,23 @@ impl Shell {
         write_to(handle, &bytes);
         cx.notify();
         true
+    }
+
+    fn repeat_text(&self, handle: &TerminalHandle, keystroke: &Keystroke) -> bool {
+        let Some(text) = keystroke.key_char.as_deref().filter(|text| !text.is_empty()) else {
+            return false;
+        };
+        write_to(handle, text.as_bytes());
+        true
+    }
+
+    fn drop_paths(&mut self, panel: PanelId, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_pane(panel);
+        window.focus(&self.focus_handle);
+        if let Some(pane) = self.panes.get(&panel) {
+            write_to(&pane.terminal.handle, dropped_paths_text(paths.paths()).as_bytes());
+        }
+        cx.notify();
     }
 
     fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
@@ -653,6 +678,17 @@ impl Shell {
         }
     }
 
+    fn pane_focus(&self, cx: &mut Context<Self>) -> PaneFocus {
+        let focus_handle = self.focus_handle.clone();
+        let shell = cx.entity();
+        PaneFocus {
+            marked_text: self.marked_text.clone(),
+            register_input: Box::new(move |bounds, window, cx| {
+                window.handle_input(&focus_handle, ElementInputHandler::new(bounds, shell), cx)
+            }),
+        }
+    }
+
     fn render_pane(&self, panel: PanelId, cx: &mut Context<Self>) -> AnyElement {
         let Some(pane) = self.panes.get(&panel) else {
             return div().into_any_element();
@@ -675,7 +711,8 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused))
+            .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
+            .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx))))
             .child(header)
             .into_any_element()
     }

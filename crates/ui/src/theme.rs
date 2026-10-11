@@ -28,6 +28,7 @@ struct RawTheme {
     scrollback: ScrollbackTokens,
     ansi: AnsiTokensRaw,
     layout: LayoutTokens,
+    input: InputTokens,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +108,11 @@ struct AnsiTokensRaw {
     bright_magenta: String,
     bright_cyan: String,
     bright_white: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct InputTokens {
+    pub option_as_meta: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -196,6 +202,7 @@ pub struct Theme {
     pub scrollback: ScrollbackTokens,
     pub ansi: AnsiTokens,
     pub layout: LayoutTokens,
+    pub input: InputTokens,
 }
 
 impl Theme {
@@ -264,6 +271,7 @@ impl Theme {
                 bright_white: hex_to_hsla(&raw.ansi.bright_white, "ansi.bright_white")?,
             },
             layout: raw.layout,
+            input: raw.input,
         })
     }
 
