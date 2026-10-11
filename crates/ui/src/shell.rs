@@ -7,7 +7,7 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{render_document, DocumentPane};
+use crate::document::{document_cwd, render_document, DocumentPane};
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
@@ -194,15 +194,14 @@ impl Shell {
         if self.model.tabs().is_empty() {
             self.open_tab(cx);
         }
-        let missing = self
-            .model
-            .panels_to_spawn(|panel| self.panes.contains_key(&panel) || self.documents.contains_key(&panel));
-        for panel in missing {
-            if self.model.is_document(panel) {
-                self.restore_document(panel);
-            } else {
-                self.spawn_restored(panel, cx);
-            }
+        let is_live = |panel: PanelId| self.panes.contains_key(&panel) || self.documents.contains_key(&panel);
+        let documents = self.model.documents_to_restore(is_live);
+        let terminals = self.model.terminals_to_spawn(is_live);
+        for panel in documents {
+            self.restore_document(panel);
+        }
+        for panel in terminals {
+            self.spawn_restored(panel, cx);
         }
     }
 
@@ -214,7 +213,7 @@ impl Shell {
 
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
         let id = panel.id;
-        let cwd = path.parent().map(Path::to_path_buf).unwrap_or_else(|| self.model.active_root());
+        let cwd = document_cwd(panel.kind, &path, self.model.active_root());
         self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path) });
         self.restore_document(id);
         let Some(tab) = self.model.tabs_mut().active_mut() else {

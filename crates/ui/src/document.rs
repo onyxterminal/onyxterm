@@ -19,6 +19,13 @@ impl DocumentPane {
     }
 }
 
+pub fn document_cwd(kind: PanelKind, path: &Path, fallback: PathBuf) -> PathBuf {
+    match kind {
+        PanelKind::FileTree => path.to_path_buf(),
+        _ => path.parent().map(Path::to_path_buf).unwrap_or(fallback),
+    }
+}
+
 pub fn document_title(path: &Path) -> String {
     path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
@@ -37,4 +44,21 @@ pub fn render_document(pane: &DocumentPane, theme: &Theme) -> AnyElement {
         .text_color(theme.text.muted)
         .child(label)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_tree_cwd_is_the_folder_itself() {
+        let cwd = document_cwd(PanelKind::FileTree, Path::new("/home/me/proj"), PathBuf::from("/fallback"));
+        assert_eq!(cwd, PathBuf::from("/home/me/proj"));
+    }
+
+    #[test]
+    fn editor_cwd_is_the_parent_folder() {
+        let cwd = document_cwd(PanelKind::Editor, Path::new("/home/me/proj/main.rs"), PathBuf::from("/fallback"));
+        assert_eq!(cwd, PathBuf::from("/home/me/proj"));
+    }
 }

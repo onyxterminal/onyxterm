@@ -337,12 +337,9 @@ fn document_panels_are_not_spawned_as_terminals() {
     model.add_panel(editor_snapshot(editor, &home.path().join("main.rs")));
     model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, editor).expect("split");
 
-    let to_spawn: Vec<PanelId> =
-        model.panels_to_spawn(|_| false).into_iter().filter(|panel| !model.is_document(*panel)).collect();
-
-    assert_eq!(to_spawn, vec![terminal]);
-    assert!(model.is_document(editor));
-    assert!(!model.is_document(terminal));
+    assert_eq!(model.terminals_to_spawn(|_| false), vec![terminal]);
+    assert_eq!(model.documents_to_restore(|_| false), vec![editor]);
+    assert!(model.documents_to_restore(|panel| panel == editor).is_empty());
 }
 
 #[test]
