@@ -121,7 +121,7 @@ impl Shell {
         let new_scroll_top = scroll_to_reveal(scroll_top, line_index, line_height, viewport_height);
         let mut new_scroll_left = scroll_left;
         let margin = f32::from(layout.line_height);
-        if let Some(laid) = layout.lines.iter().find(|laid| laid.line == line_index) {
+        if let Some(laid) = layout.laid_line(line_index) {
             let x = f32::from(laid.x_at_char(rel));
             let left = scroll_left;
             let right = left + text_width;
@@ -151,13 +151,14 @@ impl Shell {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
-        let Some((_, pane)) = self.focused_editor_mut() else {
+        let Some((panel, pane)) = self.focused_editor_mut() else {
             return;
         };
         let Some(editor) = pane.ready_mut() else {
             return;
         };
         editor.paste(&text, Instant::now());
+        self.reveal_cursor(panel);
         cx.notify();
     }
 

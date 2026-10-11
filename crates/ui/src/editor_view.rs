@@ -34,11 +34,27 @@ pub struct FrameLayout {
     pub lines: Vec<LaidLine>,
     pub viewport: Size<Pixels>,
     pub cursor_bounds: Option<Bounds<Pixels>>,
+    pub cursor_line: Option<usize>,
 }
 
 impl FrameLayout {
     pub fn visible_line_count(&self) -> usize {
         self.lines.len()
+    }
+
+    pub fn laid_line(&self, line: usize) -> Option<&LaidLine> {
+        self.lines.iter().find(|laid| laid.line == line)
+    }
+
+    fn row_y(&self, laid: &LaidLine) -> Pixels {
+        self.text_origin.y + self.line_height * (laid.line - self.first_line) as f32
+    }
+
+    fn caret_bounds(&self, rope: &Rope, head: usize, width: Pixels) -> Option<Bounds<Pixels>> {
+        let offset = head.min(rope.len_chars());
+        let laid = self.laid_line(rope.char_to_line(offset))?;
+        let x = self.text_origin.x + laid.x_at_char(offset - laid.start_char);
+        Some(Bounds::new(point(x, self.row_y(laid)), size(width, self.line_height)))
     }
 }
 
@@ -141,7 +157,7 @@ pub fn offset_at(layout: &FrameLayout, rope: &Rope, position: Point<Pixels>) -> 
     let line_start = rope.line_to_char(line_index);
     let line_chars = line_len(rope, line_index);
     let line_end = line_start + line_chars;
-    let Some(laid) = layout.lines.iter().find(|laid| laid.line == line_index) else {
+    let Some(laid) = layout.laid_line(line_index) else {
         return line_end;
     };
     let local_x = f32::from(position.x) - f32::from(layout.text_origin.x);
@@ -256,7 +272,7 @@ pub fn editor_canvas(
                     painter.paint_marked_text(text, &style, window, cx);
                 }
             });
-            paint_gutter(&state.layout, &state.gutter_rect, &style, tokens, window, cx);
+            paint_gutter(&state.layout, state.gutter_rect, &style, window, cx);
             let area = PointerArea {
                 layout: state.layout.clone(),
                 rope: frame.rope.clone(),
@@ -406,15 +422,17 @@ fn prepare_state(
     let text_offset_x = -view_ref.scroll_left;
     let text_offset_y = -view_ref.scroll_top % line_height_f;
     let text_origin = point(text_rect.origin.x + px(text_offset_x), text_rect.origin.y + px(text_offset_y));
-    let cursor_bounds = cursor_bounds_for(frame, text_origin, f32::from(style.line_height), f32::from(cell.width));
-    let layout = FrameLayout {
+    let head = frame.selections.newest().head;
+    let mut layout = FrameLayout {
         text_origin,
         line_height: style.line_height,
         first_line,
         lines,
         viewport: text_rect.size,
-        cursor_bounds,
+        cursor_bounds: None,
+        cursor_line: frame.is_focused.then(|| frame.rope.char_to_line(head.min(frame.rope.len_chars()))),
     };
+    layout.cursor_bounds = layout.caret_bounds(&frame.rope, head, cell.width);
     view_ref.layout = Some(layout.clone());
     CanvasState {
         layout,
@@ -424,18 +442,6 @@ fn prepare_state(
         hitbox,
         _on_pointer: on_pointer,
     }
-}
-
-fn cursor_bounds_for(frame: &EditorFrame, text_origin: Point<Pixels>, line_height: f32, cell_width: f32) -> Option<Bounds<Pixels>> {
-    let selection = frame.selections.newest();
-    let rope = &frame.rope;
-    let total = rope.len_chars();
-    let offset = selection.head.min(total);
-    let line_index = rope.char_to_line(offset);
-    let line_origin = text_origin.y + px(line_index as f32 * line_height);
-    let rel = offset - rope.line_to_char(line_index);
-    let laid_x = cell_width * rel as f32;
-    Some(Bounds::new(point(text_origin.x + px(laid_x), line_origin), size(px(cell_width), px(line_height))))
 }
 
 struct FramePainter<'a> {
@@ -476,7 +482,7 @@ impl<'a> FramePainter<'a> {
         let total = rope.len_chars();
         let offset = selection.head.min(total);
         let line_index = rope.char_to_line(offset);
-        let Some(laid) = self.layout.lines.iter().find(|laid| laid.line == line_index) else {
+        let Some(laid) = self.layout.laid_line(line_index) else {
             return;
         };
         let x = laid.x_at_char(offset - laid.start_char);
@@ -558,7 +564,7 @@ impl<'a> FramePainter<'a> {
     }
 
     fn row_y(&self, laid: &LaidLine) -> Pixels {
-        self.text_origin.y + px((laid.line - self.layout.first_line) as f32 * f32::from(self.line_height))
+        self.layout.row_y(laid)
     }
 }
 
@@ -571,50 +577,29 @@ fn empty_selection_on_line(selection: &Selection, laid: &LaidLine, rope: &Rope) 
     selection.head >= laid.start_char && selection.head <= line_end
 }
 
-fn paint_gutter(
-    layout: &FrameLayout,
-    gutter_rect: &Bounds<Pixels>,
-    style: &EditorStyle,
-    tokens: EditorTokens,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let padding = px(tokens.gutter_padding_px);
-    let active_line = layout.cursor_bounds.map(|_| {
-        let row_y = layout.cursor_bounds.unwrap().origin.y - layout.text_origin.y;
-        layout.first_line + (f32::from(row_y) / f32::from(layout.line_height)).round() as usize
-    });
-    let runs: Vec<TextRun> = layout
-        .lines
-        .iter()
-        .map(|laid| {
+fn paint_gutter(layout: &FrameLayout, gutter_rect: Bounds<Pixels>, style: &EditorStyle, window: &mut Window, cx: &mut App) {
+    let tokens = style.tokens;
+    let right = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_px);
+    window.with_content_mask(Some(ContentMask { bounds: gutter_rect }), |window| {
+        for laid in &layout.lines {
             let number = (laid.line + 1).to_string();
-            let is_active = active_line == Some(laid.line);
+            let is_active = layout.cursor_line == Some(laid.line);
             let color = if is_active { tokens.gutter_text_active } else { tokens.gutter_text };
-            TextRun {
+            let run = TextRun {
                 len: number.len(),
                 font: style.font(),
                 color,
                 background_color: None,
                 underline: None,
                 strikethrough: None,
+            };
+            let shape = window.text_system().shape_line(number.into(), style.font_size, &[run], None);
+            let origin = point(right - shape.width, layout.row_y(laid));
+            if let Err(err) = shape.paint(origin, layout.line_height, window, cx) {
+                tracing::warn!(?err, "gutter paint failed");
             }
-        })
-        .collect();
-    let texts: Vec<String> = layout.lines.iter().map(|laid| (laid.line + 1).to_string()).collect();
-    let shaped: Vec<ShapedLine> = texts
-        .iter()
-        .zip(runs.iter())
-        .map(|(text, run)| window.text_system().shape_line(text.clone().into(), style.font_size, std::slice::from_ref(run), None))
-        .collect();
-    for (laid, shape) in layout.lines.iter().zip(shaped.iter()) {
-        let row = laid.line - layout.first_line;
-        let y = layout.text_origin.y + px(row as f32 * f32::from(layout.line_height));
-        let x = gutter_rect.origin.x + gutter_rect.size.width - padding - shape.width;
-        if let Err(err) = shape.paint(point(x, y), layout.line_height, window, cx) {
-            tracing::warn!(?err, "gutter paint failed");
         }
-    }
+    });
 }
 
 #[cfg(test)]
