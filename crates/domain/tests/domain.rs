@@ -128,6 +128,59 @@ fn layout_resize_nudges_nearest_matching_ancestor_and_clamps() {
     root.validate().expect("resized layout stays valid");
 }
 
+fn row_shapes(node: &domain::LayoutNode) -> Vec<usize> {
+    match node {
+        domain::LayoutNode::Split { axis: Axis::Vertical, first, second, .. } => {
+            row_shapes(first).into_iter().chain(row_shapes(second)).collect()
+        }
+        row => vec![row.leaves().len()],
+    }
+}
+
+fn assert_ratios(node: &domain::LayoutNode, expected: &[f32]) {
+    fn collect(node: &domain::LayoutNode, out: &mut Vec<f32>) {
+        if let domain::LayoutNode::Split { ratio, first, second, .. } = node {
+            out.push(*ratio);
+            collect(first, out);
+            collect(second, out);
+        }
+    }
+    let mut ratios = Vec::new();
+    collect(node, &mut ratios);
+    assert_eq!(ratios.len(), expected.len(), "ratios {ratios:?}");
+    for (actual, wanted) in ratios.iter().zip(expected) {
+        assert!((actual - wanted).abs() < 1e-6, "ratios {ratios:?}");
+    }
+}
+
+#[test]
+fn layout_grid_arranges_existing_panes_into_balanced_rows() {
+    let panels: Vec<PanelId> = (0..5).map(|_| PanelId::new()).collect();
+    let mut root = domain::LayoutNode::leaf(panels[0]);
+    for pair in panels.windows(2) {
+        root.split_with(pair[0], Axis::Horizontal, 0.3, pair[1]).unwrap();
+    }
+    let grid = root.to_grid();
+    assert_eq!(grid.leaves(), panels);
+    assert_eq!(row_shapes(&grid), vec![3, 2]);
+    assert_ratios(&grid, &[0.5, 1.0 / 3.0, 0.5, 0.5]);
+    grid.validate().expect("grid is valid");
+    let single = domain::LayoutNode::leaf(panels[0]);
+    assert_eq!(single.to_grid(), single);
+}
+
+#[test]
+fn layout_equalize_gives_every_pane_an_equal_share_per_axis() {
+    let (p1, p2, p3, p4) = (PanelId::new(), PanelId::new(), PanelId::new(), PanelId::new());
+    let mut root = domain::LayoutNode::leaf(p1);
+    root.split_with(p1, Axis::Horizontal, 0.8, p2).unwrap();
+    root.split_with(p2, Axis::Horizontal, 0.2, p3).unwrap();
+    root.split_with(p3, Axis::Vertical, 0.7, p4).unwrap();
+    root.equalize();
+    assert_ratios(&root, &[1.0 / 3.0, 0.5, 0.5]);
+    root.validate().expect("equalized layout is valid");
+}
+
 #[test]
 fn layout_validate_rejects_duplicate_panel() {
     let p = PanelId::new();

@@ -257,6 +257,37 @@ impl LayoutNode {
         Ok(())
     }
 
+    pub fn to_grid(&self) -> LayoutNode {
+        let leaves: Vec<LayoutNode> = self.leaves().into_iter().map(LayoutNode::leaf).collect();
+        let columns = (leaves.len() as f32).sqrt().ceil() as usize;
+        let rows: Vec<LayoutNode> =
+            leaves.chunks(columns).map(|row| chain(row.to_vec(), Axis::Horizontal)).collect();
+        let mut grid = chain(rows, Axis::Vertical);
+        grid.equalize();
+        grid
+    }
+
+    pub fn equalize(&mut self) {
+        let Self::Split { axis, ratio, first, second } = self else {
+            return;
+        };
+        first.equalize();
+        second.equalize();
+        let lead = first.span(*axis) as SplitRatio;
+        let trail = second.span(*axis) as SplitRatio;
+        *ratio = lead / (lead + trail);
+    }
+
+    fn span(&self, axis: Axis) -> usize {
+        match self {
+            Self::Leaf { .. } => 1,
+            Self::Split { axis: split_axis, first, second, .. } if *split_axis == axis => {
+                first.span(axis) + second.span(axis)
+            }
+            Self::Split { first, second, .. } => first.span(axis).max(second.span(axis)),
+        }
+    }
+
     pub fn resize_toward(&mut self, panel: PanelId, direction: Direction, step: SplitRatio) {
         let delta = if direction.is_forward() { step } else { -step };
         self.nudge_nearest_split(panel, direction.axis(), delta);
@@ -302,6 +333,19 @@ impl LayoutNode {
     pub fn validate(&self) -> Result<(), DomainError> {
         validate_split_ratios(self)?;
         validate_no_cycle(self)
+    }
+}
+
+fn chain(mut nodes: Vec<LayoutNode>, axis: Axis) -> LayoutNode {
+    if nodes.len() == 1 {
+        return nodes.remove(0);
+    }
+    let trailing = nodes.split_off(nodes.len() / 2);
+    LayoutNode::Split {
+        axis,
+        ratio: DROP_SPLIT_RATIO,
+        first: Box::new(chain(nodes, axis)),
+        second: Box::new(chain(trailing, axis)),
     }
 }
 

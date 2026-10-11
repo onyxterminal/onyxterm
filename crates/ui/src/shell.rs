@@ -241,6 +241,8 @@ impl Shell {
             CommandId::SwapPane(direction) => self.swap_pane_toward(direction),
             CommandId::ResizePane(direction) => self.resize_pane_toward(direction),
             CommandId::MaximizePane => self.toggle_maximized(),
+            CommandId::GridLayout => self.arrange_grid(),
+            CommandId::EqualizePanes => self.equalize_panes(),
             CommandId::CloseActive => self.request_close_focused(cx),
             CommandId::Copy => self.copy_selection(cx),
             CommandId::Paste => self.paste_clipboard(cx),
@@ -681,6 +683,18 @@ impl Shell {
     fn resize_pane_toward(&mut self, direction: Direction) {
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.resize_toward(direction);
+        }
+    }
+
+    fn arrange_grid(&mut self) {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.arrange_grid();
+        }
+    }
+
+    fn equalize_panes(&mut self) {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.equalize();
         }
     }
 

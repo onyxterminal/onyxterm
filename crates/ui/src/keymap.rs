@@ -194,6 +194,8 @@ fn bind_panes(map: &mut Keymap) {
     map.bind(Combo::new(cmd, "d"), SplitRight);
     map.bind(Combo::new(Modifiers::command_shift(), "d"), SplitDown);
     map.bind(Combo::new(cmd, "enter"), MaximizePane);
+    map.bind(Combo::new(Modifiers::command_shift(), "g"), GridLayout);
+    map.bind(Combo::new(Modifiers::command_shift(), "e"), EqualizePanes);
 }
 
 fn bind_pane_movement(map: &mut Keymap) {

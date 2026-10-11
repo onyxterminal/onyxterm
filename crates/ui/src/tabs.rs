@@ -154,6 +154,15 @@ impl Tab {
         self.layout.resize_toward(self.focused, direction, RESIZE_STEP);
     }
 
+    pub fn arrange_grid(&mut self) {
+        self.layout = self.layout.to_grid();
+        self.is_maximized = false;
+    }
+
+    pub fn equalize(&mut self) {
+        self.layout.equalize();
+    }
+
     fn is_single_panel(&self) -> bool {
         matches!(self.layout, LayoutNode::Leaf { .. })
     }

@@ -38,6 +38,8 @@ pub enum CommandId {
     FocusPane(Direction),
     SwapPane(Direction),
     ResizePane(Direction),
+    GridLayout,
+    EqualizePanes,
     SelectTab(usize),
     SelectWorkspace(usize),
     NextWorkspace,
@@ -51,7 +53,7 @@ impl CommandId {
         matches!(
             self,
             NewTab | NextTab | PrevTab | SelectTab(_) | SplitRight | SplitDown | FocusAdjacent | FocusPane(_)
-                | SwapPane(_) | ResizePane(_) | CloseActive | CloseTab | MoveToNewTab
+                | SwapPane(_) | ResizePane(_) | GridLayout | EqualizePanes | CloseActive | CloseTab | MoveToNewTab
         )
     }
 }
@@ -227,6 +229,8 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(SwapPane(Direction::Up), "Swap Pane Up", "Panes", no_op).build(),
         Command::builder(SwapPane(Direction::Down), "Swap Pane Down", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
+        Command::builder(GridLayout, "Arrange Panes in Grid", "Panes", no_op).build(),
+        Command::builder(EqualizePanes, "Equalize Panes", "Panes", no_op).build(),
         Command::builder(RenamePane, "Rename Pane", "Panes", no_op).build(),
         Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),

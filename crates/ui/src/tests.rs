@@ -1120,5 +1120,25 @@ fn keymap_binds_vim_movement_with_command_held() {
     assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::control(), "j")), Some(CommandId::ResizePane(Direction::Down)));
     assert_eq!(map.resolve(&Combo::new(cmd, "d")), Some(CommandId::SplitRight));
     assert_eq!(map.resolve(&Combo::new(cmd, "enter")), Some(CommandId::MaximizePane));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "g")), Some(CommandId::GridLayout));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "e")), Some(CommandId::EqualizePanes));
     assert_eq!(map.combo_for(CommandId::FocusAdjacent), None);
+}
+
+#[test]
+fn tab_grid_keeps_panes_and_focus_and_clears_maximize() {
+    let mut tabs = Tabs::default();
+    let (a, b, c) = (PanelId::new(), PanelId::new(), PanelId::new());
+    tabs.open(a);
+    let tab = tabs.active_mut().unwrap();
+    tab.split_focused(Axis::Horizontal, b).unwrap();
+    tab.split_focused(Axis::Horizontal, c).unwrap();
+    tab.toggle_maximized();
+    tab.arrange_grid();
+    assert_eq!(tab.layout().leaves(), vec![a, b, c]);
+    assert_eq!(tab.focused(), c);
+    assert!(!tab.is_maximized());
+    assert!(matches!(tab.layout(), LayoutNode::Split { axis: Axis::Vertical, .. }));
+    tab.equalize();
+    tab.layout().validate().unwrap();
 }
