@@ -47,3 +47,4 @@ id_newtype!(TabId, "tab");
 id_newtype!(PanelId, "panel");
 id_newtype!(TerminalSessionId, "term");
 id_newtype!(AgentId, "agent");
+id_newtype!(DocumentId, "doc");

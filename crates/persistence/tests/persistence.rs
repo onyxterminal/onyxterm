@@ -324,3 +324,28 @@ fn restore_repairs_invalid_layout() {
 
 
 
+
+#[test]
+fn migration_adds_panel_path_to_v3_database() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("v3.db");
+    let conn = rusqlite::Connection::open(&path).expect("open v3");
+    conn.execute_batch(SCHEMA_SQL).expect("create v1 schema");
+    conn.execute_batch("ALTER TABLE panels ADD COLUMN cwd TEXT; ALTER TABLE panels ADD COLUMN name TEXT;")
+        .expect("add v2 and v3 columns");
+    conn.execute_batch(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2025-01-01');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2025-01-02');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2025-01-03');",
+    )
+    .expect("record v3");
+    drop(conn);
+
+    let repo = Repository::open(&path).expect("migrate v3");
+    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
+    let path_count: i64 = repo.pool().with_conn(|conn| {
+        conn.query_row("SELECT COUNT(*) FROM pragma_table_info('panels') WHERE name = 'path'", [], |row| row.get(0))
+            .expect("panel path column")
+    });
+    assert_eq!(path_count, 1);
+}

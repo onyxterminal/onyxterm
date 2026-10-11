@@ -2,13 +2,16 @@ use crate::error::PersistenceError;
 use crate::schema::SCHEMA_SQL;
 use rusqlite::Connection;
 
-pub const CURRENT_VERSION: i64 = 3;
+pub const CURRENT_VERSION: i64 = 4;
 
 const PANEL_CWD_SQL: &str = "ALTER TABLE panels ADD COLUMN cwd TEXT;";
 
 const PANEL_NAME_SQL: &str = "ALTER TABLE panels ADD COLUMN name TEXT;";
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, SCHEMA_SQL), (2, PANEL_CWD_SQL), (3, PANEL_NAME_SQL)];
+const PANEL_PATH_SQL: &str = "ALTER TABLE panels ADD COLUMN path TEXT;";
+
+const MIGRATIONS: &[(i64, &str)] =
+    &[(1, SCHEMA_SQL), (2, PANEL_CWD_SQL), (3, PANEL_NAME_SQL), (4, PANEL_PATH_SQL)];
 
 pub(crate) fn apply_migrations(conn: &mut Connection, target: i64) -> Result<(), PersistenceError> {
     let tx = conn.transaction()?;

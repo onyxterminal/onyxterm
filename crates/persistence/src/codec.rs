@@ -42,6 +42,8 @@ pub fn panel_kind_to_str(kind: PanelKind) -> &'static str {
     match kind {
         PanelKind::Terminal => "Terminal",
         PanelKind::Agent => "Agent",
+        PanelKind::Editor => "Editor",
+        PanelKind::FileTree => "FileTree",
     }
 }
 
@@ -49,6 +51,8 @@ pub fn panel_kind_from_str(value: &str) -> Result<PanelKind, PersistenceError> {
     match value {
         "Terminal" => Ok(PanelKind::Terminal),
         "Agent" => Ok(PanelKind::Agent),
+        "Editor" => Ok(PanelKind::Editor),
+        "FileTree" => Ok(PanelKind::FileTree),
         other => Err(PersistenceError::MigrationFailed(format!(
             "unknown panel kind {other}"
         ))),
@@ -59,6 +63,7 @@ pub fn resource_ref_columns(resource: ResourceRef) -> (&'static str, String) {
     match resource {
         ResourceRef::Terminal(session) => ("Terminal", session.to_string()),
         ResourceRef::Agent(agent) => ("Agent", agent.to_string()),
+        ResourceRef::Document(document) => ("Document", document.to_string()),
     }
 }
 
@@ -71,6 +76,10 @@ pub fn resource_ref_from(kind: &str, id: &str) -> Result<ResourceRef, Persistenc
         "Agent" => {
             let agent: AgentId = parse_uuid_id(id)?;
             Ok(ResourceRef::Agent(agent))
+        }
+        "Document" => {
+            let document: domain::DocumentId = parse_uuid_id(id)?;
+            Ok(ResourceRef::Document(document))
         }
         other => Err(PersistenceError::MigrationFailed(format!(
             "unknown resource kind {other}"

@@ -10,7 +10,7 @@ fn workspace_with_tab(name: &str, cwd: &str) -> (Workspace, TabSnapshot) {
     workspace.tab_order = vec![tab.id];
     workspace.active_tab = Some(tab.id);
     let panel = Panel::new_terminal(panel_id, "Terminal".into(), TerminalSessionId::new());
-    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd), name: Some(format!("{name} pane")) }];
+    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd), name: Some(format!("{name} pane")), path: None }];
     (workspace, TabSnapshot { tab, panels })
 }
 
@@ -39,4 +39,31 @@ fn snapshot_roundtrip_replaces_previous_state() {
     let loaded = repo.load_snapshot(Path::new("/default")).expect("load");
     assert!(loaded.warnings.is_empty());
     assert_eq!(loaded.snapshot, trimmed);
+}
+
+#[test]
+fn editor_panel_roundtrips_kind_and_path() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::open(&dir.path().join("snap.db")).expect("open");
+    let mut workspace = Workspace::new(WorkspaceId::new(), "Code".to_string());
+    let editor_id = PanelId::new();
+    let tab = Tab::new(TabId::new(), workspace.id, LayoutNode::leaf(editor_id));
+    workspace.tab_order = vec![tab.id];
+    workspace.active_tab = Some(tab.id);
+    let editor = PanelSnapshot {
+        panel: Panel::new_editor(editor_id, "main.rs".into()),
+        cwd: PathBuf::from("/code/src"),
+        name: None,
+        path: Some(PathBuf::from("/code/src/main.rs")),
+    };
+    let snapshot = WorkspaceSnapshot {
+        workspaces: vec![workspace.clone()],
+        tabs: vec![TabSnapshot { tab, panels: vec![editor.clone()] }],
+        agents: Vec::new(),
+        active_workspace: Some(workspace.id),
+    };
+    repo.write_snapshot(&snapshot).expect("write");
+
+    let loaded = repo.load_snapshot(Path::new("/default")).expect("load");
+    assert_eq!(loaded.snapshot.tabs[0].panels, vec![editor]);
 }

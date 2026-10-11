@@ -14,6 +14,7 @@ pub struct PanelSnapshot {
     pub panel: Panel,
     pub cwd: PathBuf,
     pub name: Option<String>,
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,12 +57,14 @@ impl Repository {
                 for panel in &tab.panels {
                     let (resource_kind, resource_id) = resource_ref_columns(panel.panel.resource);
                     tx.execute(
-                        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd, name) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd, name, path) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
                          ON CONFLICT(id) DO UPDATE SET tab_id=excluded.tab_id, kind=excluded.kind, title=excluded.title, \
-                         resource_kind=excluded.resource_kind, resource_id=excluded.resource_id, cwd=excluded.cwd, name=excluded.name",
+                         resource_kind=excluded.resource_kind, resource_id=excluded.resource_id, cwd=excluded.cwd, name=excluded.name, \
+                         path=excluded.path",
                         rusqlite::params![panel.panel.id.to_string(), tab.tab.id.to_string(), panel_kind_to_str(panel.panel.kind),
-                            panel.panel.title, resource_kind, resource_id, path_to_string_lossy(&panel.cwd), panel.name],
+                            panel.panel.title, resource_kind, resource_id, path_to_string_lossy(&panel.cwd), panel.name,
+                            panel.path.as_deref().map(path_to_string_lossy)],
                     )?;
                 }
             }
@@ -89,6 +92,7 @@ impl Repository {
         let restored = self.restore()?;
         let cwds = self.panel_cwds()?;
         let mut names = self.panel_names()?;
+        let mut paths = self.panel_paths()?;
         let panels_by_id: HashMap<PanelId, Panel> =
             restored.panels.into_iter().map(|p| (p.id, p)).collect();
         let tabs = restored
@@ -103,6 +107,7 @@ impl Repository {
                     .map(|panel| PanelSnapshot {
                         cwd: cwds.get(&panel.id).cloned().unwrap_or_else(|| default_cwd.to_path_buf()),
                         name: names.remove(&panel.id),
+                        path: paths.remove(&panel.id),
                         panel,
                     })
                     .collect();
@@ -133,6 +138,19 @@ impl Repository {
             for row in rows {
                 let (id, name) = row?;
                 out.insert(parse_uuid_id(&id)?, name);
+            }
+            Ok(out)
+        })
+    }
+
+    fn panel_paths(&self) -> Result<HashMap<PanelId, PathBuf>, PersistenceError> {
+        self.pool.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, path FROM panels WHERE path IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+            let mut out = HashMap::new();
+            for row in rows {
+                let (id, path) = row?;
+                out.insert(parse_uuid_id(&id)?, PathBuf::from(path));
             }
             Ok(out)
         })

@@ -13,7 +13,7 @@ pub fn new_terminal_tab(workspace: WorkspaceId, cwd: PathBuf) -> TabSnapshot {
     let panel = Panel::new_terminal(panel_id, DEFAULT_PANEL_TITLE.to_string(), TerminalSessionId::new());
     TabSnapshot {
         tab,
-        panels: vec![PanelSnapshot { panel, cwd, name: None }],
+        panels: vec![PanelSnapshot { panel, cwd, name: None, path: None }],
     }
 }
 

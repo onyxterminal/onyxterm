@@ -1,5 +1,5 @@
 use domain::{
-    Agent, AgentId, AgentState, Axis, DomainError, Panel, PanelId, ResourceRef, Tab, TabId,
+    Agent, AgentId, AgentState, Axis, DomainError, Panel, PanelId, PanelKind, ResourceRef, Tab, TabId,
     TerminalSession, TerminalSessionId, Workspace, WorkspaceId,
 };
 use std::path::PathBuf;
@@ -436,4 +436,19 @@ mod pane_move_edge_cases {
         };
         assert_eq!(layout, expected);
     }
+}
+
+#[test]
+fn document_panels_carry_their_kind_and_a_document_resource() {
+    let editor = Panel::new_editor(PanelId::new(), "main.rs".into());
+    assert_eq!(editor.kind, PanelKind::Editor);
+    assert!(matches!(editor.resource, ResourceRef::Document(_)));
+    assert!(editor.is_document());
+
+    let tree = Panel::new_file_tree(PanelId::new(), "src".into());
+    assert_eq!(tree.kind, PanelKind::FileTree);
+    assert!(tree.is_document());
+
+    let terminal = Panel::new_terminal(PanelId::new(), "zsh".into(), TerminalSessionId::new());
+    assert!(!terminal.is_document());
 }
