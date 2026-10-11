@@ -17,6 +17,7 @@ const SELECTION_ALPHA: f32 = 0.25;
 const WORD_CLICK_COUNT: usize = 2;
 const LINE_CLICK_COUNT: usize = 3;
 const MIN_COLS: u16 = 2;
+pub const ISLAND_BORDER_PX: f32 = 1.0;
 const MIN_ROWS: u16 = 1;
 const ANSI_COLOR_COUNT: u8 = 16;
 const CUBE_START: u8 = 16;
@@ -86,6 +87,12 @@ pub fn grid_size_for(area: Size<Pixels>, cell: Size<Pixels>) -> GridSize {
     let cols = (area.width / cell.width).floor().max(0.0) as u16;
     let rows = (area.height / cell.height).floor().max(0.0) as u16;
     GridSize::new(cols.max(MIN_COLS), rows.max(MIN_ROWS))
+}
+
+pub fn island_grid(island: Size<Pixels>, style: &TerminalStyle, cell: Size<Pixels>) -> GridSize {
+    let borders = px(ISLAND_BORDER_PX * 2.0);
+    let canvas = Bounds::new(Point::default(), size(island.width - borders, island.height - borders));
+    grid_size_for(content_bounds(canvas, style.padding, style.header_height).size, cell)
 }
 
 pub fn content_bounds(bounds: Bounds<Pixels>, padding: Pixels, header_height: Pixels) -> Bounds<Pixels> {
@@ -195,10 +202,7 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<P
     let prepare_style = style.clone();
     let prepare_handle = pane.handle.clone();
     canvas(
-        move |bounds, window, _cx| {
-            let content = content_bounds(bounds, prepare_style.padding, prepare_style.header_height);
-            prepare_frame(&prepare_handle, content, &prepare_style, window)
-        },
+        move |_bounds, window, _cx| prepare_frame(&prepare_handle, &prepare_style, window),
         move |bounds, frame, window, cx| {
             let bounds = content_bounds(bounds, style.padding, style.header_height);
             let is_focused = focus.is_some();
@@ -212,6 +216,18 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<P
             }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
             register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid }, window);
+        },
+    )
+    .size_full()
+}
+
+pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<Frame> {
+    let prepare_style = style.clone();
+    canvas(
+        move |_bounds, window, _cx| prepare_frame(&handle, &prepare_style, window),
+        move |bounds, frame, window, cx| {
+            let origin = content_bounds(bounds, style.padding, style.header_height).origin;
+            FramePainter { frame: &frame, origin, style: &style, is_focused: false }.paint(window, cx);
         },
     )
     .size_full()
@@ -285,16 +301,8 @@ fn scroll_pane(pane: &TerminalPane, delta: f32, line_height: f32) {
     }
 }
 
-fn prepare_frame(handle: &TerminalHandle, bounds: Bounds<Pixels>, style: &TerminalStyle, window: &Window) -> Frame {
-    let cell = style.cell_size(window);
-    let grid = grid_size_for(bounds.size, cell);
-    if handle.grid_size() != grid {
-        if let Err(err) = handle.resize(grid.rows, grid.cols) {
-            tracing::warn!(?err, "terminal resize failed");
-        }
-        window.request_animation_frame();
-    }
-    Frame { snapshot: handle.snapshot_grid(), cell }
+fn prepare_frame(handle: &TerminalHandle, style: &TerminalStyle, window: &Window) -> Frame {
+    Frame { snapshot: handle.snapshot_grid(), cell: style.cell_size(window) }
 }
 
 struct FramePainter<'a> {

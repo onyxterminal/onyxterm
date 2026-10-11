@@ -1,6 +1,7 @@
 use super::Shell;
 use crate::motion::fade_in;
 use crate::pane_drop::{has_left_dead_zone, pane_drop_target, tab_drop_target, DropTarget};
+use crate::pane_motion::{duration_from_ms, ease_out_cubic, progress};
 use domain::{DropZone, PanelId};
 use gpui::{
     canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, MouseMoveEvent, Pixels, Point, SharedString,
@@ -9,6 +10,7 @@ use gpui::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Instant;
 
 const GHOST_WIDTH_PX: f32 = 240.0;
 const GHOST_HEIGHT_PX: f32 = 150.0;
@@ -29,6 +31,11 @@ pub(super) struct PaneDrag {
     is_active: bool,
 }
 
+pub(super) struct DroppedGhost {
+    drag: PaneDrag,
+    started: Instant,
+}
+
 pub(super) fn bounds_probe<K>(sink: &BoundsMap<K>, key: K) -> impl IntoElement
 where
     K: std::hash::Hash + Eq + 'static,
@@ -46,7 +53,7 @@ where
 
 impl Shell {
     pub(super) fn press_pane_title(&mut self, panel: PanelId, press: Point<Pixels>) {
-        let origin = self.pane_bounds.borrow().get(&panel).map(|bounds| bounds.origin).unwrap_or(press);
+        let origin = self.stage.island_origin(panel).unwrap_or(press);
         self.pane_drag = Some(PaneDrag { panel, press, grab: press - origin, cursor: press, is_active: false });
     }
 
@@ -78,15 +85,7 @@ impl Shell {
         if let Some(index) = tab_drop_target(cursor, &tabs, source_tab) {
             return Some(DropTarget::Tab(index));
         }
-        let visible = self.model.tabs().active().map(|tab| tab.layout().leaves()).unwrap_or_default();
-        let panes: Vec<(PanelId, Bounds<Pixels>)> = self
-            .pane_bounds
-            .borrow()
-            .iter()
-            .filter(|(panel, _)| visible.contains(panel))
-            .map(|(panel, bounds)| (*panel, *bounds))
-            .collect();
-        pane_drop_target(cursor, &panes, source).map(|(panel, zone)| DropTarget::Pane(panel, zone))
+        pane_drop_target(cursor, &self.stage.island_bounds(), source).map(|(panel, zone)| DropTarget::Pane(panel, zone))
     }
 
     pub(super) fn release_pane_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -98,10 +97,12 @@ impl Shell {
             return;
         }
         cx.notify();
+        let panel = drag.panel;
+        self.dropped_ghost = Some(DroppedGhost { drag, started: Instant::now() });
         let Some(target) = target else {
             return;
         };
-        if self.apply_drop(drag.panel, target) {
+        if self.apply_drop(panel, target) {
             window.focus(&self.focus_handle);
             self.persist();
         }
@@ -124,8 +125,30 @@ impl Shell {
         self.drop_target == Some(DropTarget::Tab(index))
     }
 
-    pub(super) fn render_pane_ghost(&self) -> Option<AnyElement> {
-        let drag = self.pane_drag.as_ref().filter(|drag| drag.is_active)?;
+    pub(super) fn render_pane_ghost(&self, now: Instant) -> Option<AnyElement> {
+        if let Some(drag) = self.pane_drag.as_ref().filter(|drag| drag.is_active) {
+            return Some(self.ghost_card(drag, GHOST_OPACITY));
+        }
+        let dropped = self.dropped_ghost.as_ref()?;
+        let fade = ease_out_cubic(self.drop_fade_progress(dropped, now));
+        Some(self.ghost_card(&dropped.drag, GHOST_OPACITY * (1.0 - fade)))
+    }
+
+    pub(super) fn is_drop_ghost_fading(&self, now: Instant) -> bool {
+        self.dropped_ghost.as_ref().is_some_and(|dropped| self.drop_fade_progress(dropped, now) < 1.0)
+    }
+
+    pub(super) fn prune_dropped_ghost(&mut self, now: Instant) {
+        if !self.is_drop_ghost_fading(now) {
+            self.dropped_ghost = None;
+        }
+    }
+
+    fn drop_fade_progress(&self, dropped: &DroppedGhost, now: Instant) -> f32 {
+        progress(dropped.started, now, duration_from_ms(self.state.theme.layout.animation_ms))
+    }
+
+    fn ghost_card(&self, drag: &PaneDrag, opacity: f32) -> AnyElement {
         let theme = &self.state.theme;
         let grip_x = f32::from(drag.grab.x).clamp(GHOST_GRIP_INSET_PX, GHOST_WIDTH_PX - GHOST_GRIP_INSET_PX);
         let grip_y = theme.layout.pane_header_height_px * HALF;
@@ -136,7 +159,7 @@ impl Shell {
             .top(drag.cursor.y - px(grip_y))
             .w(px(GHOST_WIDTH_PX))
             .h(px(GHOST_HEIGHT_PX))
-            .opacity(GHOST_OPACITY)
+            .opacity(opacity)
             .bg(theme.canvas())
             .border_1()
             .border_color(theme.accent.primary)
@@ -153,7 +176,7 @@ impl Shell {
                     .text_color(theme.text_default())
                     .child(title),
             );
-        Some(ghost.into_any_element())
+        ghost.into_any_element()
     }
 
     pub(super) fn render_drop_highlight(&self, panel: PanelId) -> Option<AnyElement> {

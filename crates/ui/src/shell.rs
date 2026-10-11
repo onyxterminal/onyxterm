@@ -13,10 +13,10 @@ use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
 use crate::pane_title::OscTitle;
-use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
+use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle, ISLAND_BORDER_PX};
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
-use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
+use domain::{Axis, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
     FocusHandle,
@@ -26,11 +26,13 @@ use gpui::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 use terminal_core::broadcast::{error::RecvError, Receiver};
 use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
 use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
+mod islands;
 mod pane_header;
 mod pane_drag;
 mod pane_options;
@@ -101,12 +103,12 @@ pub struct Shell {
     split_drag: Option<splits::SplitDrag>,
     drop_target: Option<crate::pane_drop::DropTarget>,
     pane_drag: Option<pane_drag::PaneDrag>,
-    pane_bounds: pane_drag::BoundsMap<PanelId>,
+    stage: islands::Stage,
+    dropped_ghost: Option<pane_drag::DroppedGhost>,
     tab_bounds: pane_drag::BoundsMap<usize>,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     gear_bounds: pane_options::GearBounds,
-    split_bounds: splits::SplitBounds,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -118,6 +120,7 @@ impl Shell {
         let Startup { terminals, store, restored, home } = startup;
         let mut shell = Self {
             style: TerminalStyle::from_theme(&state.theme, font_family),
+            stage: islands::Stage::new(&state.theme.layout),
             state,
             terminals,
             store,
@@ -133,12 +136,11 @@ impl Shell {
             split_drag: None,
             drop_target: None,
             pane_drag: None,
-            pane_bounds: pane_drag::BoundsMap::default(),
+            dropped_ghost: None,
             tab_bounds: pane_drag::BoundsMap::default(),
             pane_menu: None,
             pane_field: None,
             gear_bounds: pane_options::GearBounds::default(),
-            split_bounds: splits::SplitBounds::default(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -571,6 +573,7 @@ impl Shell {
         let cwd = self.model.active_root();
         if let Some(panel) = self.spawn_shell_panel(cwd, cx) {
             self.model.tabs_mut().open(panel);
+            self.mark_active_tab_fresh();
         }
     }
 
@@ -723,7 +726,7 @@ impl Shell {
             .size_full()
             .overflow_hidden()
             .rounded(px(self.state.theme.layout.island_radius_px))
-            .border_1()
+            .border(px(ISLAND_BORDER_PX))
             .border_color(self.pane_border(is_focused))
             .bg(self.state.theme.canvas())
             .on_mouse_down(
@@ -735,7 +738,6 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .child(pane_drag::bounds_probe(&self.pane_bounds, panel))
             .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx))))
             .child(header)
             .children(self.render_drop_highlight(panel))
@@ -745,20 +747,20 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.pane_bounds.borrow_mut().clear();
+        let now = Instant::now();
+        let pane_area = self.render_pane_area(window, now, cx);
+        if self.needs_motion_frame(now) {
+            tracing::trace!("motion frame requested");
+            window.request_animation_frame();
+        }
         self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
         let palette_overlay = palette_render::build_overlay(&self.state, theme);
         let palette_visible = self.state.palette_visible;
-        let layout = self.model.tabs().active().map(|tab| match tab.is_maximized() {
-            true => LayoutNode::leaf(tab.focused()),
-            false => tab.layout().clone(),
-        });
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
-        let pane_area = layout.map(|layout| self.render_layout(&layout, Vec::new(), cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let pane_menu = self.render_pane_menu(cx);
-        let pane_ghost = self.render_pane_ghost();
+        let pane_ghost = self.render_pane_ghost(now);
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;

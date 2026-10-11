@@ -1,17 +1,10 @@
 use super::Shell;
+use crate::pane_layout::Gap;
 use crate::tabs::{clamp_split_ratio, SplitPath, SplitSide, SPLIT_RATIO};
-use domain::{Axis, LayoutNode};
-use gpui::{
-    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, CursorStyle, MouseButton, MouseMoveEvent,
-    Pixels,
-};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use domain::Axis;
+use gpui::{div, prelude::*, px, AnyElement, Context, CursorStyle, MouseButton, MouseMoveEvent};
 
 const DOUBLE_CLICK: usize = 2;
-
-pub(super) type SplitBounds = Rc<RefCell<HashMap<SplitPath, Bounds<Pixels>>>>;
 
 pub(super) struct SplitDrag {
     path: SplitPath,
@@ -25,58 +18,32 @@ fn resize_cursor(axis: Axis) -> CursorStyle {
     }
 }
 
-fn child_path(path: &SplitPath, side: SplitSide) -> SplitPath {
-    path.iter().copied().chain(std::iter::once(side)).collect()
-}
-
 impl Shell {
-    pub(super) fn render_layout(&self, node: &LayoutNode, path: SplitPath, cx: &mut Context<Self>) -> AnyElement {
-        let (axis, ratio, first, second) = match node {
-            LayoutNode::Leaf { panel_id } => return self.render_pane(*panel_id, cx),
-            LayoutNode::Split { axis, ratio, first, second } => (axis, ratio, first, second),
-        };
-        let first = self.render_layout(first, child_path(&path, SplitSide::First), cx);
-        let second = self.render_layout(second, child_path(&path, SplitSide::Second), cx);
-        let handle = self.render_split_handle(path.clone(), *axis, cx);
-        let bounds_sink = self.split_bounds.clone();
-        let bounds_probe = canvas(
-            move |bounds, _window, _cx| {
-                bounds_sink.borrow_mut().insert(path, bounds);
-            },
-            |_bounds, _state, _window, _cx| {},
-        )
-        .absolute()
-        .size_full();
-        let container = div().relative().size_full().flex().min_w(px(0.0)).min_h(px(0.0)).child(bounds_probe);
-        match axis {
-            Axis::Horizontal => container
-                .flex_row()
-                .child(div().h_full().w(relative(*ratio)).flex_none().child(first))
-                .child(handle)
-                .child(div().h_full().flex_1().min_w(px(0.0)).child(second)),
-            Axis::Vertical => container
-                .flex_col()
-                .child(div().w_full().h(relative(*ratio)).flex_none().child(first))
-                .child(handle)
-                .child(div().w_full().flex_1().min_h(px(0.0)).child(second)),
-        }
-        .into_any_element()
+    pub(super) fn render_gaps(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.stage.gaps().iter().map(|gap| self.render_split_handle(gap, cx)).collect()
     }
 
-    fn render_split_handle(&self, path: SplitPath, axis: Axis, cx: &mut Context<Self>) -> impl IntoElement {
-        let thickness = px(self.state.theme.layout.island_gap_px);
-        let handle = div().flex_none().cursor(resize_cursor(axis));
-        let handle = match axis {
-            Axis::Horizontal => handle.w(thickness).h_full(),
-            Axis::Vertical => handle.h(thickness).w_full(),
-        };
-        handle.on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |shell, event: &gpui::MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                shell.start_split_drag(path.clone(), axis, event.click_count, cx);
-            }),
-        )
+    pub(super) fn is_resizing_split(&self) -> bool {
+        self.split_drag.is_some()
+    }
+
+    fn render_split_handle(&self, gap: &Gap, cx: &mut Context<Self>) -> AnyElement {
+        let (path, axis, rect) = (gap.path.clone(), gap.axis, gap.rect);
+        div()
+            .absolute()
+            .left(px(rect.x))
+            .top(px(rect.y))
+            .w(px(rect.width))
+            .h(px(rect.height))
+            .cursor(resize_cursor(axis))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |shell, event: &gpui::MouseDownEvent, _window, cx| {
+                    cx.stop_propagation();
+                    shell.start_split_drag(path.clone(), axis, event.click_count, cx);
+                }),
+            )
+            .into_any_element()
     }
 
     fn start_split_drag(&mut self, path: SplitPath, axis: Axis, click_count: usize, cx: &mut Context<Self>) {
@@ -97,7 +64,7 @@ impl Shell {
             self.end_split_drag(cx);
             return;
         }
-        let Some(bounds) = self.split_bounds.borrow().get(&drag.path).copied() else {
+        let Some(bounds) = self.stage.gap_container(&drag.path) else {
             return;
         };
         let local = event.position - bounds.origin;
