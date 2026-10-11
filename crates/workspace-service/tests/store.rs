@@ -56,12 +56,14 @@ fn settings_survive_snapshot_saves_and_reopen() {
     let (store, _) = open(&path);
     store.set_setting("appearance.theme", "dark").unwrap();
     store.set_setting("appearance.ui_scale", "1.2").unwrap();
+    store.set_setting("appearance.dim_unfocused_panes", "false").unwrap();
     store.save(two_workspaces());
     store.flush().unwrap();
     drop(store);
     let (_store, restored) = open(&path);
     assert!(restored.settings.contains(&("appearance.theme".into(), "dark".into())));
     assert!(restored.settings.contains(&("appearance.ui_scale".into(), "1.2".into())));
+    assert!(restored.settings.contains(&("appearance.dim_unfocused_panes".into(), "false".into())));
 }
 
 #[test]

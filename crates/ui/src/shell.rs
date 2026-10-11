@@ -12,7 +12,7 @@ use crate::menus::RunCommand;
 use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
-use crate::settings::{Settings, FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
+use crate::settings::Settings;
 use crate::pane_title::OscTitle;
 use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
@@ -264,19 +264,8 @@ impl Shell {
             return true;
         }
         if self.state.settings_visible {
-            if self.state.settings_font_field.is_some() {
-                match keystroke.key.as_str() {
-                    ESCAPE_KEY => {
-                        self.state.settings_font_field = None;
-                        self.state.settings_error = None;
-                    }
-                    ENTER_KEY => self.commit_font_field(cx),
-                    _ => {
-                        let mut text: SharedString = self.state.settings_font_field.take().unwrap_or_default().into();
-                        edit_field(&mut text, keystroke);
-                        self.state.settings_font_field = Some(text.to_string());
-                    }
-                }
+            if self.state.font_picker_visible {
+                self.handle_font_picker_key(keystroke, cx);
             } else if keystroke.key == ESCAPE_KEY { self.state.settings_visible = false; }
             cx.notify();
             return true;
