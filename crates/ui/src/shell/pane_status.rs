@@ -34,6 +34,10 @@ impl Shell {
         display_title(&self.title_source(panel))
     }
 
+    pub(super) fn is_pane_busy(&self, panel: PanelId) -> bool {
+        self.panes.get(&panel).is_some_and(|pane| pane.status.job.is_some())
+    }
+
     pub(super) fn pane_title_tooltip(&self, panel: PanelId) -> String {
         title_tooltip(&self.title_source(panel))
     }

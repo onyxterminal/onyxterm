@@ -1,39 +1,22 @@
 use super::Shell;
 use crate::command::CommandId;
-use crate::workspace_menu::CARET;
+use crate::theme::icons::Icon;
+use crate::theme::menu_chrome::{caret_text, focused_field};
 use domain::{LayoutNode, PanelId};
-use gpui::{div, prelude::*, px, AnyView, App, Context, Hsla, MouseButton, SharedString, Window};
+use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 
-const CLOSE_GLYPH: &str = "\u{00d7}";
-const GEAR_GLYPH: &str = "\u{2699}\u{fe0e}";
 const GEAR_TOOLTIP: &str = "Pane Options";
 const CLOSE_TOOLTIP: &str = "Close Pane";
+const HEADER_GAP_PX: f32 = 7.0;
+const BUTTON_GAP_PX: f32 = 2.0;
+const RENAME_PADDING_X_PX: f32 = 6.0;
+const RENAME_RADIUS_PX: f32 = 5.0;
 
 impl Shell {
     pub(super) fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
-        let title = self.pane_display_title(panel);
-        let title_color = if is_focused { theme.text_default() } else { theme.text.muted };
-        let editing = self.pane_field.as_ref().filter(|field| field.panel == panel);
-        let title_element = match editing {
-            Some(field) => div()
-                .id(SharedString::from(format!("pane-title-{panel}")))
-                .flex_shrink()
-                .min_w(px(0.0))
-                .px_1()
-                .rounded(px(theme.layout.border_radius_px))
-                .border_1()
-                .border_color(theme.border_focus())
-                .child(format!("{}{CARET}", field.text)),
-            None => div()
-                .id(SharedString::from(format!("pane-title-{panel}")))
-                .flex_1()
-                .min_w(px(0.0))
-                .truncate()
-                .text_color(title_color)
-                .tooltip(self.tooltip_builder(self.pane_title_tooltip(panel).into()))
-                .child(title),
-        };
+        let header = theme.pane_header;
+        let group = SharedString::from(format!("pane-header-{panel}"));
         let drag_handle = div()
             .flex_1()
             .min_w(px(0.0))
@@ -41,7 +24,7 @@ impl Shell {
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
+            .gap(px(HEADER_GAP_PX))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
@@ -53,59 +36,105 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .child(title_element);
+            .child(self.status_dot(panel))
+            .child(self.pane_title_element(panel, is_focused));
+        let buttons = div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(BUTTON_GAP_PX))
+            .when(!is_focused, |buttons| buttons.invisible().group_hover(group.clone(), |buttons| buttons.visible()))
+            .child(self.gear_button(panel, cx))
+            .child(self.close_button(panel, cx));
         div()
+            .group(group)
             .absolute()
             .top_0()
             .left_0()
             .right_0()
             .h(px(theme.layout.pane_header_height_px))
-            .px_2()
+            .px(px(header.padding_x_px))
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
-            .bg(theme.canvas())
+            .gap(px(HEADER_GAP_PX))
+            .font_family(SharedString::from(theme.ui_font.family.clone()))
+            .text_size(px(theme.ui_font.pane_title_px))
+            .bg(theme.surface.canvas)
             .rounded_t(px(theme.layout.island_radius_px))
-            .border_b_1()
-            .border_color(theme.border.muted)
             .child(drag_handle)
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .child(self.gear_button(panel, cx))
-                    .child(self.close_button(panel, cx)),
-            )
+            .child(buttons)
     }
 
-    fn header_button(&self, id: String, tooltip: &'static str, glyph: &'static str) -> gpui::Stateful<gpui::Div> {
+    fn status_dot(&self, panel: PanelId) -> impl IntoElement {
         let theme = &self.state.theme;
-        let hover_bg = theme.surface.subtle;
+        let color = match self.is_pane_busy(panel) {
+            true => theme.status.running,
+            false => theme.status.idle,
+        };
+        div().flex_none().size(px(theme.pane_header.status_dot_px)).rounded_full().bg(color)
+    }
+
+    fn pane_title_element(&self, panel: PanelId, is_focused: bool) -> Stateful<gpui::Div> {
+        let theme = &self.state.theme;
+        let id = SharedString::from(format!("pane-title-{panel}"));
+        if let Some(field) = self.pane_field.as_ref().filter(|field| field.panel == panel) {
+            return focused_field(theme)
+                .id(id)
+                .flex_shrink()
+                .min_w(px(0.0))
+                .px(px(RENAME_PADDING_X_PX))
+                .rounded(px(RENAME_RADIUS_PX))
+                .child(caret_text(&field.text, &self.pane_display_title(panel), theme));
+        }
+        let (color, weight) = match is_focused {
+            true => (theme.text.default, FontWeight::SEMIBOLD),
+            false => (theme.text.subtle, FontWeight::MEDIUM),
+        };
+        div()
+            .id(id)
+            .flex_1()
+            .min_w(px(0.0))
+            .truncate()
+            .text_color(color)
+            .font_weight(weight)
+            .tooltip(self.tooltip_builder(self.pane_title_tooltip(panel).into()))
+            .child(self.pane_display_title(panel))
+    }
+
+    fn header_button(&self, id: String, tooltip: &'static str, icon: Icon) -> Stateful<gpui::Div> {
+        let header = self.state.theme.pane_header;
+        let hover_fill = self.state.theme.chrome.icon_hover_fill;
         div()
             .id(SharedString::from(id))
             .relative()
-            .px_1()
+            .size(px(header.icon_button_px))
             .flex()
             .items_center()
-            .rounded(px(theme.layout.border_radius_px))
+            .justify_center()
+            .rounded(px(header.icon_button_radius_px))
             .cursor_pointer()
-            .text_color(theme.text.muted)
-            .hover(move |style| style.bg(hover_bg))
+            .hover(move |style| style.bg(hover_fill))
             .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
-            .child(glyph)
+            .child(icon.sized(header.icon_px))
     }
 
     fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
         let theme = &self.state.theme;
-        let colors = (theme.canvas(), theme.border_default(), theme.text_default());
-        move |_window, cx| cx.new(|_| Tooltip { text: text.clone(), colors }).into()
+        let style = TooltipStyle {
+            fill: theme.surface.canvas,
+            border: theme.border.default,
+            text: theme.text.default,
+            font: theme.ui_font.family.clone().into(),
+            size_px: theme.ui_font.hint_px,
+            radius_px: theme.top_bar.control_radius_px,
+        };
+        move |_window, cx| cx.new(|_| Tooltip { text: text.clone(), style: style.clone() }).into()
     }
 
     fn gear_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
-        self.header_button(format!("pane-gear-{panel}"), GEAR_TOOLTIP, GEAR_GLYPH)
+        self.header_button(format!("pane-gear-{panel}"), GEAR_TOOLTIP, Icon::Gear)
             .child(self.gear_bounds_probe(panel))
             .on_mouse_down(
                 MouseButton::Left,
@@ -117,7 +146,7 @@ impl Shell {
     }
 
     fn close_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
-        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, CLOSE_GLYPH).on_mouse_down(
+        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, Icon::Close).on_mouse_down(
             MouseButton::Left,
             cx.listener(move |shell, _event, window, cx| {
                 cx.stop_propagation();
@@ -142,14 +171,35 @@ impl Shell {
     }
 }
 
+#[derive(Clone)]
+struct TooltipStyle {
+    fill: Hsla,
+    border: Hsla,
+    text: Hsla,
+    font: SharedString,
+    size_px: f32,
+    radius_px: f32,
+}
+
 struct Tooltip {
     text: SharedString,
-    colors: (Hsla, Hsla, Hsla),
+    style: TooltipStyle,
 }
 
 impl Render for Tooltip {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let (bg, border, fg) = self.colors;
-        div().px_2().py_1().rounded_md().shadow_md().bg(bg).border_1().border_color(border).text_color(fg).child(self.text.clone())
+        let style = &self.style;
+        div()
+            .px_2()
+            .py_1()
+            .rounded(px(style.radius_px))
+            .shadow_md()
+            .bg(style.fill)
+            .border_1()
+            .border_color(style.border)
+            .font_family(style.font.clone())
+            .text_size(px(style.size_px))
+            .text_color(style.text)
+            .child(self.text.clone())
     }
 }
