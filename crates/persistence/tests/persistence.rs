@@ -113,6 +113,34 @@ fn migration_adds_snapshot_columns_to_v1_database() {
 }
 
 #[test]
+fn migration_adds_panel_name_to_v2_database() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("v2.db");
+    let conn = rusqlite::Connection::open(&path).expect("open v2");
+    conn.execute_batch(SCHEMA_SQL).expect("create v1 schema");
+    conn.execute_batch("ALTER TABLE panels ADD COLUMN cwd TEXT")
+        .expect("add v2 cwd");
+    conn.execute_batch(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2025-01-01');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2025-01-02');",
+    )
+    .expect("record v2");
+    drop(conn);
+
+    let repo = Repository::open(&path).expect("migrate v2");
+    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
+    let name_count: i64 = repo.pool().with_conn(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('panels') WHERE name = 'name'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("panel name column")
+    });
+    assert_eq!(name_count, 1);
+}
+
+#[test]
 fn workspace_repo_roundtrip() {
     let (_dir, repo) = fresh_repo();
     let workspace_id = WorkspaceId::new();
