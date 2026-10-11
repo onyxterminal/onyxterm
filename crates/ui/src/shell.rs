@@ -229,6 +229,11 @@ impl Shell {
             }
             CommandId::NextTab => self.model.tabs_mut().select_next(),
             CommandId::PrevTab => self.model.tabs_mut().select_previous(),
+            CommandId::SelectTab(index) => self.model.tabs_mut().activate(index),
+            CommandId::SelectWorkspace(index) => self.select_workspace_at(index, cx),
+            CommandId::NextWorkspace => self.select_neighbor_workspace(1, cx),
+            CommandId::PrevWorkspace => self.select_neighbor_workspace(-1, cx),
+            CommandId::OpenWorkspaceMenu => self.open_workspace_menu(cx),
             CommandId::SplitRight => self.split_focused(Axis::Horizontal, cx),
             CommandId::SplitDown => self.split_focused(Axis::Vertical, cx),
             CommandId::FocusAdjacent => self.focus_next_pane(),
@@ -580,6 +585,12 @@ impl Shell {
         cx.notify();
     }
 
+    fn open_workspace_menu(&mut self, cx: &mut Context<Self>) {
+        self.is_workspace_menu_open = true;
+        self.menu_field = None;
+        cx.notify();
+    }
+
     fn close_workspace_menu(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = false;
         self.menu_field = None;
@@ -592,6 +603,17 @@ impl Shell {
         self.show_active_workspace(cx);
         self.persist();
         self.close_workspace_menu(cx);
+    }
+
+    fn select_workspace_at(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(id) = self.model.workspace_id_at(index) {
+            self.select_workspace(id, cx);
+        }
+    }
+
+    fn select_neighbor_workspace(&mut self, step: isize, cx: &mut Context<Self>) {
+        let id = self.model.neighbor_workspace_id(step);
+        self.select_workspace(id, cx);
     }
 
     fn dismiss_notice(&mut self, cx: &mut Context<Self>) {

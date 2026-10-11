@@ -67,6 +67,8 @@ impl Combo {
             "left" => "\u{2190}".to_string(),
             "up" => "\u{2191}".to_string(),
             "down" => "\u{2193}".to_string(),
+            "enter" => "\u{21a9}".to_string(),
+            "tab" => "\u{21e5}".to_string(),
             other => other.to_uppercase(),
         };
         format!("{prefix}{key}")
@@ -150,32 +152,67 @@ impl Keymap {
     }
 }
 
+const INDEXED_SLOTS: usize = 9;
+
 impl Default for Keymap {
     fn default() -> Self {
-        use CommandId::*;
-        let cmd_alt = Modifiers::command() | Modifiers::alt();
         let mut map = Self::new();
-        map.bind(Combo::new(Modifiers::command(), "t"), NewTab);
-        map.bind(Combo::new(Modifiers::command(), "w"), CloseActive);
-        map.bind(Combo::new(Modifiers::command_shift(), "w"), CloseTab);
-        map.bind(Combo::new(Modifiers::command(), "a"), SelectAll);
-        map.bind(Combo::new(Modifiers::command(), "q"), Quit);
-        map.bind(Combo::new(Modifiers::command(), "k"), OpenPalette);
-        map.bind(Combo::new(Modifiers::command(), ","), OpenSettings);
-        map.bind(Combo::new(Modifiers::command(), "c"), Copy);
-        map.bind(Combo::new(Modifiers::command(), "v"), Paste);
-        map.bind(Combo::new(Modifiers::command(), "}"), NextTab);
-        map.bind(Combo::new(Modifiers::command(), "{"), PrevTab);
-        map.bind(Combo::new(cmd_alt, "right"), SplitRight);
-        map.bind(Combo::new(cmd_alt, "down"), SplitDown);
-        map.bind(Combo::new(cmd_alt, "up"), FocusAdjacent);
-        map.bind(Combo::new(cmd_alt, "left"), FocusAdjacent);
-        map.bind(Combo::new(Modifiers::command_shift(), "m"), MaximizePane);
-        map.bind(Combo::new(Modifiers::command_shift(), "n"), NewWorkspace);
-        map.bind(Combo::new(Modifiers::command() | Modifiers::control(), "f"), ToggleFullScreen);
-        map.bind(Combo::new(Modifiers::command(), "m"), Minimize);
-        map.bind(Combo::new(Modifiers::command(), "h"), Hide);
-        map.bind(Combo::new(cmd_alt, "h"), HideOthers);
+        bind_application(&mut map);
+        bind_panes(&mut map);
+        bind_tabs(&mut map);
+        bind_workspaces(&mut map);
         map
     }
+}
+
+fn bind_application(map: &mut Keymap) {
+    use CommandId::*;
+    let cmd = Modifiers::command();
+    map.bind(Combo::new(cmd, "a"), SelectAll);
+    map.bind(Combo::new(cmd, "q"), Quit);
+    map.bind(Combo::new(Modifiers::command_shift(), "p"), OpenPalette);
+    map.bind(Combo::new(cmd, ","), OpenSettings);
+    map.bind(Combo::new(cmd, "c"), Copy);
+    map.bind(Combo::new(cmd, "v"), Paste);
+    map.bind(Combo::new(cmd | Modifiers::control(), "f"), ToggleFullScreen);
+    map.bind(Combo::new(cmd, "m"), Minimize);
+}
+
+fn bind_panes(map: &mut Keymap) {
+    use CommandId::*;
+    let cmd = Modifiers::command();
+    map.bind(Combo::new(cmd, "w"), CloseActive);
+    map.bind(Combo::new(cmd, "d"), SplitRight);
+    map.bind(Combo::new(Modifiers::command_shift(), "d"), SplitDown);
+    map.bind(Combo::new(cmd, "enter"), MaximizePane);
+}
+
+fn bind_tabs(map: &mut Keymap) {
+    use CommandId::*;
+    let cmd = Modifiers::command();
+    map.bind(Combo::new(cmd, "t"), NewTab);
+    map.bind(Combo::new(Modifiers::command_shift(), "w"), CloseTab);
+    map.bind(Combo::new(cmd, "}"), NextTab);
+    map.bind(Combo::new(cmd, "{"), PrevTab);
+    map.bind(Combo::new(Modifiers::control(), "tab"), NextTab);
+    map.bind(Combo::new(Modifiers::control() | Modifiers::shift(), "tab"), PrevTab);
+    for index in 0..INDEXED_SLOTS {
+        map.bind(Combo::new(cmd, slot_key(index)), SelectTab(index));
+    }
+}
+
+fn bind_workspaces(map: &mut Keymap) {
+    use CommandId::*;
+    let cmd_alt = Modifiers::command() | Modifiers::alt();
+    map.bind(Combo::new(Modifiers::command_shift(), "n"), NewWorkspace);
+    map.bind(Combo::new(Modifiers::command(), "o"), OpenWorkspaceMenu);
+    map.bind(Combo::new(cmd_alt, "]"), NextWorkspace);
+    map.bind(Combo::new(cmd_alt, "["), PrevWorkspace);
+    for index in 0..INDEXED_SLOTS {
+        map.bind(Combo::new(cmd_alt, slot_key(index)), SelectWorkspace(index));
+    }
+}
+
+fn slot_key(index: usize) -> String {
+    (index + 1).to_string()
 }

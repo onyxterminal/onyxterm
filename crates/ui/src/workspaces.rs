@@ -95,6 +95,15 @@ impl WorkspaceModel {
         self.entries[self.active].workspace.root.clone().unwrap_or_else(|| self.home.clone())
     }
 
+    pub fn workspace_id_at(&self, index: usize) -> Option<WorkspaceId> {
+        self.entries.get(index).map(|entry| entry.workspace.id)
+    }
+
+    pub fn neighbor_workspace_id(&self, step: isize) -> WorkspaceId {
+        let index = (self.active as isize + step).rem_euclid(self.entries.len() as isize) as usize;
+        self.entries[index].workspace.id
+    }
+
     pub fn switch_to(&mut self, id: WorkspaceId) {
         if let Some(index) = self.position(id) {
             self.active = index;

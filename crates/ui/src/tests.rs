@@ -47,8 +47,9 @@ fn theme_hex_to_hsla_conversion() {
 #[test]
 fn keymap_resolves_default_bindings() {
     let map = Keymap::default();
-    let cmd_k = Combo::new(Modifiers::command(), "k");
-    assert_eq!(map.resolve(&cmd_k), Some(CommandId::OpenPalette));
+    let cmd_shift_p = Combo::new(Modifiers::command_shift(), "p");
+    assert_eq!(map.resolve(&cmd_shift_p), Some(CommandId::OpenPalette));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "k")), None);
     let cmd_w = Combo::new(Modifiers::command(), "w");
     assert_eq!(map.resolve(&cmd_w), Some(CommandId::CloseActive));
     let cmd_t = Combo::new(Modifiers::command(), "t");
@@ -236,6 +237,29 @@ fn keymap_tab_switch_matches_gpui_shifted_bracket_keys() {
     let map = Keymap::default();
     assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "}")), Some(CommandId::NextTab));
     assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "{")), Some(CommandId::PrevTab));
+}
+
+#[test]
+fn keymap_binds_tabs_and_workspaces_by_index_and_order() {
+    let map = Keymap::default();
+    let cmd = Modifiers::command();
+    let cmd_alt = cmd | Modifiers::alt();
+    for slot in 1..=9 {
+        let key = slot.to_string();
+        assert_eq!(map.resolve(&Combo::new(cmd, key.as_str())), Some(CommandId::SelectTab(slot - 1)));
+        assert_eq!(map.resolve(&Combo::new(cmd_alt, key.as_str())), Some(CommandId::SelectWorkspace(slot - 1)));
+    }
+    assert_eq!(map.resolve(&Combo::new(Modifiers::control(), "tab")), Some(CommandId::NextTab));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::control() | Modifiers::shift(), "tab")), Some(CommandId::PrevTab));
+    assert_eq!(map.resolve(&Combo::new(cmd_alt, "]")), Some(CommandId::NextWorkspace));
+    assert_eq!(map.resolve(&Combo::new(cmd_alt, "[")), Some(CommandId::PrevWorkspace));
+    assert_eq!(map.resolve(&Combo::new(cmd, "o")), Some(CommandId::OpenWorkspaceMenu));
+    assert_eq!(map.combo_for(CommandId::NextTab), Some(&Combo::new(cmd, "}")));
+}
+
+#[test]
+fn default_keymap_has_no_conflicts() {
+    assert!(Keymap::default().conflicts().is_empty());
 }
 
 #[test]
@@ -509,8 +533,8 @@ fn menu_bar_lists_native_sections_and_window_shortcuts() {
     let map = Keymap::default();
     let cmd = Modifiers::command();
     assert_eq!(map.resolve(&Combo::new(cmd, "m")), Some(CommandId::Minimize));
-    assert_eq!(map.resolve(&Combo::new(cmd, "h")), Some(CommandId::Hide));
-    assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::alt(), "h")), Some(CommandId::HideOthers));
+    assert_eq!(map.combo_for(CommandId::Hide), None);
+    assert_eq!(map.combo_for(CommandId::HideOthers), None);
     assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::control(), "f")), Some(CommandId::ToggleFullScreen));
     assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "w")), Some(CommandId::CloseTab));
 }
@@ -519,13 +543,16 @@ fn menu_bar_lists_native_sections_and_window_shortcuts() {
 fn shortcuts_match_the_physical_key_under_an_arabic_layout() {
     let map = Keymap::default();
     let cmd = Modifiers::command();
-    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0646}", None)), Some(CommandId::OpenPalette));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{062d}", None)), Some(CommandId::OpenPalette));
     assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0635}", None)), Some(CommandId::CloseActive));
     assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0641}", None)), Some(CommandId::NewTab));
-    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{0648}", None)), Some(CommandId::MaximizePane));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{064a}", None)), Some(CommandId::SplitDown));
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "\u{0663}", None)), Some(CommandId::SelectTab(2)));
+    let cmd_alt = cmd | Modifiers::alt();
+    assert_eq!(map.resolve_keystroke(&keystroke(cmd_alt, "\u{0629}", None)), Some(CommandId::NextWorkspace));
     assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{0629}", None)), Some(CommandId::NextTab));
     assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "\u{062c}", None)), Some(CommandId::PrevTab));
-    assert_eq!(map.resolve_keystroke(&keystroke(cmd, "k", None)), Some(CommandId::OpenPalette));
+    assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::command_shift(), "p", None)), Some(CommandId::OpenPalette));
     assert_eq!(map.resolve_keystroke(&keystroke(Modifiers::none(), "\u{0646}", Some("\u{0646}"))), None);
     let control_c = crate::keymap::physical_combo(&keystroke(Modifiers::control(), "\u{0630}", None));
     assert_eq!(control_c, Some(Combo::new(Modifiers::control(), "c")));
@@ -658,9 +685,9 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
         })
         .collect();
     let expected = [
-        ("Split Right", Some("\u{2325}\u{2318}\u{2192}")),
-        ("Split Down", Some("\u{2325}\u{2318}\u{2193}")),
-        ("Maximize Pane", Some("\u{21e7}\u{2318}M")),
+        ("Split Right", Some("\u{2318}D")),
+        ("Split Down", Some("\u{21e7}\u{2318}D")),
+        ("Maximize Pane", Some("\u{2318}\u{21a9}")),
         ("-", None),
         ("Rename Pane\u{2026}", None),
         ("Move to New Tab", None),
@@ -954,7 +981,7 @@ fn palette_rows_carry_category_and_bound_shortcut() {
     let row = |title: &str| rows.iter().find(|row| row.title == title).cloned().unwrap();
     assert_eq!(
         row("Split Right"),
-        PaletteRow { title: "Split Right".into(), category: "Panes", shortcut: Some("\u{2325}\u{2318}\u{2192}".into()) }
+        PaletteRow { title: "Split Right".into(), category: "Panes", shortcut: Some("\u{2318}D".into()) }
     );
     assert_eq!(row("New Tab").category, "Tabs");
     assert_eq!(row("New Tab").shortcut.as_deref(), Some("\u{2318}T"));

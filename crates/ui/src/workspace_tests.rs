@@ -303,3 +303,17 @@ fn moving_a_pane_into_its_own_tab_or_a_missing_tab_is_rejected() {
     assert!(model.tabs_mut().move_panel_to_tab(panel, 99).is_err());
     assert!(model.tabs().iter().any(|tab| tab.contains(panel)));
 }
+
+#[test]
+fn workspaces_resolve_by_index_and_neighbors_wrap_in_entry_order() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut model = seeded_model(dir.path());
+    let order: Vec<WorkspaceId> = model.entries().iter().map(|entry| entry.workspace.id).collect();
+    assert_eq!(model.workspace_id_at(1), Some(order[1]));
+    assert_eq!(model.workspace_id_at(order.len()), None);
+    model.switch_to(order[0]);
+    assert_eq!(model.neighbor_workspace_id(1), order[1]);
+    assert_eq!(model.neighbor_workspace_id(-1), order[order.len() - 1]);
+    model.switch_to(order[order.len() - 1]);
+    assert_eq!(model.neighbor_workspace_id(1), order[0]);
+}
