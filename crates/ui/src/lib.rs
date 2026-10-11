@@ -9,6 +9,7 @@ pub mod copy_mode;
 pub mod document;
 pub mod editor_keys;
 pub mod editor_view;
+pub mod file_tree;
 pub mod input;
 pub mod island_look;
 pub mod keymap;

@@ -6337,6 +6337,7 @@ version = "0.1.0"
 dependencies = [
  "domain",
  "editor-core",
+ "fs-service",
  "gpui",
  "parking_lot",
  "serde",
