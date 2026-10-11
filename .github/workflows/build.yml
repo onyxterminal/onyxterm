@@ -38,14 +38,14 @@ jobs:
             platform: windows
             artifact_id: app-windows-x86_64
     steps:
+      - uses: actions/checkout@v6
+
       - name: Resolve version
         id: version
         shell: bash
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
