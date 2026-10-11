@@ -95,27 +95,48 @@ fn row_style(group: SharedString) -> MenuRowStyle {
 fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuActions) -> impl IntoElement {
     let group = SharedString::from(format!("workspace-row-{}", item.id));
     let style = row_style(group.clone());
-    let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme)
-        .when(item.is_editable, |count| count.group_hover(group.clone(), |style| style.hidden()));
+    let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme);
+    let trailing = if item.is_editable {
+        let width = theme.pane_header.icon_button_px * 2.0 + ROW_ACTION_GAP_PX;
+        // Keep both states in the layout so hover changes cannot skip child prepaint.
+        div()
+            .relative()
+            .w(px(width))
+            .h(px(theme.pane_header.icon_button_px))
+            .flex_none()
+            .child(
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .child(count.group_hover(group.clone(), |style| style.invisible())),
+            )
+            .child(row_actions(&item.id, group, theme, &actions))
+            .into_any_element()
+    } else {
+        count.into_any_element()
+    };
     let (select, select_id) = (actions.select.clone(), item.id.clone());
     menu_row(item.id.clone(), style, theme)
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
         .child(div().w(px(CHECK_COLUMN_PX)).flex_none().child(if item.is_active { CHECK_MARK } else { "" }))
         .child(div().flex_1().min_w(px(0.0)).truncate().child(item.name))
-        .child(count)
-        .when(item.is_editable, |row| row.child(row_actions(&item.id, group, theme, &actions)))
+        .child(trailing)
 }
 
 fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
     let (rename, delete) = (actions.rename.clone(), actions.delete.clone());
     let (rename_id, delete_id) = (id.clone(), id.clone());
     div()
-        .hidden()
-        .flex_none()
+        .absolute()
+        .inset_0()
+        .flex()
         .flex_row()
         .items_center()
         .gap(px(ROW_ACTION_GAP_PX))
-        .group_hover(group, |style| style.flex())
+        .invisible()
+        .group_hover(group, |style| style.visible())
         .child(row_button(format!("rename-{id}"), Icon::Pencil, theme, move |window, cx| {
             rename(&rename_id, window, cx)
         }))
@@ -145,6 +166,63 @@ fn row_button(
             on_click(window, cx);
         })
         .child(icon.sized(ROW_ACTION_ICON_PX))
+}
+
+#[cfg(test)]
+mod paint_tests {
+    use super::*;
+    use gpui::{point, Context, Modifiers, Render, TestAppContext};
+    use std::cell::Cell;
+
+    struct TestMenu {
+        model: WorkspaceMenuModel,
+        theme: Theme,
+        actions: WorkspaceMenuActions,
+    }
+
+    impl Render for TestMenu {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            workspace_menu(self.model.clone(), &self.theme, self.actions.clone())
+        }
+    }
+
+    #[test]
+    fn workspace_actions_survive_hover_during_paint() {
+        let mut app = TestAppContext::single();
+        let theme = Theme::load_default().expect("theme");
+        let rename_count = Rc::new(Cell::new(0));
+        let model = WorkspaceMenuModel {
+            items: vec![WorkspaceMenuItem {
+                id: "workspace-1".into(),
+                name: "Project".into(),
+                tab_count: 2,
+                is_active: true,
+                is_editable: true,
+            }],
+            field: None,
+            new_workspace_shortcut: None,
+        };
+        let actions = WorkspaceMenuActions {
+            select: Rc::new(|_, _, _| {}),
+            rename: {
+                let rename_count = rename_count.clone();
+                Rc::new(move |_, _, _| rename_count.set(rename_count.get() + 1))
+            },
+            delete: Rc::new(|_, _, _| {}),
+            create: Rc::new(|_, _| {}),
+        };
+        let row_y = theme.menu.padding_px + theme.menu.section_label_height_px + theme.menu.row_height_px / 2.0;
+        let action_x = theme.menu.width_px
+            - theme.menu.padding_px
+            - theme.menu.row_padding_x_px
+            - theme.pane_header.icon_button_px * 1.5
+            - ROW_ACTION_GAP_PX;
+        let (_menu, cx) = app.add_window_view(|_, _| TestMenu { model, theme, actions });
+        cx.simulate_mouse_move(point(px(action_x), px(row_y)), None, Modifiers::default());
+        cx.simulate_mouse_down(point(px(action_x), px(row_y)), MouseButton::Left, Modifiers::default());
+        assert_eq!(rename_count.get(), 1);
+        cx.simulate_mouse_move(point(px(390.0), px(290.0)), None, Modifiers::default());
+    }
 }
 
 fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandler) -> impl IntoElement {
