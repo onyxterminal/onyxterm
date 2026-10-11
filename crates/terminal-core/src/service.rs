@@ -42,15 +42,6 @@ pub trait TerminalService: Send + Sync {
     ) -> Result<(), TerminalError>;
 }
 
-const TERMINAL_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
-
-#[derive(Debug, Clone)]
-pub struct ShellCommand {
-    pub program: PathBuf,
-    pub args: Vec<String>,
-    pub cwd: PathBuf,
-}
-
 pub struct InMemoryTerminalService {
     pty: Box<dyn Pty>,
     sessions: Mutex<HashMap<TerminalSessionId, TerminalHandle>>,
@@ -105,32 +96,6 @@ impl InMemoryTerminalService {
     pub fn active_session_count(&self) -> usize {
         self.sessions.lock().len()
     }
-
-    pub fn spawn_command(
-        &self,
-        command: ShellCommand,
-        size: GridSize,
-    ) -> Result<TerminalSessionId, TerminalError> {
-        let id = TerminalSessionId::new();
-        let env = TERMINAL_ENV
-            .iter()
-            .map(|(key, value)| (key.to_string(), value.to_string()))
-            .collect();
-        let pty_handle = self.pty.spawn(command.program, command.args, command.cwd, env, size)?;
-        let terminal = Terminal::new(id, size, self.scrollback);
-        let handle = TerminalHandle::attach(terminal, pty_handle)?;
-        self.sessions.lock().insert(id, handle);
-        Ok(id)
-    }
-
-    pub fn terminate_session(&self, session: TerminalSessionId) -> Result<(), TerminalError> {
-        let handle = self
-            .sessions
-            .lock()
-            .remove(&session)
-            .ok_or_else(|| TerminalError::SessionNotFound(session.to_string()))?;
-        handle.kill()
-    }
 }
 
 #[async_trait]
@@ -141,8 +106,18 @@ impl TerminalService for InMemoryTerminalService {
         cwd: PathBuf,
         size: GridSize,
     ) -> Result<TerminalSessionId, TerminalError> {
-        let command = ShellCommand { program: shell, args: Vec::new(), cwd };
-        self.spawn_command(command, size)
+        let id = TerminalSessionId::new();
+        let pty_handle = self.pty.spawn(
+            shell,
+            Vec::new(),
+            cwd,
+            HashMap::new(),
+            size,
+        )?;
+        let terminal = Terminal::new(id, size, self.scrollback);
+        let handle = TerminalHandle::attach(terminal, pty_handle)?;
+        self.sessions.lock().insert(id, handle);
+        Ok(id)
     }
 
     async fn write(
@@ -181,7 +156,11 @@ impl TerminalService for InMemoryTerminalService {
     }
 
     async fn terminate(&self, session: TerminalSessionId) -> Result<(), TerminalError> {
-        self.terminate_session(session)
+        let mut guard = self.sessions.lock();
+        let handle = guard
+            .remove(&session)
+            .ok_or_else(|| TerminalError::SessionNotFound(session.to_string()))?;
+        handle.kill()
     }
 
     async fn snapshot(
