@@ -262,3 +262,43 @@ fn restore_notice_lists_each_warning() {
     .expect("notice");
     assert!(notice.contains("/gone") && notice.contains("/home/me"));
 }
+
+#[test]
+fn moving_panes_keeps_their_sessions_and_persists_the_layout() {
+    use domain::DropZone;
+    let root = TempDir::new().unwrap();
+    let mut model = seeded_model(root.path());
+    model.switch_to(workspace_ids(&model)[0]);
+    let first = open_terminal_tab(&mut model, root.path());
+    let second = open_terminal_tab(&mut model, root.path());
+    let session_of = |model: &WorkspaceModel, panel: PanelId| model.panel(panel).unwrap().panel.resource;
+    let (first_session, second_session) = (session_of(&model, first), session_of(&model, second));
+    let tab_count = model.tabs().len();
+
+    model.tabs_mut().move_panel_to_tab(second, tab_count - 2).unwrap();
+    assert_eq!(model.tabs().len(), tab_count - 1);
+    let tab = model.tabs().active().unwrap();
+    assert_eq!(tab.layout().leaves(), vec![first, second]);
+    assert_eq!(tab.focused(), second);
+
+    model.tabs_mut().active_mut().unwrap().move_panel(second, first, DropZone::Top).unwrap();
+    let expected = split(Axis::Vertical, 0.5, LayoutNode::leaf(second), LayoutNode::leaf(first));
+    assert_eq!(model.tabs().active().unwrap().layout(), &expected);
+    assert_eq!(session_of(&model, first), first_session);
+    assert_eq!(session_of(&model, second), second_session);
+
+    let snapshot = model.snapshot();
+    let restored = WorkspaceModel::from_snapshot(snapshot, root.path());
+    assert_eq!(restored.tabs().active().unwrap().layout(), &expected);
+}
+
+#[test]
+fn moving_a_pane_into_its_own_tab_or_a_missing_tab_is_rejected() {
+    let root = TempDir::new().unwrap();
+    let mut model = seeded_model(root.path());
+    let panel = open_terminal_tab(&mut model, root.path());
+    let own = model.tabs().position_of(panel).unwrap();
+    assert!(model.tabs_mut().move_panel_to_tab(panel, own).is_err());
+    assert!(model.tabs_mut().move_panel_to_tab(panel, 99).is_err());
+    assert!(model.tabs().iter().any(|tab| tab.contains(panel)));
+}

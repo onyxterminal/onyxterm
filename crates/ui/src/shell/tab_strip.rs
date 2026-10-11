@@ -1,3 +1,4 @@
+use super::pane_drag::DraggedPane;
 use super::{edit_field, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::workspace_menu::CARET;
 use gpui::{div, img, prelude::*, px, Context, Image, ImageFormat, Keystroke, MouseButton, SharedString, Window};
@@ -29,6 +30,7 @@ impl Shell {
             })
             .collect();
         let layout = theme.layout;
+        let drop_border = theme.accent.primary;
         let leading_inset = match is_fullscreen {
             true => layout.window_margin_px,
             false => layout.traffic_lights_width_px,
@@ -70,6 +72,10 @@ impl Shell {
                     .border_1()
                     .border_color(border)
                     .when(!is_active, |el| el.hover(move |style| style.bg(hover_bg)))
+                    .drag_over::<DraggedPane>(move |style, _dragged, _window, _cx| style.border_color(drop_border))
+                    .on_drop(cx.listener(move |shell, dragged: &DraggedPane, _window, cx| {
+                        shell.move_pane_to_tab(dragged.panel, index, cx)
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {

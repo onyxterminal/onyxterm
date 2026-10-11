@@ -13,7 +13,7 @@ mod workspace;
 pub use agent::{Agent, AgentState};
 pub use error::DomainError;
 pub use id::{AgentId, PanelId, TabId, TerminalSessionId, WorkspaceId};
-pub use layout::{axis_helpers, Axis, LayoutNode, SplitRatio};
+pub use layout::{axis_helpers, Axis, DropZone, LayoutNode, SplitRatio};
 pub use panel::{Panel, PanelKind, ResourceRef};
 pub use reducer::{WorkspaceReducer, WorkspaceReducerEvent};
 pub use terminal::{ProcessStatus, TerminalSession};

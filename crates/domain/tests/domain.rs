@@ -237,3 +237,67 @@ fn layout_replace_leaf_swaps_panel() {
     assert!(replaced);
     assert_eq!(root.leaves(), vec![p2]);
 }
+
+mod pane_moves {
+    use domain::{Axis, DropZone, LayoutNode, PanelId};
+
+    fn two_up() -> (LayoutNode, PanelId, PanelId) {
+        let (a, b) = (PanelId::new(), PanelId::new());
+        let mut layout = LayoutNode::leaf(a);
+        layout.split_with(a, Axis::Horizontal, 0.5, b).unwrap();
+        (layout, a, b)
+    }
+
+    fn split(axis: Axis, first: PanelId, second: PanelId) -> LayoutNode {
+        LayoutNode::Split {
+            axis,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::leaf(first)),
+            second: Box::new(LayoutNode::leaf(second)),
+        }
+    }
+
+    #[test]
+    fn dropping_on_each_side_splits_the_target_and_collapses_the_source_parent() {
+        for (zone, axis, source_first) in [
+            (DropZone::Left, Axis::Horizontal, true),
+            (DropZone::Right, Axis::Horizontal, false),
+            (DropZone::Top, Axis::Vertical, true),
+            (DropZone::Bottom, Axis::Vertical, false),
+        ] {
+            let (mut layout, a, b) = two_up();
+            let c = PanelId::new();
+            layout.split_with(b, Axis::Vertical, 0.5, c).unwrap();
+            layout.move_leaf(c, a, zone).unwrap();
+            let moved = match source_first {
+                true => split(axis, c, a),
+                false => split(axis, a, c),
+            };
+            let expected = LayoutNode::Split {
+                axis: Axis::Horizontal,
+                ratio: 0.5,
+                first: Box::new(moved),
+                second: Box::new(LayoutNode::leaf(b)),
+            };
+            assert_eq!(layout, expected, "{zone:?}");
+            layout.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn dropping_on_the_center_swaps_two_panes() {
+        let (mut layout, a, b) = two_up();
+        layout.move_leaf(a, b, DropZone::Center).unwrap();
+        assert_eq!(layout, split(Axis::Horizontal, b, a));
+    }
+
+    #[test]
+    fn invalid_moves_leave_the_layout_untouched() {
+        let (mut layout, a, _b) = two_up();
+        let before = layout.clone();
+        assert!(layout.move_leaf(a, a, DropZone::Left).is_err());
+        assert!(layout.move_leaf(a, PanelId::new(), DropZone::Left).is_err());
+        assert!(layout.move_leaf(PanelId::new(), a, DropZone::Center).is_err());
+        assert_eq!(layout, before);
+    }
+}

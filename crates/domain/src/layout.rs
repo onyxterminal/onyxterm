@@ -19,6 +19,30 @@ impl Axis {
 
 pub type SplitRatio = f32;
 
+const DROP_SPLIT_RATIO: SplitRatio = 0.5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropZone {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Center,
+}
+
+impl DropZone {
+    fn axis(self) -> Axis {
+        match self {
+            DropZone::Left | DropZone::Right | DropZone::Center => Axis::Horizontal,
+            DropZone::Top | DropZone::Bottom => Axis::Vertical,
+        }
+    }
+
+    fn places_before(self) -> bool {
+        matches!(self, DropZone::Left | DropZone::Top)
+    }
+}
+
 pub mod axis_helpers {
     use super::Axis;
 
@@ -169,6 +193,48 @@ impl LayoutNode {
                     return Ok(true);
                 }
                 second.close_leaf(pred)
+            }
+        }
+    }
+
+    pub fn move_leaf(&mut self, source: PanelId, target: PanelId, zone: DropZone) -> Result<(), DomainError> {
+        let leaves = self.leaves();
+        if source == target || !leaves.contains(&source) || !leaves.contains(&target) {
+            return Err(DomainError::InvalidLayout(format!("cannot move {source} onto {target}")));
+        }
+        if zone == DropZone::Center {
+            self.swap_leaves(source, target);
+            return Ok(());
+        }
+        self.close_leaf(&mut |panel| panel == source)?;
+        self.insert_beside(target, source, zone)
+    }
+
+    pub fn insert_beside(&mut self, target: PanelId, panel: PanelId, zone: DropZone) -> Result<(), DomainError> {
+        let node = self
+            .find_leaf_mut(&mut |id| id == target)
+            .ok_or_else(|| DomainError::PanelNotFound(target.to_string()))?;
+        let (first, second) = match zone.places_before() {
+            true => (panel, target),
+            false => (target, panel),
+        };
+        *node = LayoutNode::Split {
+            axis: zone.axis(),
+            ratio: DROP_SPLIT_RATIO,
+            first: Box::new(LayoutNode::leaf(first)),
+            second: Box::new(LayoutNode::leaf(second)),
+        };
+        Ok(())
+    }
+
+    fn swap_leaves(&mut self, a: PanelId, b: PanelId) {
+        match self {
+            Self::Leaf { panel_id } if *panel_id == a => *panel_id = b,
+            Self::Leaf { panel_id } if *panel_id == b => *panel_id = a,
+            Self::Leaf { .. } => {}
+            Self::Split { first, second, .. } => {
+                first.swap_leaves(a, b);
+                second.swap_leaves(a, b);
             }
         }
     }

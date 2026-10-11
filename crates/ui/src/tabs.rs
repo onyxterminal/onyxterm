@@ -1,9 +1,23 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use domain::{Axis, DomainError, LayoutNode, PanelId, TabId};
+use domain::{Axis, DomainError, DropZone, LayoutNode, PanelId, TabId};
 
 pub const SPLIT_RATIO: f32 = 0.5;
+const CENTER_ZONE_HALF_EXTENT: f32 = 0.25;
+
+pub fn drop_zone_at(x_fraction: f32, y_fraction: f32) -> DropZone {
+    let (dx, dy) = (x_fraction - 0.5, y_fraction - 0.5);
+    if dx.abs() < CENTER_ZONE_HALF_EXTENT && dy.abs() < CENTER_ZONE_HALF_EXTENT {
+        return DropZone::Center;
+    }
+    match (dx.abs() >= dy.abs(), dx < 0.0, dy < 0.0) {
+        (true, true, _) => DropZone::Left,
+        (true, false, _) => DropZone::Right,
+        (false, _, true) => DropZone::Top,
+        (false, _, false) => DropZone::Bottom,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SplitSide {
@@ -100,6 +114,20 @@ impl Tab {
         }
     }
 
+    pub fn move_panel(&mut self, source: PanelId, target: PanelId, zone: DropZone) -> Result<(), DomainError> {
+        self.layout.move_leaf(source, target, zone)?;
+        self.focused = source;
+        self.is_maximized = false;
+        Ok(())
+    }
+
+    fn adopt_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {
+        self.layout.insert_beside(self.focused, panel, DropZone::Right)?;
+        self.focused = panel;
+        self.is_maximized = false;
+        Ok(())
+    }
+
     pub fn focus(&mut self, panel: PanelId) {
         if self.contains(panel) {
             self.focused = panel;
@@ -191,6 +219,21 @@ impl Tabs {
         if !self.tabs.is_empty() {
             self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
         }
+    }
+
+    pub fn move_panel_to_tab(&mut self, panel: PanelId, target: usize) -> Result<(), DomainError> {
+        let source = self.position_of(panel).ok_or_else(|| DomainError::PanelNotFound(panel.to_string()))?;
+        if source == target || target >= self.tabs.len() {
+            return Err(DomainError::InvalidLayout(format!("cannot move {panel} into tab {target}")));
+        }
+        let target_id = self.tabs[target].id();
+        self.close_panel(panel)?;
+        let index = self.tabs.iter().position(|tab| tab.id() == target_id).ok_or_else(|| {
+            DomainError::TabNotFound(target_id.to_string())
+        })?;
+        self.tabs[index].adopt_panel(panel)?;
+        self.active = index;
+        Ok(())
     }
 
     pub fn close_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {

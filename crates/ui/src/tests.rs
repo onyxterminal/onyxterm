@@ -586,3 +586,14 @@ fn set_split_ratio_targets_the_nested_split_by_path() {
     let LayoutNode::Split { ratio: inner, .. } = second.as_ref() else { panic!("nested split") };
     assert!((inner - 0.25).abs() < 1e-6);
 }
+
+#[test]
+fn drop_zone_picks_the_nearest_edge_or_the_center() {
+    use crate::tabs::drop_zone_at;
+    use domain::DropZone;
+    assert_eq!(drop_zone_at(0.5, 0.5), DropZone::Center);
+    assert_eq!(drop_zone_at(0.1, 0.5), DropZone::Left);
+    assert_eq!(drop_zone_at(0.9, 0.4), DropZone::Right);
+    assert_eq!(drop_zone_at(0.5, 0.05), DropZone::Top);
+    assert_eq!(drop_zone_at(0.45, 0.95), DropZone::Bottom);
+}

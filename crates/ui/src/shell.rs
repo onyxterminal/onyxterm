@@ -9,6 +9,7 @@ use crate::command::{
 };
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
+use pane_drag::DraggedPane;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
@@ -17,7 +18,7 @@ use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
-    FocusHandle,
+    DragMoveEvent, FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
     TitlebarOptions, Window, WindowOptions,
 };
@@ -30,6 +31,7 @@ use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
 mod pane_header;
+mod pane_drag;
 mod splits;
 mod tab_strip;
 mod text_input;
@@ -95,6 +97,7 @@ pub struct Shell {
     notice: Option<String>,
     marked_text: Option<String>,
     split_drag: Option<splits::SplitDrag>,
+    drop_target: Option<(PanelId, domain::DropZone)>,
     split_bounds: splits::SplitBounds,
     _quit_hook: Subscription,
 }
@@ -119,6 +122,7 @@ impl Shell {
             notice: restore_notice(&restored.warnings),
             marked_text: None,
             split_drag: None,
+            drop_target: None,
             split_bounds: splits::SplitBounds::default(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
@@ -222,6 +226,9 @@ impl Shell {
 
     fn consume_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let keystroke = &event.keystroke;
+        if keystroke.key == ESCAPE_KEY && cx.has_active_drag() {
+            return self.cancel_pane_drag(window, cx);
+        }
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
             return true;
@@ -690,8 +697,13 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
+            .on_drag_move(cx.listener(move |shell, event: &DragMoveEvent<DraggedPane>, _window, cx| {
+                shell.track_pane_drag(panel, event, cx)
+            }))
+            .on_drop(cx.listener(|shell, dragged: &DraggedPane, _window, cx| shell.drop_pane(dragged.panel, cx)))
             .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx))))
             .child(header)
+            .children(self.render_drop_highlight(panel))
             .into_any_element()
     }
 }
@@ -724,7 +736,10 @@ impl Render for Shell {
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
             .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
             .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| shell.drag_split(event, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.end_split_drag(cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
+                shell.end_split_drag(cx);
+                shell.clear_drop_target(cx);
+            }))
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)

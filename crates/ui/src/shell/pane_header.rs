@@ -1,3 +1,4 @@
+use super::pane_drag::{DraggedPane, PaneGhost};
 use super::{short_cwd, Shell};
 use crate::command::CommandId;
 use domain::{LayoutNode, PanelId};
@@ -25,7 +26,11 @@ impl Shell {
             },
             HeaderAction { command: CommandId::CloseActive, tooltip: "Close Pane" },
         ];
+        let dragged = DraggedPane::new(panel, title.clone().into());
+        let ghost_style = self.ghost_style();
         div()
+            .id(SharedString::from(format!("pane-header-{panel}")))
+            .on_drag(dragged, move |dragged, _offset, _window, cx| cx.new(|_| PaneGhost::new(dragged, ghost_style)))
             .absolute()
             .top_0()
             .left_0()

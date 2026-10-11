@@ -75,6 +75,7 @@ island_gap_px = 6
 window_margin_px = 8
 island_padding_px = 8
 min_pane_px = 120
+animation_ms = 150
 traffic_light_left_px = 14
 traffic_light_top_px = 11
 traffic_lights_width_px = 84

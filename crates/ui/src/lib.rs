@@ -7,6 +7,7 @@ pub mod confirm;
 pub mod input;
 pub mod keymap;
 pub mod menus;
+pub mod motion;
 pub mod palette;
 pub mod shell;
 pub mod tabs;
