@@ -80,7 +80,7 @@ impl Shell {
                     cx.stop_propagation();
                     shell.focus_pane(panel);
                     window.focus(&shell.focus_handle);
-                    shell.run_command(command, cx);
+                    shell.run_command(command, window, cx);
                 }),
             )
             .child(header_icon(command, is_maximized, theme.text.muted))

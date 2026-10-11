@@ -11,7 +11,7 @@ static LOGO: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
 
 impl Shell {
-    pub(super) fn render_tab_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let active = self.model.tabs().active_index();
         let labels: Vec<(String, bool)> = self
@@ -29,14 +29,24 @@ impl Shell {
             })
             .collect();
         let layout = theme.layout;
+        let leading_inset = match is_fullscreen {
+            true => layout.window_margin_px,
+            false => layout.traffic_lights_width_px,
+        };
         div()
             .h(px(layout.tab_strip_height_px))
             .flex_none()
-            .px(px(layout.window_margin_px))
+            .pl(px(leading_inset))
+            .pr(px(layout.window_margin_px))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(layout.island_gap_px))
+            .on_mouse_down(MouseButton::Left, |event, window, _cx| {
+                if event.click_count == DOUBLE_CLICK {
+                    window.titlebar_double_click();
+                }
+            })
             .child(self.render_logo_button(cx))
             .children(labels.into_iter().enumerate().map(|(index, (label, is_active))| {
                 let (bg, fg, border) = if is_active {
@@ -140,7 +150,13 @@ impl Shell {
             .cursor_pointer()
             .rounded(px(theme.layout.border_radius_px))
             .hover(move |style| style.bg(hover_bg))
-            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.toggle_workspace_menu(cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|shell, _event, _window, cx| {
+                    cx.stop_propagation();
+                    shell.toggle_workspace_menu(cx);
+                }),
+            )
             .child(img(LOGO.clone()).size(px(LOGO_SIZE_PX)))
     }
 }

@@ -16,9 +16,9 @@ use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
 use gpui::{
-    div, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle,
+    div, point, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
-    Window, WindowOptions,
+    TitlebarOptions, Window, WindowOptions,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -171,7 +171,7 @@ impl Shell {
         self.state.keymap.resolve(&combo)
     }
 
-    fn run_command(&mut self, id: CommandId, cx: &mut Context<Self>) {
+    fn run_command(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
         match id {
             CommandId::NewTab => self.open_tab(cx),
             CommandId::NextTab => self.model.tabs_mut().select_next(),
@@ -187,6 +187,12 @@ impl Shell {
             CommandId::NewWorkspace => self.start_new_workspace(cx),
             CommandId::RenameTab => self.start_rename_tab(self.model.tabs().active_index()),
             CommandId::Quit => self.request_quit(cx),
+            CommandId::ToggleFullScreen => window.toggle_fullscreen(),
+            CommandId::Minimize => window.minimize_window(),
+            CommandId::Zoom => window.zoom_window(),
+            CommandId::Hide => cx.hide(),
+            CommandId::HideOthers => cx.hide_other_apps(),
+            CommandId::ShowAll => cx.unhide_other_apps(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -195,7 +201,7 @@ impl Shell {
         cx.notify();
     }
 
-    fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
@@ -210,11 +216,11 @@ impl Shell {
             return;
         }
         if let Some(id) = self.resolve_combo(event) {
-            self.run_command(id, cx);
+            self.run_command(id, window, cx);
             return;
         }
         if self.state.palette_visible {
-            self.handle_palette_key(keystroke, cx);
+            self.handle_palette_key(keystroke, window, cx);
             return;
         }
         self.send_key_to_terminal(keystroke, cx);
@@ -235,11 +241,11 @@ impl Shell {
         }
     }
 
-    fn handle_palette_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         let modifiers = keystroke.modifiers;
         match keystroke.key.as_str() {
             ESCAPE_KEY => close_palette(&mut self.state),
-            ENTER_KEY => self.run_palette_selection(cx),
+            ENTER_KEY => self.run_palette_selection(window, cx),
             BACKSPACE_KEY => palette_backspace(&mut self.state),
             UP_KEY => palette_move(&mut self.state, -1),
             DOWN_KEY => palette_move(&mut self.state, 1),
@@ -253,7 +259,7 @@ impl Shell {
         cx.notify();
     }
 
-    fn run_palette_selection(&mut self, cx: &mut Context<Self>) {
+    fn run_palette_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let selected = palette_selected(&self.state);
         let choice = palette_selected_choice(&self.state);
         close_palette(&mut self.state);
@@ -261,7 +267,7 @@ impl Shell {
             self.select_workspace_by_key(&key, cx);
         }
         if let Some(id) = selected {
-            self.run_command(id, cx);
+            self.run_command(id, window, cx);
         }
     }
 
@@ -630,7 +636,7 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let palette_overlay = palette_render::build_overlay(&self.state, theme);
         let palette_visible = self.state.palette_visible;
@@ -642,7 +648,7 @@ impl Render for Shell {
         let pane_area = layout.map(|layout| self.render_layout(&layout, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
-        let tab_strip = self.render_tab_strip(cx);
+        let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
         let margin = px(theme.layout.window_margin_px);
 
@@ -654,7 +660,7 @@ impl Render for Shell {
             .bg(theme.surface.subtle)
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(|shell, event, _window, cx| shell.handle_key(event, cx)))
+            .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)
             .children(notice)
@@ -750,12 +756,21 @@ pub fn open_shell_window(
     cx: &mut gpui::App,
 ) -> gpui::Result<gpui::WindowHandle<Shell>> {
     let state = AppState::new();
+    let layout = state.theme.layout;
     let themed_options = WindowOptions {
         window_background: state.theme.window_background(),
+        titlebar: Some(TitlebarOptions {
+            title: options.titlebar.and_then(|titlebar| titlebar.title),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(layout.traffic_light_left_px), px(layout.traffic_light_top_px))),
+        }),
         ..options
     };
     cx.open_window(themed_options, |window, cx| {
-        let shell = cx.new(|cx| Shell::new(state, startup, cx));
+        let shell = cx.new(|cx| {
+            cx.observe_window_bounds(window, |_shell, _window, cx| cx.notify()).detach();
+            Shell::new(state, startup, cx)
+        });
         window.focus(&shell.read(cx).focus_handle);
         let guarded = shell.downgrade();
         window.on_window_should_close(cx, move |_window, cx| {

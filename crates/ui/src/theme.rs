@@ -119,6 +119,9 @@ pub struct LayoutTokens {
     pub island_gap_px: f32,
     pub window_margin_px: f32,
     pub island_padding_px: f32,
+    pub traffic_light_left_px: f32,
+    pub traffic_light_top_px: f32,
+    pub traffic_lights_width_px: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
