@@ -34,6 +34,7 @@ use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEve
 use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
+mod editor_io;
 mod islands;
 mod pane_header;
 mod pane_drag;
@@ -198,17 +199,24 @@ impl Shell {
         let documents = self.model.documents_to_restore(is_live);
         let terminals = self.model.terminals_to_spawn(is_live);
         for panel in documents {
-            self.restore_document(panel);
+            self.restore_document(panel, cx);
         }
         for panel in terminals {
             self.spawn_restored(panel, cx);
         }
     }
 
-    fn restore_document(&mut self, panel: PanelId) {
-        if let Some(document) = self.model.panel(panel).and_then(DocumentPane::from_snapshot) {
-            self.documents.insert(panel, document);
+    fn restore_document(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let Some(record) = self.model.panel(panel).cloned() else {
+            return;
+        };
+        let Some(document) = DocumentPane::from_snapshot(&record) else {
+            return;
+        };
+        if let DocumentPane::Editor(editor_pane) = &document {
+            self.load_editor(panel, editor_pane.path.clone(), cx);
         }
+        self.documents.insert(panel, document);
     }
 
     fn open_editor_here(&mut self, cx: &mut Context<Self>) {
@@ -228,7 +236,7 @@ impl Shell {
         let id = panel.id;
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
         self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path) });
-        self.restore_document(id);
+        self.restore_document(id, cx);
         let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
         };

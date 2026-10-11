@@ -7,6 +7,7 @@ pub mod command;
 pub mod confirm;
 pub mod copy_mode;
 pub mod document;
+pub mod editor_view;
 pub mod input;
 pub mod island_look;
 pub mod keymap;
