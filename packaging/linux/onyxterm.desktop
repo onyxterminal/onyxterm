@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Onyxterm
+GenericName=Terminal Workspace
+Comment=Local-first Rust terminal workspace and AI agent control center
+Exec=onyxterm %U
+Icon=onyxterm
+Terminal=false
+Categories=System;TerminalEmulator;Development;
+StartupNotify=true
+StartupWMClass=Onyxterm
