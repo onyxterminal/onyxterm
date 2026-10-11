@@ -1,6 +1,7 @@
 use super::islands::pane_group;
 use super::Shell;
 use crate::command::CommandId;
+use crate::document::DocumentPane;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::{field_text, focused_field};
 use domain::PanelId;
@@ -79,9 +80,12 @@ impl Shell {
 
     fn status_dot(&self, panel: PanelId) -> impl IntoElement {
         let theme = &self.state.theme;
-        let color = match self.is_pane_busy(panel) {
-            true => theme.status.running,
-            false => theme.status.idle,
+        let color = if self.documents.get(&panel).is_some_and(DocumentPane::is_dirty) {
+            theme.accent.primary
+        } else if self.is_pane_busy(panel) {
+            theme.status.running
+        } else {
+            theme.status.idle
         };
         div().flex_none().size(px(theme.pane_header.status_dot_px)).rounded_full().bg(color)
     }

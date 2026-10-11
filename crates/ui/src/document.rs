@@ -107,11 +107,10 @@ pub fn render_document(pane: &DocumentPane, theme: &Theme) -> AnyElement {
 
 fn render_editor_pane(pane: &EditorPane, theme: &Theme) -> AnyElement {
     let name = document_title(&pane.path);
-    match &pane.state {
-        EditorState::Loading => div().size_full().into_any_element(),
-        EditorState::Failed(message) => centered_label(format!("{name} — {message}"), theme),
-        EditorState::Ready(_) => div().size_full().into_any_element(),
+    if let EditorState::Failed(message) = &pane.state {
+        return centered_label(format!("{name} — {message}"), theme);
     }
+    div().size_full().into_any_element()
 }
 
 fn render_file_tree(pane: &FileTreePane, theme: &Theme) -> AnyElement {

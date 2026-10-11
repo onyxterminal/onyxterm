@@ -9,7 +9,10 @@ use crate::command::{
 };
 use crate::document::{document_cwd, document_title, render_document, DocumentPane, EditorPane, EditorState};
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
-use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
+use crate::confirm::{
+    close_pane_copy, close_tab_copy, delete_workspace_copy, discard_pane_copy, discard_tab_copy, quit_copy, ConfirmCopy,
+    Confirmation,
+};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
@@ -581,6 +584,10 @@ impl Shell {
         let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) else {
             return;
         };
+        if self.documents.get(&panel).is_some_and(DocumentPane::is_dirty) {
+            self.pending = Some(Confirmation::DiscardPane(panel));
+            return;
+        }
         let is_busy = self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
         if is_busy {
             self.pending = Some(Confirmation::ClosePane(panel));
@@ -594,9 +601,12 @@ impl Shell {
             return;
         };
         let id = tab.id();
-        let is_busy = tab
-            .layout()
-            .leaves()
+        let leaves = tab.layout().leaves();
+        if self.unsaved_count(leaves.iter().copied()) > 0 {
+            self.pending = Some(Confirmation::DiscardTab(id));
+            return;
+        }
+        let is_busy = leaves
             .iter()
             .any(|panel| self.panes.get(panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job()));
         if is_busy {
@@ -604,6 +614,12 @@ impl Shell {
             return;
         }
         self.close_tab(id, cx);
+    }
+
+    fn unsaved_count(&self, panels: impl Iterator<Item = PanelId>) -> usize {
+        panels
+            .filter(|panel| self.documents.get(panel).is_some_and(DocumentPane::is_dirty))
+            .count()
     }
 
     fn close_tab(&mut self, id: TabId, cx: &mut Context<Self>) {
@@ -624,6 +640,8 @@ impl Shell {
         match self.pending.take() {
             Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
             Some(Confirmation::CloseTab(id)) => self.close_tab(id, cx),
+            Some(Confirmation::DiscardPane(panel)) => self.close_pane(panel, cx),
+            Some(Confirmation::DiscardTab(id)) => self.close_tab(id, cx),
             Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
             Some(Confirmation::Quit { .. }) => cx.quit(),
             None => {}
@@ -635,10 +653,26 @@ impl Shell {
         match confirmation {
             Confirmation::ClosePane(_) => close_pane_copy(),
             Confirmation::CloseTab(_) => close_tab_copy(),
-            Confirmation::Quit { sessions } => quit_copy(sessions),
+            Confirmation::DiscardPane(panel) => {
+                let name = self.documents.get(&panel).map(|doc| document_title(doc.path())).unwrap_or_default();
+                discard_pane_copy(&name)
+            }
+            Confirmation::DiscardTab(id) => {
+                let unsaved = self
+                    .model
+                    .tabs()
+                    .iter()
+                    .find(|tab| tab.id() == id)
+                    .map(|tab| self.unsaved_count(tab.layout().leaves().into_iter()))
+                    .unwrap_or(0);
+                discard_tab_copy(unsaved)
+            }
+            Confirmation::Quit { sessions, unsaved } => quit_copy(sessions, unsaved),
             Confirmation::DeleteWorkspace(id) => {
-                let live = self.model.workspace_panels(id).iter().filter(|p| self.panes.contains_key(p)).count();
-                delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live)
+                let panels = self.model.workspace_panels(id);
+                let live = panels.iter().filter(|p| self.panes.contains_key(p)).count();
+                let unsaved = self.unsaved_count(panels.into_iter());
+                delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live, unsaved)
             }
         }
     }
@@ -648,10 +682,13 @@ impl Shell {
     }
 
     fn request_quit(&mut self, cx: &mut Context<Self>) {
-        match self.live_session_count() {
-            0 => cx.quit(),
-            sessions => self.pending = Some(Confirmation::Quit { sessions }),
+        let sessions = self.live_session_count();
+        let unsaved = self.unsaved_count(self.documents.keys().copied());
+        if sessions == 0 && unsaved == 0 {
+            cx.quit();
+            return;
         }
+        self.pending = Some(Confirmation::Quit { sessions, unsaved });
     }
 
     fn toggle_workspace_menu(&mut self, cx: &mut Context<Self>) {
@@ -813,7 +850,10 @@ impl Shell {
     }
 
     fn close_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        if self.pending == Some(Confirmation::ClosePane(panel)) {
+        if matches!(
+            self.pending,
+            Some(Confirmation::ClosePane(p)) | Some(Confirmation::DiscardPane(p)) if p == panel
+        ) {
             self.pending = None;
         }
         self.tab_field = None;

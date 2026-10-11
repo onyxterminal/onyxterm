@@ -305,6 +305,7 @@ fn register_editor_mouse_handlers(
             return;
         }
         up_view.borrow_mut().is_selecting = false;
+        up_view.borrow_mut().last_click_mode = None;
         up_handler(PointerEvent::Up, window, cx);
     });
     let scroll_handler = on_pointer.clone();

@@ -410,7 +410,7 @@ fn palette_offers_workspace_commands() {
 #[test]
 fn delete_workspace_copy_names_workspace_and_session_count() {
     use crate::confirm::{delete_workspace_copy, sessions_ending};
-    let copy = delete_workspace_copy("Backend", 3);
+    let copy = delete_workspace_copy("Backend", 3, 0);
     assert!(copy.title.contains("Backend"));
     assert!(copy.body.ends_with("3 sessions will end."));
     assert!(copy.is_destructive);
@@ -420,7 +420,7 @@ fn delete_workspace_copy_names_workspace_and_session_count() {
 #[test]
 fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
     use crate::confirm::quit_copy;
-    let copy = quit_copy(4);
+    let copy = quit_copy(4, 0);
     assert_eq!(copy.title, "Quit Onyxterm?");
     assert_eq!(copy.body, "4 sessions will end.");
     assert_eq!(copy.action, "Quit");
@@ -429,6 +429,38 @@ fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
     assert!(crate::confirm::close_tab_copy().is_destructive);
     let map = Keymap::default();
     assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "q")), Some(CommandId::Quit));
+}
+
+#[test]
+fn discard_pane_copy_names_the_file_and_is_destructive() {
+    use crate::confirm::discard_pane_copy;
+    let copy = discard_pane_copy("main.rs");
+    assert!(copy.body.contains("main.rs"));
+    assert!(copy.is_destructive);
+    assert_eq!(copy.action, "Discard");
+}
+
+#[test]
+fn discard_tab_copy_counts_unsaved_files() {
+    use crate::confirm::discard_tab_copy;
+    let copy = discard_tab_copy(2);
+    assert!(copy.body.contains("2 unsaved files"));
+    assert!(copy.is_destructive);
+    assert_eq!(copy.action, "Close tab");
+}
+
+#[test]
+fn quit_copy_mentions_unsaved_files() {
+    use crate::confirm::quit_copy;
+    assert!(quit_copy(0, 2).body.contains("2 unsaved files"));
+    assert!(quit_copy(1, 1).body.contains("1 unsaved file"));
+    assert!(!quit_copy(1, 0).body.contains("unsaved"));
+}
+
+#[test]
+fn delete_workspace_copy_mentions_unsaved_files() {
+    use crate::confirm::delete_workspace_copy;
+    assert!(delete_workspace_copy("Code", 0, 3).body.contains("3 unsaved files"));
 }
 
 #[test]
