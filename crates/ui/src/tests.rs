@@ -979,6 +979,14 @@ fn workspace_button_falls_back_to_scratch_and_rows_count_tabs() {
     assert_eq!(tab_count_label(3), "3 tabs");
 }
 
+#[test]
+fn top_bar_leading_inset_drops_traffic_lights_in_fullscreen() {
+    let theme = Theme::load_default().unwrap();
+    let windowed = theme.layout.traffic_lights_width_px + theme.top_bar.leading_gap_px;
+    assert_eq!(theme.top_bar_leading_inset_px(false), windowed);
+    assert_eq!(theme.top_bar_leading_inset_px(true), theme.layout.window_margin_px);
+}
+
 fn look_for(is_focused: bool, is_split: bool) -> crate::island_look::IslandLook {
     use crate::island_look::{IslandLook, IslandRole};
     IslandLook::for_role(&Theme::load_default().unwrap(), IslandRole { is_focused, is_split })

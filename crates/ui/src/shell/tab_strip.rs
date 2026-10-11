@@ -43,10 +43,7 @@ impl Shell {
     pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let layout = theme.layout;
-        let leading_inset = match is_fullscreen {
-            true => layout.window_margin_px,
-            false => layout.traffic_lights_width_px + theme.top_bar.leading_gap_px,
-        };
+        let leading_inset = theme.top_bar_leading_inset_px(is_fullscreen);
         div()
             .h(px(layout.tab_strip_height_px))
             .flex_none()

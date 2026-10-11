@@ -25,7 +25,7 @@ struct ButtonPaint {
 }
 
 impl Shell {
-    pub(super) fn render_workspace_menu(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_workspace_menu(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let model = WorkspaceMenuModel {
             items: self.workspace_menu_items(),
@@ -47,7 +47,7 @@ impl Shell {
         };
         let layout = theme.layout;
         let top = (layout.tab_strip_height_px + theme.top_bar.control_height_px) * HALF + theme.menu.offset_px;
-        let left = layout.traffic_lights_width_px + theme.top_bar.leading_gap_px;
+        let left = theme.top_bar_leading_inset_px(is_fullscreen);
         div()
             .absolute()
             .inset_0()

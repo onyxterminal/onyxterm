@@ -793,7 +793,7 @@ impl Render for Shell {
         let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll);
         let palette_visible = self.state.palette_visible;
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
-        let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
+        let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));

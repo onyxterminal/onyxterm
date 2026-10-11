@@ -402,6 +402,13 @@ impl Theme {
     pub fn window_background(&self) -> WindowBackgroundAppearance {
         WindowBackgroundAppearance::Opaque
     }
+
+    pub fn top_bar_leading_inset_px(&self, is_fullscreen: bool) -> f32 {
+        match is_fullscreen {
+            true => self.layout.window_margin_px,
+            false => self.layout.traffic_lights_width_px + self.top_bar.leading_gap_px,
+        }
+    }
 }
 
 const SYSTEM_MONOSPACE: &str = "ui-monospace";
