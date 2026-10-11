@@ -41,23 +41,25 @@ impl Selections {
     }
 
     pub fn new(items: Vec<Selection>, newest: usize) -> Self {
-        let Some(newest_head) = items.get(newest).or(items.last()).map(|selection| selection.head) else {
+        if items.is_empty() {
             return Self::single(Selection::cursor(0));
-        };
-        let mut sorted = items;
-        sorted.sort_by_key(|selection| (selection.range().start, selection.range().end));
-        let mut merged: Vec<Selection> = Vec::with_capacity(sorted.len());
-        for selection in sorted {
+        }
+        let newest = newest.min(items.len() - 1);
+        let mut tagged: Vec<(Selection, bool)> =
+            items.into_iter().enumerate().map(|(index, selection)| (selection, index == newest)).collect();
+        tagged.sort_by_key(|(selection, _)| (selection.range().start, selection.range().end));
+        let mut merged: Vec<(Selection, bool)> = Vec::with_capacity(tagged.len());
+        for (selection, is_newest) in tagged {
             match merged.last_mut() {
-                Some(last) if overlaps(last, &selection) => *last = union(last, &selection),
-                _ => merged.push(selection),
+                Some((last, last_is_newest)) if overlaps(last, &selection) => {
+                    *last = union(last, &selection);
+                    *last_is_newest |= is_newest;
+                }
+                _ => merged.push((selection, is_newest)),
             }
         }
-        let newest = merged
-            .iter()
-            .position(|selection| selection.range().contains(&newest_head) || selection.range().end == newest_head)
-            .unwrap_or(merged.len() - 1);
-        Self { items: merged, newest }
+        let newest = merged.iter().position(|(_, is_newest)| *is_newest).unwrap_or(0);
+        Self { items: merged.into_iter().map(|(selection, _)| selection).collect(), newest }
     }
 
     pub fn as_slice(&self) -> &[Selection] {
@@ -135,5 +137,17 @@ mod tests {
     #[test]
     fn empty_input_falls_back_to_a_cursor_at_zero() {
         assert_eq!(Selections::new(Vec::new(), 0).as_slice(), &[Selection::cursor(0)]);
+    }
+
+    #[test]
+    fn newest_is_the_touching_cursor_not_the_selection_ending_there() {
+        let selections = Selections::new(vec![Selection::new(0, 5), Selection::cursor(5)], 1);
+        assert_eq!(selections.newest(), Selection::cursor(5));
+    }
+
+    #[test]
+    fn with_a_cursor_touching_a_selection_makes_the_cursor_newest() {
+        let selections = Selections::single(Selection::new(0, 5)).with(Selection::cursor(5));
+        assert_eq!(selections.newest(), Selection::cursor(5));
     }
 }

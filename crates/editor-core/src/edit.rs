@@ -20,12 +20,13 @@ pub struct Edit {
 
 impl Edit {
     pub fn new(mut changes: Vec<Change>) -> Self {
-        changes.sort_by_key(|change| change.range.start);
+        changes.sort_by_key(|change| (change.range.start, change.range.end));
         let mut merged: Vec<Change> = Vec::with_capacity(changes.len());
         for change in changes {
             match merged.last_mut() {
-                Some(last) if change.range.start < last.range.end => {
+                Some(last) if overlaps(last, &change) => {
                     last.range.end = last.range.end.max(change.range.end);
+                    last.text.push_str(&change.text);
                 }
                 _ => merged.push(change),
             }
@@ -82,6 +83,11 @@ impl Edit {
     }
 }
 
+fn overlaps(earlier: &Change, later: &Change) -> bool {
+    later.range.start < earlier.range.end
+        || (later.range.start == earlier.range.start && later.range.end > later.range.start)
+}
+
 fn offset_by(offset: usize, delta: isize) -> usize {
     offset.checked_add_signed(delta).unwrap_or(0)
 }
@@ -127,5 +133,18 @@ mod tests {
         assert_eq!(edit.map(4, Bias::Left), 6);
         assert_eq!(edit.map(6, Bias::Right), 7);
         assert_eq!(edit.map(9, Bias::Left), 9);
+    }
+
+    #[test]
+    fn merging_keeps_both_texts_regardless_of_input_order() {
+        let expected = [change(1..3, "ba")];
+        assert_eq!(Edit::new(vec![change(1..3, "a"), change(1..1, "b")]).changes(), &expected);
+        assert_eq!(Edit::new(vec![change(1..1, "b"), change(1..3, "a")]).changes(), &expected);
+    }
+
+    #[test]
+    fn insert_inside_a_replaced_range_is_kept() {
+        let edit = Edit::new(vec![change(0..5, "x"), change(2..2, "Y")]);
+        assert_eq!(edit.changes(), &[change(0..5, "xY")]);
     }
 }

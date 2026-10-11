@@ -113,4 +113,11 @@ mod tests {
         assert_eq!(line_len(&rope, 0), 2);
         assert_eq!(line_len(&rope, 1), 3);
     }
+
+    #[test]
+    fn only_lf_breaks_lines() {
+        let buffer = Buffer::from_text("a\rb\u{2028}c\nd");
+        assert_eq!(buffer.line_count(), 2);
+        assert_eq!(line_len(buffer.rope(), 0), 5);
+    }
 }
