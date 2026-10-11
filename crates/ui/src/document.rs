@@ -1,8 +1,10 @@
 use crate::editor_view::EditorView;
+use crate::file_tree::FileTree;
 use crate::theme::Theme;
 use domain::PanelKind;
 use editor_core::io::LoadError;
-use gpui::{div, px, AnyElement, IntoElement, ParentElement, SharedString, Styled};
+use fs_service::Entry;
+use gpui::{div, px, AnyElement, IntoElement, ParentElement, SharedString, Styled, UniformListScrollHandle};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -31,6 +33,8 @@ pub enum EditorState {
 pub struct FileTreePane {
     pub root: PathBuf,
     pub exists: bool,
+    pub tree: FileTree,
+    pub scroll: UniformListScrollHandle,
 }
 
 impl DocumentPane {
@@ -42,7 +46,7 @@ impl DocumentPane {
                 state: EditorState::Loading,
                 view: Rc::new(RefCell::new(EditorView::default())),
             })),
-            PanelKind::FileTree => Some(Self::FileTree(FileTreePane { exists: path.is_dir(), root: path })),
+            PanelKind::FileTree => Some(Self::FileTree(FileTreePane::new(path))),
             PanelKind::Terminal | PanelKind::Agent => None,
         }
     }
@@ -71,6 +75,23 @@ impl EditorPane {
         match &mut self.state {
             EditorState::Ready(editor) => Some(editor),
             EditorState::Loading | EditorState::Failed(_) => None,
+        }
+    }
+}
+
+impl FileTreePane {
+    fn new(root: PathBuf) -> Self {
+        Self { tree: FileTree::new(root.clone()), root, exists: true, scroll: UniformListScrollHandle::new() }
+    }
+
+    pub fn apply_listing(&mut self, dir: &Path, listed: std::io::Result<Vec<Entry>>) {
+        match listed {
+            Ok(entries) => self.tree.set_children(dir, entries),
+            Err(err) if dir == self.root => {
+                tracing::warn!(%err, root = %dir.display(), "file tree root listing failed");
+                self.exists = false;
+            }
+            Err(err) => tracing::warn!(%err, dir = %dir.display(), "file tree listing failed"),
         }
     }
 }
@@ -190,6 +211,52 @@ mod tests {
         pane.state = EditorState::Ready(Editor::new(Buffer::from_text("x")));
         assert!(pane.ready().is_some());
         assert!(!DocumentPane::Editor(pane).is_dirty());
+    }
+
+    fn tree_pane() -> FileTreePane {
+        let record = PanelSnapshot {
+            panel: Panel::new_file_tree(PanelId::new(), "proj".to_string()),
+            cwd: PathBuf::from("/home/me/proj"),
+            name: None,
+            path: Some(PathBuf::from("/home/me/proj")),
+        };
+        let Some(DocumentPane::FileTree(pane)) = DocumentPane::from_snapshot(&record) else {
+            panic!("expected a file tree pane");
+        };
+        pane
+    }
+
+    fn listing_error() -> std::io::Result<Vec<fs_service::Entry>> {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    }
+
+    #[test]
+    fn root_listing_fills_the_tree() {
+        let mut pane = tree_pane();
+        let entry = fs_service::Entry {
+            path: PathBuf::from("/home/me/proj/a.txt"),
+            name: "a.txt".to_string(),
+            is_dir: false,
+            is_ignored: false,
+        };
+        pane.apply_listing(&PathBuf::from("/home/me/proj"), Ok(vec![entry]));
+        assert!(pane.exists);
+        assert_eq!(pane.tree.rows().len(), 1);
+    }
+
+    #[test]
+    fn failed_root_listing_marks_the_tree_missing() {
+        let mut pane = tree_pane();
+        pane.apply_listing(&PathBuf::from("/home/me/proj"), listing_error());
+        assert!(!pane.exists);
+    }
+
+    #[test]
+    fn failed_subdirectory_listing_leaves_the_tree_present_and_empty() {
+        let mut pane = tree_pane();
+        pane.apply_listing(&PathBuf::from("/home/me/proj/src"), listing_error());
+        assert!(pane.exists);
+        assert!(pane.tree.rows().is_empty());
     }
 
     #[test]

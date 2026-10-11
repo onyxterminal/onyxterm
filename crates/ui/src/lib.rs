@@ -10,6 +10,7 @@ pub mod document;
 pub mod editor_keys;
 pub mod editor_view;
 pub mod file_tree;
+pub mod file_tree_view;
 pub mod input;
 pub mod island_look;
 pub mod keymap;

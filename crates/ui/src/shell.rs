@@ -39,6 +39,7 @@ use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
 mod editor_io;
+mod file_tree_input;
 mod islands;
 mod pane_header;
 mod pane_drag;
@@ -217,8 +218,9 @@ impl Shell {
         let Some(document) = DocumentPane::from_snapshot(&record) else {
             return;
         };
-        if let DocumentPane::Editor(editor_pane) = &document {
-            self.load_editor(panel, editor_pane.path.clone(), cx);
+        match &document {
+            DocumentPane::Editor(editor_pane) => self.load_editor(panel, editor_pane.path.clone(), cx),
+            DocumentPane::FileTree(tree_pane) => self.load_tree_dir(panel, tree_pane.root.clone(), cx),
         }
         self.documents.insert(panel, document);
     }
@@ -974,6 +976,9 @@ impl Shell {
                 let focus = is_focused.then(|| self.pane_focus(cx));
                 let handler = self.editor_pointer_handler(panel, cx);
                 editor_canvas(frame, style, view.clone(), focus, handler).into_any_element()
+            }
+            DocumentPane::FileTree(tree_pane) if tree_pane.exists => {
+                self.render_file_tree(panel, tree_pane, is_focused, cx)
             }
             _ => render_document(document, &self.state.theme),
         }
