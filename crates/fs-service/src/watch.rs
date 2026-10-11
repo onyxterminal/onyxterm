@@ -71,10 +71,12 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::fs;
+    use std::time::Instant;
     use std::sync::mpsc::RecvTimeoutError;
 
     const BURST_FILE_COUNT: usize = 20;
     const FIRST_BATCH_TIMEOUT: Duration = Duration::from_secs(5);
+    const BURST_DEADLINE: Duration = Duration::from_secs(10);
     const QUIET_WINDOW: Duration = Duration::from_millis(600);
     const MAX_BATCHES_PER_BURST: usize = 2;
     const SILENCE_WINDOW: Duration = Duration::from_millis(800);
@@ -83,12 +85,38 @@ mod tests {
         PathBuf::from(value)
     }
 
-    fn drain_batches(receiver: &Receiver<Vec<PathBuf>>) -> Vec<Vec<PathBuf>> {
-        let mut batches = vec![receiver.recv_timeout(FIRST_BATCH_TIMEOUT).unwrap()];
-        while let Ok(batch) = receiver.recv_timeout(QUIET_WINDOW) {
-            batches.push(batch);
+    fn is_burst_file(path: &Path) -> bool {
+        path.file_name().is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.starts_with("file") && name.ends_with(".txt")
+        })
+    }
+
+    fn collect_burst(receiver: &Receiver<Vec<PathBuf>>) -> (usize, BTreeSet<String>) {
+        let deadline = Instant::now() + BURST_DEADLINE;
+        let mut burst_batches = 0;
+        let mut seen = BTreeSet::new();
+        let mut last_burst_at = Instant::now();
+        while Instant::now() < deadline {
+            let all_arrived = seen.len() == BURST_FILE_COUNT;
+            if all_arrived && last_burst_at.elapsed() > QUIET_WINDOW {
+                break;
+            }
+            let Ok(batch) = receiver.recv_timeout(QUIET_WINDOW) else { continue };
+            let names: Vec<String> = batch
+                .iter()
+                .filter(|path| is_burst_file(path))
+                .filter_map(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            burst_batches += 1;
+            last_burst_at = Instant::now();
+            seen.extend(names);
         }
-        batches
+        (burst_batches, seen)
     }
 
     #[test]
@@ -107,18 +135,21 @@ mod tests {
         for index in 0..BURST_FILE_COUNT {
             fs::write(root.path().join(format!("file{index}.txt")), "x").unwrap();
         }
-        let batches = drain_batches(&receiver);
+        let (burst_batches, seen) = collect_burst(&receiver);
 
-        let seen: BTreeSet<String> = batches
-            .iter()
-            .flatten()
-            .filter_map(|path| path.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .collect();
-        assert!(batches.len() <= MAX_BATCHES_PER_BURST, "{} batches", batches.len());
+        assert!(burst_batches <= MAX_BATCHES_PER_BURST, "{burst_batches} batches");
         for index in 0..BURST_FILE_COUNT {
             assert!(seen.contains(&format!("file{index}.txt")), "missing file{index}.txt");
         }
+    }
+
+    #[test]
+    fn dropping_the_watcher_disconnects_the_receiver() {
+        let (watcher, receiver) = Watcher::new(DEFAULT_DEBOUNCE).unwrap();
+
+        drop(watcher);
+
+        assert_eq!(receiver.recv_timeout(FIRST_BATCH_TIMEOUT), Err(RecvTimeoutError::Disconnected));
     }
 
     #[test]

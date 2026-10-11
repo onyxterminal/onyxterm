@@ -19,37 +19,50 @@ pub fn list_dir(dir: &Path) -> std::io::Result<Vec<Entry>> {
     let ignore_rules = build_ignore_rules(&absolute_dir);
     let mut entries = Vec::new();
     for dir_entry in std::fs::read_dir(dir)? {
-        let dir_entry = dir_entry?;
+        let dir_entry = match dir_entry {
+            Ok(dir_entry) => dir_entry,
+            Err(error) => {
+                tracing::warn!(%error, "skipping entry that vanished during listing");
+                continue;
+            }
+        };
         let name = dir_entry.file_name().to_string_lossy().into_owned();
         if name == GIT_DIR_NAME {
             continue;
         }
         let is_dir = dir_entry.path().is_dir();
-        let is_ignored = ignore_rules
-            .matched_path_or_any_parents(absolute_dir.join(&name), is_dir)
-            .is_ignore();
+        let is_ignored = is_ignored(&ignore_rules, &absolute_dir.join(&name), is_dir);
         entries.push(Entry { path: dir_entry.path(), name, is_dir, is_ignored });
     }
     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
     Ok(entries)
 }
 
-fn build_ignore_rules(dir: &Path) -> Gitignore {
-    let mut levels = Vec::new();
-    for ancestor in dir.ancestors() {
-        levels.push(ancestor);
-        if ancestor.join(GIT_DIR_NAME).exists() {
+fn is_ignored(rules_deepest_first: &[Gitignore], path: &Path, is_dir: bool) -> bool {
+    rules_deepest_first
+        .iter()
+        .map(|rules| rules.matched_path_or_any_parents(path, is_dir))
+        .find(|decision| !decision.is_none())
+        .is_some_and(|decision| decision.is_ignore())
+}
+
+fn build_ignore_rules(dir: &Path) -> Vec<Gitignore> {
+    let mut rules = Vec::new();
+    for level in dir.ancestors() {
+        rules.push(build_level_rules(level));
+        if level.join(GIT_DIR_NAME).exists() {
             break;
         }
     }
-    let root = levels.last().copied().unwrap_or(dir);
-    let mut builder = GitignoreBuilder::new(root);
-    for level in levels.iter().rev() {
-        let file = level.join(GITIGNORE_FILE_NAME);
-        if file.is_file() {
-            if let Some(error) = builder.add(&file) {
-                tracing::warn!(path = %file.display(), %error, "unreadable gitignore");
-            }
+    rules
+}
+
+fn build_level_rules(level: &Path) -> Gitignore {
+    let mut builder = GitignoreBuilder::new(level);
+    let file = level.join(GITIGNORE_FILE_NAME);
+    if file.is_file() {
+        if let Some(error) = builder.add(&file) {
+            tracing::warn!(path = %file.display(), %error, "unreadable gitignore");
         }
     }
     builder.build().unwrap_or_else(|error| {
@@ -143,6 +156,88 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
 
         assert!(list_dir(&root.path().join("missing")).is_err());
+    }
+
+    fn ignored_names(dir: &Path) -> Vec<String> {
+        list_dir(dir)
+            .unwrap()
+            .into_iter()
+            .filter(|entry| entry.is_ignored)
+            .map(|entry| entry.name)
+            .collect()
+    }
+
+    #[test]
+    fn nested_gitignore_anchors_to_its_own_directory() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        let sub = root.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join(".gitignore"), "/dist\ndocs/*.md").unwrap();
+        fs::create_dir(sub.join("dist")).unwrap();
+        fs::create_dir(sub.join("docs")).unwrap();
+        fs::create_dir(root.path().join("dist")).unwrap();
+
+        assert_eq!(ignored_names(&sub), ["dist"]);
+        assert!(ignored_names(root.path()).is_empty());
+        assert_eq!(ignored_names(&sub.join("docs")), Vec::<String>::new());
+        fs::write(sub.join("docs").join("a.md"), "").unwrap();
+        assert_eq!(ignored_names(&sub.join("docs")), ["a.md"]);
+    }
+
+    #[test]
+    fn negation_whitelists_a_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::write(root.path().join(".gitignore"), "*.log\n!keep.log").unwrap();
+        fs::write(root.path().join("a.log"), "").unwrap();
+        fs::write(root.path().join("keep.log"), "").unwrap();
+
+        assert_eq!(ignored_names(root.path()), ["a.log"]);
+    }
+
+    #[test]
+    fn ancestor_gitignore_applies_in_subdirectory() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::write(root.path().join(".gitignore"), "*.tmp").unwrap();
+        let sub = root.path().join("a").join("b");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("x.tmp"), "").unwrap();
+        fs::write(sub.join("y.txt"), "").unwrap();
+
+        assert_eq!(ignored_names(&sub), ["x.tmp"]);
+    }
+
+    #[test]
+    fn deeper_negation_overrides_ancestor_ignore() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git")).unwrap();
+        fs::write(root.path().join(".gitignore"), "*.log").unwrap();
+        let sub = root.path().join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join(".gitignore"), "!keep.log").unwrap();
+        fs::write(sub.join("keep.log"), "").unwrap();
+        fs::write(sub.join("drop.log"), "").unwrap();
+
+        assert_eq!(ignored_names(&sub), ["drop.log"]);
+    }
+
+    #[test]
+    fn natural_cmp_leading_zeros_are_consistent() {
+        assert_eq!(natural_cmp("a01", "a1"), natural_cmp("a01", "a1"));
+        assert_ne!(natural_cmp("a01", "a1"), Ordering::Equal);
+        assert_eq!(natural_cmp("a01", "a1"), natural_cmp("a1", "a01").reverse());
+        assert_eq!(natural_cmp("a01", "a2"), Ordering::Less);
+    }
+
+    #[test]
+    fn natural_cmp_handles_very_long_digit_runs() {
+        let small = format!("a{}", "9".repeat(30));
+        let large = format!("a1{}", "0".repeat(30));
+
+        assert_eq!(natural_cmp(&small, &large), Ordering::Less);
+        assert_eq!(natural_cmp(&large, &small), Ordering::Greater);
     }
 
     #[test]

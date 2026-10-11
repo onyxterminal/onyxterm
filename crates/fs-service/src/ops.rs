@@ -17,7 +17,7 @@ pub enum OpError {
 pub fn validate_name(name: &str) -> Result<&str, OpError> {
     let trimmed = name.trim();
     let is_reserved = trimmed.is_empty() || trimmed == "." || trimmed == "..";
-    if is_reserved || trimmed.contains(['/', '\0']) {
+    if is_reserved || trimmed.contains(['/', '\\', '\0']) {
         return Err(OpError::InvalidName(name.to_owned()));
     }
     Ok(trimmed)
@@ -42,7 +42,7 @@ pub fn create_dir(dir: &Path, name: &str) -> Result<PathBuf, OpError> {
 pub fn rename(from: &Path, new_name: &str) -> Result<PathBuf, OpError> {
     let name = validate_name(new_name)?;
     let target = from.with_file_name(name);
-    if target.symlink_metadata().is_ok() {
+    if target.symlink_metadata().is_ok() && !is_case_only_rename(from, &target) {
         return Err(OpError::AlreadyExists(target));
     }
     std::fs::rename(from, &target)?;
@@ -51,6 +51,28 @@ pub fn rename(from: &Path, new_name: &str) -> Result<PathBuf, OpError> {
 
 pub fn trash(path: &Path) -> Result<(), OpError> {
     trash::delete(path).map_err(|error| OpError::Trash(error.to_string()))
+}
+
+fn is_case_only_rename(from: &Path, target: &Path) -> bool {
+    let has_same_name_ignoring_case = match (from.file_name(), target.file_name()) {
+        (Some(a), Some(b)) => a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase(),
+        _ => false,
+    };
+    has_same_name_ignoring_case && is_same_file(from, target)
+}
+
+#[cfg(unix)]
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (a.symlink_metadata(), b.symlink_metadata()) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 fn classify_create_error(error: std::io::Error, path: &Path) -> OpError {
@@ -124,6 +146,28 @@ mod tests {
             assert!(matches!(create_file(root.path(), name), Err(OpError::InvalidName(_))), "{name:?}");
         }
         assert_eq!(validate_name("  ok.txt ").unwrap(), "ok.txt");
+    }
+
+    #[test]
+    fn backslash_and_nul_are_rejected() {
+        assert!(matches!(validate_name("a\\b"), Err(OpError::InvalidName(_))));
+        assert!(matches!(validate_name("a\0b"), Err(OpError::InvalidName(_))));
+    }
+
+    #[test]
+    fn rename_allows_case_only_change() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("a.txt");
+        fs::write(&original, "x").unwrap();
+
+        let renamed = rename(&original, "A.txt").unwrap();
+
+        assert_eq!(renamed, root.path().join("A.txt"));
+        let names: Vec<String> = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["A.txt"]);
     }
 
     #[test]
