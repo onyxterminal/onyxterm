@@ -20,6 +20,36 @@ impl Axis {
 pub type SplitRatio = f32;
 
 const DROP_SPLIT_RATIO: SplitRatio = 0.5;
+pub const MIN_SPLIT_RATIO: SplitRatio = 0.1;
+pub const MAX_SPLIT_RATIO: SplitRatio = 0.9;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl Direction {
+    pub fn axis(self) -> Axis {
+        match self {
+            Direction::Left | Direction::Right => Axis::Horizontal,
+            Direction::Up | Direction::Down => Axis::Vertical,
+        }
+    }
+
+    pub fn is_forward(self) -> bool {
+        matches!(self, Direction::Right | Direction::Down)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Nudge {
+    Absent,
+    Pending,
+    Applied,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropZone {
@@ -225,6 +255,29 @@ impl LayoutNode {
             second: Box::new(LayoutNode::leaf(second)),
         };
         Ok(())
+    }
+
+    pub fn resize_toward(&mut self, panel: PanelId, direction: Direction, step: SplitRatio) {
+        let delta = if direction.is_forward() { step } else { -step };
+        self.nudge_nearest_split(panel, direction.axis(), delta);
+    }
+
+    fn nudge_nearest_split(&mut self, panel: PanelId, axis: Axis, delta: SplitRatio) -> Nudge {
+        let Self::Split { axis: split_axis, ratio, first, second } = self else {
+            return match self.leaf_id() == Some(panel) {
+                true => Nudge::Pending,
+                false => Nudge::Absent,
+            };
+        };
+        let inner = match first.nudge_nearest_split(panel, axis, delta) {
+            Nudge::Absent => second.nudge_nearest_split(panel, axis, delta),
+            outcome => outcome,
+        };
+        if inner != Nudge::Pending || *split_axis != axis {
+            return inner;
+        }
+        *ratio = (*ratio + delta).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+        Nudge::Applied
     }
 
     fn swap_leaves(&mut self, a: PanelId, b: PanelId) {

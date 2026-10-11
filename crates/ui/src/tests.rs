@@ -49,7 +49,6 @@ fn keymap_resolves_default_bindings() {
     let map = Keymap::default();
     let cmd_shift_p = Combo::new(Modifiers::command_shift(), "p");
     assert_eq!(map.resolve(&cmd_shift_p), Some(CommandId::OpenPalette));
-    assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "k")), None);
     let cmd_w = Combo::new(Modifiers::command(), "w");
     assert_eq!(map.resolve(&cmd_w), Some(CommandId::CloseActive));
     let cmd_t = Combo::new(Modifiers::command(), "t");
@@ -1058,4 +1057,68 @@ fn ghost_islands_keep_the_look_they_had_when_they_left_the_layout() {
     assert_eq!(looks.get(staying), Some(look_for(true, false)));
     looks.remember(HashMap::from([(staying, look_for(true, false))]), &[]);
     assert_eq!(looks.get(leaving), None);
+}
+
+fn split_node(axis: Axis, first: LayoutNode, second: LayoutNode) -> LayoutNode {
+    LayoutNode::Split { axis, ratio: 0.5, first: Box::new(first), second: Box::new(second) }
+}
+
+#[test]
+fn directional_neighbor_follows_pane_geometry() {
+    use crate::pane_layout::neighbor_toward;
+    use domain::Direction;
+    let (a, b, c, d) = (PanelId::new(), PanelId::new(), PanelId::new(), PanelId::new());
+    let right_column = split_node(Axis::Vertical, LayoutNode::leaf(b), LayoutNode::leaf(c));
+    let top = split_node(Axis::Horizontal, LayoutNode::leaf(a), right_column);
+    let layout = split_node(Axis::Vertical, top, LayoutNode::leaf(d));
+    assert_eq!(neighbor_toward(&layout, a, Direction::Right), Some(b));
+    assert_eq!(neighbor_toward(&layout, a, Direction::Left), None);
+    assert_eq!(neighbor_toward(&layout, a, Direction::Up), None);
+    assert_eq!(neighbor_toward(&layout, c, Direction::Left), Some(a));
+    assert_eq!(neighbor_toward(&layout, b, Direction::Down), Some(c));
+    assert_eq!(neighbor_toward(&layout, c, Direction::Down), Some(d));
+    assert_eq!(neighbor_toward(&layout, d, Direction::Up), Some(a));
+    assert_eq!(neighbor_toward(&layout, PanelId::new(), Direction::Up), None);
+}
+
+#[test]
+fn tab_focuses_swaps_and_resizes_toward_a_direction() {
+    use domain::Direction;
+    let mut tabs = Tabs::default();
+    let (a, b) = (PanelId::new(), PanelId::new());
+    tabs.open(a);
+    let tab = tabs.active_mut().unwrap();
+    tab.split_focused(Axis::Horizontal, b).unwrap();
+    tab.focus_toward(Direction::Left);
+    assert_eq!(tab.focused(), a);
+    tab.focus_toward(Direction::Left);
+    assert_eq!(tab.focused(), a);
+    tab.focus_toward(Direction::Right);
+    assert_eq!(tab.focused(), b);
+    tab.swap_toward(Direction::Left).unwrap();
+    assert_eq!(tab.layout().leaves(), vec![b, a]);
+    assert_eq!(tab.focused(), b);
+    tab.swap_toward(Direction::Up).unwrap();
+    assert_eq!(tab.layout().leaves(), vec![b, a]);
+    tab.resize_toward(Direction::Right);
+    let LayoutNode::Split { ratio, .. } = tab.layout() else { panic!("expected split") };
+    assert!((ratio - (0.5 + crate::tabs::RESIZE_STEP)).abs() < 1e-6);
+}
+
+#[test]
+fn keymap_binds_vim_movement_with_command_held() {
+    use domain::Direction;
+    let map = Keymap::default();
+    let cmd = Modifiers::command();
+    assert_eq!(map.resolve(&Combo::new(cmd, "h")), Some(CommandId::FocusPane(Direction::Left)));
+    assert_eq!(map.resolve(&Combo::new(cmd, "j")), Some(CommandId::FocusPane(Direction::Down)));
+    assert_eq!(map.resolve(&Combo::new(cmd, "k")), Some(CommandId::FocusPane(Direction::Up)));
+    assert_eq!(map.resolve(&Combo::new(cmd, "l")), Some(CommandId::FocusPane(Direction::Right)));
+    assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::alt(), "up")), Some(CommandId::FocusPane(Direction::Up)));
+    assert_eq!(map.combo_for(CommandId::FocusPane(Direction::Left)), Some(&Combo::new(cmd, "h")));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "l")), Some(CommandId::SwapPane(Direction::Right)));
+    assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::control(), "j")), Some(CommandId::ResizePane(Direction::Down)));
+    assert_eq!(map.resolve(&Combo::new(cmd, "d")), Some(CommandId::SplitRight));
+    assert_eq!(map.resolve(&Combo::new(cmd, "enter")), Some(CommandId::MaximizePane));
+    assert_eq!(map.combo_for(CommandId::FocusAdjacent), None);
 }

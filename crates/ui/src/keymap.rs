@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::command::CommandId;
+use domain::Direction;
 use gpui::{Keystroke, Modifiers};
 use std::collections::HashMap;
 
@@ -154,11 +155,19 @@ impl Keymap {
 
 const INDEXED_SLOTS: usize = 9;
 
+const DIRECTION_KEYS: [(Direction, &str, &str); 4] = [
+    (Direction::Left, "h", "left"),
+    (Direction::Down, "j", "down"),
+    (Direction::Up, "k", "up"),
+    (Direction::Right, "l", "right"),
+];
+
 impl Default for Keymap {
     fn default() -> Self {
         let mut map = Self::new();
         bind_application(&mut map);
         bind_panes(&mut map);
+        bind_pane_movement(&mut map);
         bind_tabs(&mut map);
         bind_workspaces(&mut map);
         map
@@ -185,6 +194,17 @@ fn bind_panes(map: &mut Keymap) {
     map.bind(Combo::new(cmd, "d"), SplitRight);
     map.bind(Combo::new(Modifiers::command_shift(), "d"), SplitDown);
     map.bind(Combo::new(cmd, "enter"), MaximizePane);
+}
+
+fn bind_pane_movement(map: &mut Keymap) {
+    use CommandId::*;
+    let cmd = Modifiers::command();
+    for (direction, vim_key, arrow_key) in DIRECTION_KEYS {
+        map.bind(Combo::new(cmd, vim_key), FocusPane(direction));
+        map.bind(Combo::new(cmd | Modifiers::alt(), arrow_key), FocusPane(direction));
+        map.bind(Combo::new(Modifiers::command_shift(), vim_key), SwapPane(direction));
+        map.bind(Combo::new(cmd | Modifiers::control(), vim_key), ResizePane(direction));
+    }
 }
 
 fn bind_tabs(map: &mut Keymap) {

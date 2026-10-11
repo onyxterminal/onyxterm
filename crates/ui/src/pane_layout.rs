@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::tabs::{SplitPath, SplitSide};
-use domain::{Axis, LayoutNode, PanelId};
+use domain::{Axis, Direction, LayoutNode, PanelId};
 use gpui::{point, px, size, Bounds, Pixels, Point};
 use terminal_core::GridSize;
 
@@ -21,6 +21,17 @@ impl Rect {
 
     pub fn to_bounds(self, origin: Point<Pixels>) -> Bounds<Pixels> {
         Bounds::new(origin + point(px(self.x), px(self.y)), size(px(self.width), px(self.height)))
+    }
+
+    fn start(self, axis: Axis) -> f32 {
+        match axis {
+            Axis::Horizontal => self.x,
+            Axis::Vertical => self.y,
+        }
+    }
+
+    fn end(self, axis: Axis) -> f32 {
+        self.start(axis) + self.extent(axis)
     }
 
     fn extent(self, axis: Axis) -> f32 {
@@ -88,6 +99,39 @@ pub fn compute_layout(node: &LayoutNode, area: Rect, spacing: Spacing) -> PaneLa
     let mut placer = Placer { spacing, layout: PaneLayout::default() };
     placer.place(node, Slot { rect: area, collapsed: area, path: Vec::new() });
     placer.layout
+}
+
+const UNIT_AREA: Rect = Rect { x: 0.0, y: 0.0, width: 1.0, height: 1.0 };
+const UNSPACED: Spacing = Spacing { gap: 0.0, min_pane: 0.0 };
+const EDGE_TOLERANCE: f32 = 1e-4;
+
+pub fn neighbor_toward(node: &LayoutNode, from: PanelId, direction: Direction) -> Option<PanelId> {
+    let islands = compute_layout(node, UNIT_AREA, UNSPACED).islands;
+    let origin = islands.iter().find(|island| island.panel == from)?.rect;
+    islands
+        .iter()
+        .filter(|island| island.panel != from)
+        .filter_map(|island| {
+            let distance = distance_toward(origin, island.rect, direction)?;
+            let overlap = cross_overlap(origin, island.rect, direction.axis());
+            (overlap > EDGE_TOLERANCE).then_some((island.panel, distance, overlap))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(b.2.total_cmp(&a.2)))
+        .map(|(panel, _, _)| panel)
+}
+
+fn distance_toward(origin: Rect, candidate: Rect, direction: Direction) -> Option<f32> {
+    let axis = direction.axis();
+    let distance = match direction.is_forward() {
+        true => candidate.start(axis) - origin.end(axis),
+        false => origin.start(axis) - candidate.end(axis),
+    };
+    (distance > -EDGE_TOLERANCE).then_some(distance)
+}
+
+fn cross_overlap(a: Rect, b: Rect, axis: Axis) -> f32 {
+    let cross = axis.opposite();
+    a.end(cross).min(b.end(cross)) - a.start(cross).max(b.start(cross))
 }
 
 pub fn first_extent(extent: f32, ratio: f32, spacing: Spacing) -> f32 {

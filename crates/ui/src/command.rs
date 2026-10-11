@@ -3,6 +3,7 @@
 
 use crate::app::{AppState, PaletteChoice};
 use crate::keymap::Combo;
+use domain::Direction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandId {
@@ -34,6 +35,9 @@ pub enum CommandId {
     SelectAll,
     RenamePane,
     MoveToNewTab,
+    FocusPane(Direction),
+    SwapPane(Direction),
+    ResizePane(Direction),
     SelectTab(usize),
     SelectWorkspace(usize),
     NextWorkspace,
@@ -46,8 +50,8 @@ impl CommandId {
         use CommandId::*;
         matches!(
             self,
-            NewTab | NextTab | PrevTab | SelectTab(_) | SplitRight | SplitDown | FocusAdjacent | CloseActive | CloseTab
-                | MoveToNewTab
+            NewTab | NextTab | PrevTab | SelectTab(_) | SplitRight | SplitDown | FocusAdjacent | FocusPane(_)
+                | SwapPane(_) | ResizePane(_) | CloseActive | CloseTab | MoveToNewTab
         )
     }
 }
@@ -214,6 +218,14 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),
         Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
         Command::builder(FocusAdjacent, "Focus Next Pane", "Panes", no_op).build(),
+        Command::builder(FocusPane(Direction::Left), "Focus Pane Left", "Panes", no_op).build(),
+        Command::builder(FocusPane(Direction::Right), "Focus Pane Right", "Panes", no_op).build(),
+        Command::builder(FocusPane(Direction::Up), "Focus Pane Up", "Panes", no_op).build(),
+        Command::builder(FocusPane(Direction::Down), "Focus Pane Down", "Panes", no_op).build(),
+        Command::builder(SwapPane(Direction::Left), "Swap Pane Left", "Panes", no_op).build(),
+        Command::builder(SwapPane(Direction::Right), "Swap Pane Right", "Panes", no_op).build(),
+        Command::builder(SwapPane(Direction::Up), "Swap Pane Up", "Panes", no_op).build(),
+        Command::builder(SwapPane(Direction::Down), "Swap Pane Down", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
         Command::builder(RenamePane, "Rename Pane", "Panes", no_op).build(),
         Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),

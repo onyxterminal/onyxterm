@@ -18,7 +18,7 @@ use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, Termin
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
-use domain::{Axis, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
+use domain::{Axis, Direction, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
     FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
@@ -237,6 +237,9 @@ impl Shell {
             CommandId::SplitRight => self.split_focused(Axis::Horizontal, cx),
             CommandId::SplitDown => self.split_focused(Axis::Vertical, cx),
             CommandId::FocusAdjacent => self.focus_next_pane(),
+            CommandId::FocusPane(direction) => self.focus_pane_toward(direction),
+            CommandId::SwapPane(direction) => self.swap_pane_toward(direction),
+            CommandId::ResizePane(direction) => self.resize_pane_toward(direction),
             CommandId::MaximizePane => self.toggle_maximized(),
             CommandId::CloseActive => self.request_close_focused(cx),
             CommandId::Copy => self.copy_selection(cx),
@@ -657,6 +660,27 @@ impl Shell {
     fn focus_next_pane(&mut self) {
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus_next();
+        }
+    }
+
+    fn focus_pane_toward(&mut self, direction: Direction) {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.focus_toward(direction);
+        }
+    }
+
+    fn swap_pane_toward(&mut self, direction: Direction) {
+        let Some(tab) = self.model.tabs_mut().active_mut() else {
+            return;
+        };
+        if let Err(err) = tab.swap_toward(direction) {
+            tracing::warn!(?err, "swap pane failed");
+        }
+    }
+
+    fn resize_pane_toward(&mut self, direction: Direction) {
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.resize_toward(direction);
         }
     }
 

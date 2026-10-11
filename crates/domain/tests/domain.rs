@@ -94,6 +94,40 @@ fn layout_close_leaf_reaches_nested_second_branch() {
     assert_eq!(root.leaves(), vec![p1, p2]);
 }
 
+fn root_ratio(node: &domain::LayoutNode) -> f32 {
+    match node {
+        domain::LayoutNode::Split { ratio, .. } => *ratio,
+        domain::LayoutNode::Leaf { .. } => panic!("expected split"),
+    }
+}
+
+#[test]
+fn layout_resize_nudges_nearest_matching_ancestor_and_clamps() {
+    use domain::{Direction, MAX_SPLIT_RATIO, MIN_SPLIT_RATIO};
+    let (p1, p2, p3) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let mut root = domain::LayoutNode::leaf(p1);
+    root.split_with(p1, Axis::Horizontal, 0.5, p2).unwrap();
+    root.split_with(p2, Axis::Vertical, 0.5, p3).unwrap();
+    root.resize_toward(p3, Direction::Right, 0.1);
+    assert!((root_ratio(&root) - 0.6).abs() < 1e-6);
+    root.resize_toward(p1, Direction::Left, 0.1);
+    assert!((root_ratio(&root) - 0.5).abs() < 1e-6);
+    root.resize_toward(p1, Direction::Up, 0.1);
+    assert!((root_ratio(&root) - 0.5).abs() < 1e-6);
+    root.resize_toward(p3, Direction::Up, 0.1);
+    let domain::LayoutNode::Split { second, .. } = &root else { panic!("expected split") };
+    assert!((root_ratio(second) - 0.4).abs() < 1e-6);
+    for _ in 0..20 {
+        root.resize_toward(p1, Direction::Right, 0.1);
+    }
+    assert_eq!(root_ratio(&root), MAX_SPLIT_RATIO);
+    for _ in 0..20 {
+        root.resize_toward(p2, Direction::Left, 0.1);
+    }
+    assert_eq!(root_ratio(&root), MIN_SPLIT_RATIO);
+    root.validate().expect("resized layout stays valid");
+}
+
 #[test]
 fn layout_validate_rejects_duplicate_panel() {
     let p = PanelId::new();

@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 
 use crate::pane_drop::DropTarget;
-use domain::{Axis, DomainError, DropZone, LayoutNode, PanelId, TabId};
+use crate::pane_layout::neighbor_toward;
+use domain::{Axis, Direction, DomainError, DropZone, LayoutNode, PanelId, TabId};
 
 pub const SPLIT_RATIO: f32 = 0.5;
+pub const RESIZE_STEP: f32 = 0.05;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SplitSide {
@@ -133,6 +135,23 @@ impl Tab {
         let leaves = self.layout.leaves();
         let current = leaves.iter().position(|id| *id == self.focused).unwrap_or(0);
         self.focused = leaves[(current + 1) % leaves.len()];
+    }
+
+    pub fn focus_toward(&mut self, direction: Direction) {
+        if let Some(panel) = neighbor_toward(&self.layout, self.focused, direction) {
+            self.focused = panel;
+        }
+    }
+
+    pub fn swap_toward(&mut self, direction: Direction) -> Result<(), DomainError> {
+        let Some(target) = neighbor_toward(&self.layout, self.focused, direction) else {
+            return Ok(());
+        };
+        self.move_panel(self.focused, target, DropZone::Center)
+    }
+
+    pub fn resize_toward(&mut self, direction: Direction) {
+        self.layout.resize_toward(self.focused, direction, RESIZE_STEP);
     }
 
     fn is_single_panel(&self) -> bool {
