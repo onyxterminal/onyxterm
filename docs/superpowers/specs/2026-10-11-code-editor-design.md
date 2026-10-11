@@ -98,12 +98,9 @@ Built-in grammars are linked natively in v1. Loading `.wasm` grammars from downl
 
 Today `Pane` in `ui/src/shell.rs:62` is terminal-only, and about 15 `Shell` methods assume a PTY.
 
-- Domain: `PanelKind` gains `Editor` and `FileTree`. `ResourceRef` gains `Document(DocumentId)`; the path is `PanelSnapshot.path: Option<PathBuf>`. Constructors `Panel::new_editor(path)` and `Panel::new_file_tree(root)`.
-- UI: non-terminal panes live in `Shell.documents: HashMap<PanelId, DocumentPane>`; terminal code paths are unchanged. Every terminal-only method in the scout list (`spawn_restored`, `sync_live_cwds`, `send_key_to_terminal`, `drop_paths`, `focused_handle`, close/confirm, `panel_cwd`, `discard_pane`, `apply_batch`, `render_pane`, `islands::sync_grids`, `pane_status`, `copy_mode`, `text_input`) matches on the kind and either handles it or skips non-terminals.
-- Key routing: `Shell::consume_key` keeps its order (dialogs → menus → palette → keymap → copy mode); after the global keymap, the key goes to the focused pane's kind instead of straight to the terminal.
-- IME: `Shell`'s `EntityInputHandler` delegates to the focused pane's kind; the editor supplies its own `bounds_for_range` from the cursor.
-- Closing an editor with unsaved changes uses the existing confirm dialog (`ui/src/confirm.rs`) with Save / Discard / Cancel. Quit with unsaved buffers asks the same.
-- `restore_policy` fallbacks (`fall_back_missing_panel_cwds`, `fill_missing_panels`, `fresh_terminal`) apply only to terminals. An editor whose file no longer exists restores as a "file not found" editor pane; a file tree whose root is gone shows a 'not found' placeholder.
+- Domain: `PanelKind` gains `Editor` and `FileTree`. `ResourceRef` gains `Document(DocumentId)`; the path is `PanelSnapshot.path: Option<PathBuf>`. Constructors `Panel::new_editor(id, title)` and `Panel::new_file_tree(id, title)`.
+- UI: non-terminal panes live in `Shell.documents: HashMap<PanelId, DocumentPane>`; terminal code paths are unchanged. Terminal-only methods look up `self.panes` and skip documents on a miss. `WorkspaceModel::terminals_to_spawn` / `documents_to_restore` partition restore so a document never goes through `spawn_restored`.
+- `restore_policy` fallbacks (`fall_back_missing_panel_cwds`, `fill_missing_panels`, `fresh_terminal`) apply only to terminals; document panels are skipped by the cwd fallback. An editor whose file no longer exists restores as a "file not found" editor pane; a file tree whose root is gone shows a 'not found' placeholder.
 
 Done when: every existing test passes, terminals behave identically, and a stub editor pane can be split, focused, moved, closed and restored.
 
@@ -111,11 +108,20 @@ Done when: every existing test passes, terminals behave identically, and a stub 
 
 - Migration v4 adds `panels.path TEXT NULL`.
 - `ResourceRef::Document(id)` stores `resource_kind = 'Document'` and the document id; the path is stored in `panels.path`.
-- The codec (`persistence/src/codec.rs:41-79`) gains `editor` / `file_tree` kind strings and the `path` resource.
+- The codec (`persistence/src/codec.rs:41-79`) gains `Editor` / `FileTree` kind strings and the `Document` resource kind.
 - `PanelSnapshot` carries the path through `write_snapshot` / `load_snapshot`.
 - Restore reopens the file from disk; unsaved edits are never persisted (quit already confirmed them).
 
 ## Step 2 — Editor core and view
+
+### Carried from Step 1
+
+- Key routing: `Shell::consume_key` currently returns false for a focused document. The editor replaces that with dispatch to the focused pane's kind after the global keymap; order stays dialogs → menus → palette → keymap → pane.
+- IME: `Shell`'s `EntityInputHandler` (`crates/ui/src/shell/text_input.rs`) delegates to the focused pane's kind; the editor supplies its own `bounds_for_range` from the cursor.
+- Closing an editor with unsaved changes uses the existing confirm dialog (`ui/src/confirm.rs`) with Save / Discard / Cancel, hooked into `request_close_focused`, `request_close_tab` and `request_quit` in `crates/ui/src/shell.rs`. Quit with unsaved buffers asks the same.
+- The header title for documents comes from `Panel.title`.
+- `DocumentPane` becomes `enum DocumentPane { Editor(..), FileTree(..) }`.
+- File existence is checked at open/restore and on watcher events, not per render.
 
 **Buffer.** `Rope` plus `version: u64` (bumped on each edit) and `saved_version`. `is_dirty = version != saved_version`. Line endings are detected on load and preserved on save.
 
@@ -145,6 +151,8 @@ Done when: every existing test passes, terminals behave identically, and a stub 
 Pane header shows the file name and a dirty dot. `Pane::title` is the file name.
 
 ## Step 3 — File tree pane
+
+Open Folder currently splits the tree to the right of the focused pane; Step 3 moves the tree to the left.
 
 - State: root path, set of expanded directories, and a flat `Vec<Row>` of what's visible (depth, name, is_dir, path). It's rendered with `uniform_list`, so 100k visible rows cost the same as 30.
 - Listing: directories load on expand through `fs-service::tree` on a background thread. `.gitignore` is respected; `.git` is hidden. Directories are listed first, then files, in natural sort order.
