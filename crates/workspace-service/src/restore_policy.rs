@@ -51,7 +51,7 @@ impl RestorePolicy<'_> {
                 .find(|w| w.id == workspace_id)
                 .and_then(|w| w.root.clone())
                 .unwrap_or_else(|| self.home.to_path_buf());
-            for panel in tab.panels.iter_mut().filter(|p| !p.cwd.is_dir()) {
+            for panel in tab.panels.iter_mut().filter(|p| !p.panel.is_document() && !p.cwd.is_dir()) {
                 let missing = std::mem::replace(&mut panel.cwd, fallback.clone());
                 self.warn_missing(workspace_id, missing, fallback.clone());
             }

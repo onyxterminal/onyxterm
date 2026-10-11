@@ -7,7 +7,7 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{document_cwd, render_document, DocumentPane};
+use crate::document::{document_cwd, document_title, render_document, DocumentPane};
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
@@ -692,7 +692,7 @@ impl Shell {
                 return;
             };
             let updated = shell.update(cx, |shell, cx| {
-                let title = crate::document::document_title(&path);
+                let title = document_title(&path);
                 let panel = if is_folder {
                     Panel::new_file_tree(PanelId::new(), title)
                 } else {

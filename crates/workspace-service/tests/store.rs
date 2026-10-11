@@ -247,3 +247,22 @@ fn running_agent_is_restored_as_exited_and_never_resumed() {
     assert_eq!(reopened.snapshot.agents[0].id, agent.id);
     assert_eq!(reopened.snapshot.agents[0].state, AgentState::Exited);
 }
+
+#[test]
+fn document_panel_with_missing_folder_keeps_its_cwd_and_raises_no_warning() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = db_path(&dir);
+    let gone = dir.path().join("deleted-project");
+    let (store, _) = open(&path);
+    let mut changed = two_workspaces();
+    let record = &mut changed.tabs[0].panels[0];
+    record.panel = domain::Panel::new_editor(record.panel.id, "main.rs".to_string());
+    record.cwd = gone.clone();
+    record.path = Some(gone.join("main.rs"));
+    store.save(changed);
+    drop(store);
+
+    let (_store, reopened) = open(&path);
+    assert_eq!(reopened.snapshot.tabs[0].panels[0].cwd, gone);
+    assert!(reopened.warnings.is_empty());
+}

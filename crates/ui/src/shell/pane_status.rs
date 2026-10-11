@@ -1,4 +1,5 @@
 use super::Shell;
+use crate::document::explicit_title;
 use crate::pane_title::{display_title, title_tooltip, TitleSource};
 use domain::PanelId;
 use gpui::{Context, Task};
@@ -51,7 +52,7 @@ impl Shell {
             .or_else(|| record.map(|record| record.cwd.as_path()))
             .unwrap_or(home);
         TitleSource {
-            name: record.and_then(|record| record.name.as_deref()),
+            name: record.and_then(explicit_title),
             job: pane.and_then(|pane| pane.status.job.as_ref()),
             osc: pane.and_then(|pane| pane.osc.as_ref()),
             cwd,

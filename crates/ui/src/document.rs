@@ -26,6 +26,11 @@ pub fn document_cwd(kind: PanelKind, path: &Path, fallback: PathBuf) -> PathBuf 
     }
 }
 
+pub fn explicit_title(record: &PanelSnapshot) -> Option<&str> {
+    let document_name = record.panel.is_document().then_some(record.panel.title.as_str());
+    record.name.as_deref().or(document_name)
+}
+
 pub fn document_title(path: &Path) -> String {
     path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
@@ -49,6 +54,32 @@ pub fn render_document(pane: &DocumentPane, theme: &Theme) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pane_title::{display_title, TitleSource};
+    use domain::{Panel, PanelId};
+
+    fn editor_record(name: Option<&str>) -> PanelSnapshot {
+        PanelSnapshot {
+            panel: Panel::new_editor(PanelId::new(), "main.rs".to_string()),
+            cwd: PathBuf::from("/home/me/proj"),
+            name: name.map(str::to_string),
+            path: Some(PathBuf::from("/home/me/proj/main.rs")),
+        }
+    }
+
+    fn shown(record: &PanelSnapshot) -> String {
+        let home = Path::new("/home/me");
+        display_title(&TitleSource { name: explicit_title(record), job: None, osc: None, cwd: &record.cwd, home })
+    }
+
+    #[test]
+    fn document_title_is_the_panel_title_not_the_cwd() {
+        assert_eq!(shown(&editor_record(None)), "main.rs");
+    }
+
+    #[test]
+    fn renamed_document_shows_its_name() {
+        assert_eq!(shown(&editor_record(Some("scratch"))), "scratch");
+    }
 
     #[test]
     fn file_tree_cwd_is_the_folder_itself() {
