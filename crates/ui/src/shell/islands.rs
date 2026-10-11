@@ -3,7 +3,7 @@ use crate::island_look::{IslandLook, IslandLooks, IslandRole};
 use crate::pane_layout::{compute_layout, grid_changes, Gap, PaneLayout, Rect, Spacing};
 use crate::pane_motion::{duration_from_ms, transition_for, IslandFrame, PaneMotion, Scene};
 use crate::tabs::SplitSide;
-use crate::terminal_view::{island_grid, terminal_preview};
+use crate::terminal_view::island_grid;
 use crate::theme::{box_shadows, LayoutTokens, Theme};
 use domain::{LayoutNode, PanelId, TabId};
 use gpui::{
@@ -242,8 +242,7 @@ impl Shell {
     fn render_ghost_island(&self, panel: PanelId) -> impl IntoElement {
         let theme = &self.state.theme;
         let look = self.stage.looks.get(panel).unwrap_or_else(|| self.island_look(panel));
-        let preview =
-            self.panes.get(&panel).map(|pane| terminal_preview(pane.terminal.handle.clone(), self.style.clone()));
-        island_card(theme).children(preview.map(|preview| island_content(look, preview))).child(island_edge(theme, look))
+        let dim = look.content_opacity;
+        island_card(theme).opacity(dim).child(island_edge(theme, look))
     }
 }
