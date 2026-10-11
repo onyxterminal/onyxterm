@@ -1,0 +1,11 @@
+[package]
+name = "editor-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ropey = "=1.6.1"
+unicode-segmentation = "=1.13.3"
+tempfile = "=3.20.0"
+thiserror = { workspace = true }
