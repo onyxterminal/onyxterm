@@ -188,17 +188,18 @@ impl Shell {
         }
         let theme = &self.state.theme;
         let fill = theme.accent.primary.opacity(DROP_HIGHLIGHT_ALPHA);
+        let radius = px(theme.layout.island_radius_px);
         let highlight = div().absolute();
         let highlight = match zone {
-            DropZone::Left => highlight.bg(fill).left_0().top_0().h_full().w(relative(HALF)),
-            DropZone::Right => highlight.bg(fill).right_0().top_0().h_full().w(relative(HALF)),
-            DropZone::Top => highlight.bg(fill).left_0().top_0().w_full().h(relative(HALF)),
-            DropZone::Bottom => highlight.bg(fill).left_0().bottom_0().w_full().h(relative(HALF)),
+            DropZone::Left => highlight.bg(fill).rounded_l(radius).left_0().top_0().h_full().w(relative(HALF)),
+            DropZone::Right => highlight.bg(fill).rounded_r(radius).right_0().top_0().h_full().w(relative(HALF)),
+            DropZone::Top => highlight.bg(fill).rounded_t(radius).left_0().top_0().w_full().h(relative(HALF)),
+            DropZone::Bottom => highlight.bg(fill).rounded_b(radius).left_0().bottom_0().w_full().h(relative(HALF)),
             DropZone::Center => highlight
                 .inset_0()
                 .border(px(SWAP_OUTLINE_PX))
                 .border_color(theme.accent.primary)
-                .rounded(px(theme.layout.island_radius_px))
+                .rounded(radius)
                 .flex()
                 .items_center()
                 .justify_center()
