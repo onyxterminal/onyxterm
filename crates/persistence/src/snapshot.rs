@@ -15,6 +15,7 @@ const ACTIVE_WORKSPACE_KEY: &str = "workspace.active";
 pub struct PanelSnapshot {
     pub panel: Panel,
     pub cwd: PathBuf,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +49,7 @@ impl Repository {
                 write_tab_row(tx, &tab.tab)?;
                 for panel in &tab.panels {
                     write_panel_row(tx, tab.tab.id, &panel.panel, Some(&panel.cwd))?;
+                    write_panel_name(tx, panel)?;
                 }
             }
             delete_absent(tx, "tabs", snapshot.tabs.iter().map(|t| t.tab.id.to_string()))?;
@@ -62,6 +64,7 @@ impl Repository {
     pub fn load_snapshot(&self, default_cwd: &Path) -> Result<LoadedSnapshot, PersistenceError> {
         let restored = self.restore()?;
         let cwds = self.panel_cwds()?;
+        let mut names = self.panel_names()?;
         let panels_by_id: HashMap<PanelId, Panel> =
             restored.panels.into_iter().map(|p| (p.id, p)).collect();
         let tabs = restored
@@ -75,6 +78,7 @@ impl Repository {
                     .filter_map(|id| panels_by_id.get(&id).cloned())
                     .map(|panel| PanelSnapshot {
                         cwd: cwds.get(&panel.id).cloned().unwrap_or_else(|| default_cwd.to_path_buf()),
+                        name: names.remove(&panel.id),
                         panel,
                     })
                     .collect();
@@ -94,6 +98,19 @@ impl Repository {
                 active_workspace,
             },
             warnings: restored.warnings,
+        })
+    }
+
+    fn panel_names(&self) -> Result<HashMap<PanelId, String>, PersistenceError> {
+        self.pool.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, name FROM panels WHERE name IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+            let mut out = HashMap::new();
+            for row in rows {
+                let (id, name) = row?;
+                out.insert(parse_uuid_id(&id)?, name);
+            }
+            Ok(out)
         })
     }
 
@@ -138,5 +155,13 @@ fn write_active_workspace(
         )?,
         None => tx.execute("DELETE FROM app_settings WHERE key = ?1", [ACTIVE_WORKSPACE_KEY])?,
     };
+    Ok(())
+}
+
+fn write_panel_name(tx: &rusqlite::Transaction<'_>, panel: &PanelSnapshot) -> Result<(), PersistenceError> {
+    tx.execute(
+        "UPDATE panels SET name = ?1 WHERE id = ?2",
+        rusqlite::params![panel.name, panel.panel.id.to_string()],
+    )?;
     Ok(())
 }

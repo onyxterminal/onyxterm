@@ -235,6 +235,7 @@ pub fn fresh_terminal(panel: PanelId, cwd: PathBuf) -> PanelSnapshot {
     PanelSnapshot {
         panel: Panel::new_terminal(panel, DEFAULT_PANEL_TITLE.to_string(), TerminalSessionId::new()),
         cwd,
+        name: None,
     }
 }
 

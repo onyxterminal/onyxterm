@@ -621,7 +621,7 @@ impl Shell {
         let title = shell_title(&command);
         let panel = PanelId::new();
         let session = self.spawn_session(panel, command, title.clone(), cx)?;
-        self.model.add_panel(PanelSnapshot { panel: Panel::new_terminal(panel, title, session), cwd });
+        self.model.add_panel(PanelSnapshot { panel: Panel::new_terminal(panel, title, session), cwd, name: None });
         Some(panel)
     }
 

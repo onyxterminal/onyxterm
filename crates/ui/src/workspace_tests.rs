@@ -15,6 +15,7 @@ fn titled(panel: PanelId, title: &str, cwd: &Path) -> PanelSnapshot {
     PanelSnapshot {
         panel: Panel::new_terminal(panel, title.to_string(), TerminalSessionId::new()),
         cwd: cwd.to_path_buf(),
+        name: None,
     }
 }
 

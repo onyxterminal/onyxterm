@@ -10,7 +10,7 @@ fn workspace_with_tab(name: &str, cwd: &str) -> (Workspace, TabSnapshot) {
     workspace.tab_order = vec![tab.id];
     workspace.active_tab = Some(tab.id);
     let panel = Panel::new_terminal(panel_id, "Terminal".into(), TerminalSessionId::new());
-    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd) }];
+    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd), name: Some(format!("{name} pane")) }];
     (workspace, TabSnapshot { tab, panels })
 }
 
