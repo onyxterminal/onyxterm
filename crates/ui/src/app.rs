@@ -4,6 +4,7 @@
 use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
+use crate::settings::Settings;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteChoice {
@@ -14,6 +15,10 @@ pub struct PaletteChoice {
 #[derive(Debug)]
 pub struct AppState {
     pub theme: Theme,
+    pub settings: Settings,
+    pub settings_visible: bool,
+    pub settings_font_field: Option<String>,
+    pub settings_error: Option<String>,
     pub registry: CommandRegistry,
     pub keymap: Keymap,
     pub palette_visible: bool,
@@ -24,8 +29,16 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        Self::with_settings(Settings::default())
+    }
+
+    pub fn with_settings(settings: Settings) -> Self {
         Self {
-            theme: Theme::load_default().expect("default theme must load"),
+            theme: settings.theme_tokens(),
+            settings,
+            settings_visible: false,
+            settings_font_field: None,
+            settings_error: None,
             registry: CommandRegistry::with_defaults(),
             keymap: Keymap::default(),
             palette_visible: false,

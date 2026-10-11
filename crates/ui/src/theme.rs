@@ -7,7 +7,18 @@ pub mod menu_chrome;
 use gpui::{point, px, BoxShadow, Hsla, Rgba, WindowBackgroundAppearance};
 use serde::{Deserialize, Deserializer};
 
-const THEME_TOML: &str = include_str!("../../../assets/themes/apple-light.toml");
+const LIGHT_THEME_TOML: &str = include_str!("../../../assets/themes/apple-light.toml");
+const DARK_THEME_TOML: &str = include_str!("../../../assets/themes/onyx-dark.toml");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeKind { Light, Dark }
+
+impl ThemeKind {
+    pub fn key(self) -> &'static str { match self { Self::Light => "light", Self::Dark => "dark" } }
+    pub fn from_key(key: &str) -> Self { if key == "dark" { Self::Dark } else { Self::Light } }
+    pub fn label(self) -> &'static str { match self { Self::Light => "Light", Self::Dark => "Dark" } }
+    pub fn next(self) -> Self { match self { Self::Light => Self::Dark, Self::Dark => Self::Light } }
+}
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ThemeError {
@@ -231,8 +242,36 @@ pub struct Theme {
 
 impl Theme {
     pub fn load_default() -> Result<Self, ThemeError> {
-        let raw: RawTheme = toml::from_str(THEME_TOML)?;
+        Self::load(ThemeKind::Light)
+    }
+
+    pub fn load(kind: ThemeKind) -> Result<Self, ThemeError> {
+        let source = match kind { ThemeKind::Light => LIGHT_THEME_TOML, ThemeKind::Dark => DARK_THEME_TOML };
+        let raw: RawTheme = toml::from_str(source)?;
         Self::from_raw(raw)
+    }
+
+    pub fn scale_ui(&mut self, scale: f32) {
+        macro_rules! scale { ($object:expr, $($field:ident),+ $(,)?) => { $( $object.$field *= scale; )+ }; }
+        scale!(self.ui_font, tab_px, button_px, pane_title_px, menu_px, shortcut_px,
+            palette_input_px, hint_px, section_label_px, dialog_title_px, dialog_body_px);
+        scale!(self.layout, tab_strip_height_px, pane_header_height_px, border_radius_px,
+            gap_px, island_radius_px, island_gap_px, window_margin_px, min_pane_px,
+            traffic_light_left_px, traffic_light_top_px, traffic_lights_width_px);
+        scale!(self.top_bar, leading_gap_px, control_height_px, control_radius_px, logo_px,
+            separator_width_px, separator_height_px, tab_padding_x_px, tab_gap_px, item_gap_px);
+        scale!(self.pane_header, padding_x_px, status_dot_px, icon_button_px, icon_button_radius_px, icon_px);
+        scale!(self.menu, width_px, radius_px, padding_px, border_px, row_height_px, row_radius_px,
+            row_padding_x_px, offset_px, section_label_height_px);
+        scale!(self.palette, width_px, top_px, radius_px, border_px, search_height_px,
+            search_icon_px, row_height_px, row_radius_px, footer_height_px);
+        scale!(self.dialog, width_px, radius_px, button_height_px, button_radius_px);
+        scale!(self.island, focus_ring_px, unfocused_border_px, pane_padding_x_px,
+            pane_padding_top_px, pane_padding_bottom_px);
+        for shadow in self.shadow.card.iter_mut().chain(&mut self.shadow.tab)
+            .chain(&mut self.shadow.menu).chain(&mut self.shadow.palette) {
+            scale!(shadow, x, y, blur, spread);
+        }
     }
 
     fn from_raw(raw: RawTheme) -> Result<Self, ThemeError> {

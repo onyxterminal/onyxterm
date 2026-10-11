@@ -1,7 +1,7 @@
 use crate::restore_policy::RestorePolicy;
 use crate::writer::{SnapshotWriter, WriterCommand};
 use domain::WorkspaceId;
-use persistence::{LoadedSnapshot, PersistenceError, Repository, RestoreWarning, WorkspaceSnapshot};
+use persistence::{AppSettingsRepo, LoadedSnapshot, PersistenceError, Repository, RestoreWarning, WorkspaceSnapshot};
 use platform::PlatformError;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -37,6 +37,7 @@ pub enum StoreWarning {
 #[derive(Debug, Clone)]
 pub struct RestoredState {
     pub snapshot: WorkspaceSnapshot,
+    pub settings: Vec<(String, String)>,
     pub warnings: Vec<StoreWarning>,
 }
 
@@ -57,14 +58,19 @@ impl WorkspaceStore {
         warnings.extend(loaded.warnings.into_iter().map(StoreWarning::LayoutDropped));
         let mut policy = RestorePolicy { home: &home, warnings: &mut warnings };
         let snapshot = policy.apply(loaded.snapshot);
+        let settings = repository.settings().all()?;
         let store = Self::spawn_writer(repository)?;
-        Ok((store, RestoredState { snapshot, warnings }))
+        Ok((store, RestoredState { snapshot, settings, warnings }))
     }
 
     pub fn save(&self, snapshot: WorkspaceSnapshot) {
         if self.send(WriterCommand::Save(snapshot)).is_err() {
             tracing::error!("workspace store writer has stopped; snapshot dropped");
         }
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.send(WriterCommand::SetSetting(key.to_string(), value.to_string()))
     }
 
     pub fn flush(&self) -> Result<(), StoreError> {

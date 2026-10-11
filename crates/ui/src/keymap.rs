@@ -161,6 +161,7 @@ impl Default for Keymap {
         map.bind(Combo::new(Modifiers::command(), "a"), SelectAll);
         map.bind(Combo::new(Modifiers::command(), "q"), Quit);
         map.bind(Combo::new(Modifiers::command(), "k"), OpenPalette);
+        map.bind(Combo::new(Modifiers::command(), ","), OpenSettings);
         map.bind(Combo::new(Modifiers::command(), "c"), Copy);
         map.bind(Combo::new(Modifiers::command(), "v"), Paste);
         map.bind(Combo::new(Modifiers::command(), "}"), NextTab);

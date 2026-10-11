@@ -50,6 +50,21 @@ fn first_run_yields_zero_workspaces() {
 }
 
 #[test]
+fn settings_survive_snapshot_saves_and_reopen() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = db_path(&dir);
+    let (store, _) = open(&path);
+    store.set_setting("appearance.theme", "dark").unwrap();
+    store.set_setting("appearance.ui_scale", "1.2").unwrap();
+    store.save(two_workspaces());
+    store.flush().unwrap();
+    drop(store);
+    let (_store, restored) = open(&path);
+    assert!(restored.settings.contains(&("appearance.theme".into(), "dark".into())));
+    assert!(restored.settings.contains(&("appearance.ui_scale".into(), "1.2".into())));
+}
+
+#[test]
 fn created_workspace_is_exactly_what_reopens() {
     let dir = TempDir::new().expect("tempdir");
     let path = db_path(&dir);

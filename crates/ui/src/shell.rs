@@ -12,6 +12,7 @@ use crate::menus::RunCommand;
 use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
+use crate::settings::{Settings, FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::pane_title::OscTitle;
 use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
@@ -38,6 +39,7 @@ mod pane_drag;
 mod pane_options;
 mod pane_status;
 mod splits;
+mod settings_view;
 mod tab_strip;
 mod text_input;
 
@@ -206,6 +208,10 @@ impl Shell {
     fn run_command(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
         match id {
             CommandId::NewTab => self.open_tab(cx),
+            CommandId::OpenSettings => {
+                self.state.settings_visible = !self.state.settings_visible;
+                self.state.palette_visible = false;
+            }
             CommandId::NextTab => self.model.tabs_mut().select_next(),
             CommandId::PrevTab => self.model.tabs_mut().select_previous(),
             CommandId::SplitRight => self.split_focused(Axis::Horizontal, cx),
@@ -255,6 +261,24 @@ impl Shell {
         }
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
+            return true;
+        }
+        if self.state.settings_visible {
+            if self.state.settings_font_field.is_some() {
+                match keystroke.key.as_str() {
+                    ESCAPE_KEY => {
+                        self.state.settings_font_field = None;
+                        self.state.settings_error = None;
+                    }
+                    ENTER_KEY => self.commit_font_field(cx),
+                    _ => {
+                        let mut text: SharedString = self.state.settings_font_field.take().unwrap_or_default().into();
+                        edit_field(&mut text, keystroke);
+                        self.state.settings_font_field = Some(text.to_string());
+                    }
+                }
+            } else if keystroke.key == ESCAPE_KEY { self.state.settings_visible = false; }
+            cx.notify();
             return true;
         }
         if self.is_workspace_menu_open {
@@ -759,6 +783,7 @@ impl Render for Shell {
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
+        let settings_overlay = self.state.settings_visible.then(|| self.render_settings(cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
         let margin = px(theme.layout.window_margin_px);
@@ -792,6 +817,7 @@ impl Render for Shell {
             .children(pane_ghost)
             .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
+            .children(settings_overlay)
     }
 }
 
@@ -866,7 +892,7 @@ pub fn open_shell_window(
     startup: Startup,
     cx: &mut gpui::App,
 ) -> gpui::Result<gpui::WindowHandle<Shell>> {
-    let state = AppState::new();
+    let state = AppState::with_settings(Settings::from_pairs(&startup.restored.settings));
     let layout = state.theme.layout;
     let themed_options = WindowOptions {
         window_background: state.theme.window_background(),

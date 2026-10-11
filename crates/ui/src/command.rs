@@ -9,6 +9,7 @@ pub enum CommandId {
     NewTab,
     CloseActive,
     OpenPalette,
+    OpenSettings,
     ClosePalette,
     NextTab,
     PrevTab,
@@ -194,6 +195,7 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
         Command::builder(CloseActive, "Close Pane", "Panes", no_op).build(),
         Command::builder(OpenPalette, "Open Palette", "Palette", toggle_palette).build(),
+        Command::builder(OpenSettings, "Settings", "Application", no_op).build(),
         Command::builder(ClosePalette, "Close Palette", "Palette", close_palette)
             .enabled_when(palette_open)
             .build(),

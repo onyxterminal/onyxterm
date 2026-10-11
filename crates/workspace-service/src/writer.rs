@@ -1,4 +1,4 @@
-use persistence::{PersistenceError, Repository, WorkspaceSnapshot};
+use persistence::{AppSettingsRepo, PersistenceError, Repository, WorkspaceSnapshot};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -8,6 +8,7 @@ pub const SAVE_DEBOUNCE: Duration = Duration::from_millis(300);
 
 pub(crate) enum WriterCommand {
     Save(WorkspaceSnapshot),
+    SetSetting(String, String),
     Flush(Sender<Result<(), PersistenceError>>),
 }
 
@@ -31,6 +32,11 @@ impl SnapshotWriter {
                         .as_ref()
                         .map_or_else(|| Instant::now() + SAVE_DEBOUNCE, |p| p.deadline);
                     pending = Some(PendingSave { snapshot, deadline });
+                }
+                Ok(WriterCommand::SetSetting(key, value)) => {
+                    if let Err(err) = self.repository.settings().set(&key, &value) {
+                        tracing::error!(%err, %key, "failed to persist setting");
+                    }
                 }
                 Ok(WriterCommand::Flush(ack)) => {
                     let _ = ack.send(self.write(pending.take()));
