@@ -1,6 +1,6 @@
 use domain::{Axis, LayoutNode, Panel, PanelId, Tab, TabId, TerminalSessionId, Workspace, WorkspaceId};
 use persistence::{
-    PersistenceError, Repository, TabRepo, WorkspaceRepo, CURRENT_VERSION,
+    PersistenceError, Repository, TabRepo, WorkspaceRepo, CURRENT_VERSION, SCHEMA_SQL,
 };
 use rusqlite::params;
 use std::path::PathBuf;
@@ -48,15 +48,15 @@ fn count_migrations(repo: &Repository) -> i64 {
 #[test]
 fn migrations_apply_once() {
     let (dir, repo) = fresh_repo();
-    assert_eq!(read_max_version(&repo), 1);
+    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
     drop(repo);
 
     let path = dir.path().join("test.db");
     let repo2 = Repository::open(&path).expect("reopen");
-    assert_eq!(read_max_version(&repo2), 1);
+    assert_eq!(read_max_version(&repo2), CURRENT_VERSION);
     assert_eq!(
         count_migrations(&repo2),
-        1,
+        CURRENT_VERSION,
         "migration must be applied once"
     );
 }
@@ -70,7 +70,7 @@ fn migrations_reject_downgrade() {
         .with_conn(|c| {
             c.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-                params![2_i64, "2025-01-01T00:00:00Z"],
+                params![CURRENT_VERSION + 1, "2025-01-01T00:00:00Z"],
             )
         })
         .expect("seed future version");
@@ -78,12 +78,38 @@ fn migrations_reject_downgrade() {
 
     match Repository::open(&path) {
         Err(PersistenceError::DowngradeForbidden { from, to }) => {
-            assert_eq!(from, 2);
+            assert_eq!(from, CURRENT_VERSION + 1);
             assert_eq!(to, CURRENT_VERSION);
         }
         Err(other) => panic!("expected downgrade forbidden, got error: {:?}", other),
         Ok(_) => panic!("expected downgrade forbidden, got success"),
     }
+}
+
+#[test]
+fn migration_adds_snapshot_columns_to_v1_database() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("v1.db");
+    let conn = rusqlite::Connection::open(&path).expect("open v1");
+    conn.execute_batch(SCHEMA_SQL).expect("create v1 schema");
+    conn.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2025-01-01')",
+        [],
+    )
+    .expect("record v1");
+    drop(conn);
+
+    let repo = Repository::open(&path).expect("migrate v1");
+    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
+    let columns: Vec<String> = repo.pool().with_conn(|conn| {
+        let mut stmt = conn.prepare("PRAGMA table_info(panels)").expect("table info");
+        stmt.query_map([], |row| row.get(1))
+            .expect("columns")
+            .map(|row| row.expect("column"))
+            .collect()
+    });
+    assert!(columns.contains(&"cwd".to_string()));
+    assert!(columns.contains(&"name".to_string()));
 }
 
 #[test]

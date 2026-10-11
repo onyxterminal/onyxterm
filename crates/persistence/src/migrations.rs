@@ -2,7 +2,7 @@ use crate::error::PersistenceError;
 use crate::schema::SCHEMA_SQL;
 use rusqlite::Connection;
 
-pub const CURRENT_VERSION: i64 = 1;
+pub const CURRENT_VERSION: i64 = 2;
 
 pub(crate) fn apply_migrations(conn: &mut Connection, target: i64) -> Result<(), PersistenceError> {
     let tx = conn.transaction()?;
@@ -40,6 +40,17 @@ pub(crate) fn apply_migrations(conn: &mut Connection, target: i64) -> Result<(),
         tx.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
             rusqlite::params![1_i64, &now],
+        )?;
+    }
+    if existing.unwrap_or(0) < 2 {
+        tx.execute_batch(
+            "ALTER TABLE panels ADD COLUMN cwd TEXT; \
+             ALTER TABLE panels ADD COLUMN name TEXT;",
+        )
+        .map_err(|e| PersistenceError::MigrationFailed(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
+            rusqlite::params![2_i64, chrono::Utc::now().to_rfc3339()],
         )?;
     }
     tx.commit()?;

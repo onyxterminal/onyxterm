@@ -1,9 +1,7 @@
-use crate::agent_repo::write_agent_row;
-use crate::codec::{encode_json, parse_uuid_id};
+use crate::codec::{agent_state_to_str, encode_json, encode_layout, panel_kind_to_str, parse_uuid_id, path_to_string_lossy, resource_ref_columns};
 use crate::error::PersistenceError;
 use crate::repository::Repository;
 use crate::restore::RestoreWarning;
-use crate::tab_repo::{write_panel_row, write_tab_row};
 use crate::workspace_repo::write_workspace_row;
 use domain::{Agent, Panel, PanelId, Tab, Workspace, WorkspaceId};
 use std::collections::HashMap;
@@ -44,19 +42,45 @@ impl Repository {
             for workspace in &snapshot.workspaces {
                 write_workspace_row(tx, workspace)?;
             }
-            delete_absent(tx, "workspaces", snapshot.workspaces.iter().map(|w| w.id.to_string()))?;
             for tab in &snapshot.tabs {
-                write_tab_row(tx, &tab.tab)?;
+                tx.execute(
+                    "INSERT INTO tabs (id, workspace_id, title, focused_panel) VALUES (?1, ?2, ?3, ?4) \
+                     ON CONFLICT(id) DO UPDATE SET workspace_id=excluded.workspace_id, title=excluded.title, focused_panel=excluded.focused_panel",
+                    rusqlite::params![tab.tab.id.to_string(), tab.tab.workspace_id.to_string(), tab.tab.title, tab.tab.focused_panel.map(|p| p.to_string())],
+                )?;
+                tx.execute(
+                    "INSERT INTO layouts (tab_id, tree_json) VALUES (?1, ?2) \
+                     ON CONFLICT(tab_id) DO UPDATE SET tree_json=excluded.tree_json",
+                    rusqlite::params![tab.tab.id.to_string(), encode_layout(&tab.tab.layout)?],
+                )?;
                 for panel in &tab.panels {
-                    write_panel_row(tx, tab.tab.id, &panel.panel, Some(&panel.cwd))?;
-                    write_panel_name(tx, panel)?;
+                    let (resource_kind, resource_id) = resource_ref_columns(panel.panel.resource);
+                    tx.execute(
+                        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd, name) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                         ON CONFLICT(id) DO UPDATE SET tab_id=excluded.tab_id, kind=excluded.kind, title=excluded.title, \
+                         resource_kind=excluded.resource_kind, resource_id=excluded.resource_id, cwd=excluded.cwd, name=excluded.name",
+                        rusqlite::params![panel.panel.id.to_string(), tab.tab.id.to_string(), panel_kind_to_str(panel.panel.kind),
+                            panel.panel.title, resource_kind, resource_id, path_to_string_lossy(&panel.cwd), panel.name],
+                    )?;
                 }
             }
-            delete_absent(tx, "tabs", snapshot.tabs.iter().map(|t| t.tab.id.to_string()))?;
             for agent in &snapshot.agents {
-                write_agent_row(tx, agent)?;
+                tx.execute(
+                    "INSERT INTO agents (id, provider, workspace_id, terminal_session_id, cwd, state, started_at, ended_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                     ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, workspace_id=excluded.workspace_id, \
+                     terminal_session_id=excluded.terminal_session_id, cwd=excluded.cwd, state=excluded.state, \
+                     started_at=excluded.started_at, ended_at=excluded.ended_at",
+                    rusqlite::params![agent.id.to_string(), agent.provider, agent.workspace.to_string(), agent.terminal_session.to_string(),
+                        path_to_string_lossy(&agent.cwd), agent_state_to_str(agent.state),
+                        agent.started_at.map(|d| d.to_rfc3339()), agent.ended_at.map(|d| d.to_rfc3339())],
+                )?;
             }
+            delete_absent(tx, "panels", snapshot.tabs.iter().flat_map(|t| t.panels.iter()).map(|p| p.panel.id.to_string()))?;
+            delete_absent(tx, "tabs", snapshot.tabs.iter().map(|t| t.tab.id.to_string()))?;
             delete_absent(tx, "agents", snapshot.agents.iter().map(|a| a.id.to_string()))?;
+            delete_absent(tx, "workspaces", snapshot.workspaces.iter().map(|w| w.id.to_string()))?;
             write_active_workspace(tx, snapshot.active_workspace)
         })
     }
@@ -155,13 +179,5 @@ fn write_active_workspace(
         )?,
         None => tx.execute("DELETE FROM app_settings WHERE key = ?1", [ACTIVE_WORKSPACE_KEY])?,
     };
-    Ok(())
-}
-
-fn write_panel_name(tx: &rusqlite::Transaction<'_>, panel: &PanelSnapshot) -> Result<(), PersistenceError> {
-    tx.execute(
-        "UPDATE panels SET name = ?1 WHERE id = ?2",
-        rusqlite::params![panel.name, panel.panel.id.to_string()],
-    )?;
     Ok(())
 }

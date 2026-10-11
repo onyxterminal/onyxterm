@@ -1,12 +1,16 @@
-use crate::event::{Cell, GridSize, GridSnapshot, TerminalError, TerminalEvent, TerminalOutput};
-use crate::pty::PtyHandle;
+use crate::event::{
+    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
+    TerminalError, TerminalEvent, TerminalOutput,
+};
+use crate::pty::{ForegroundJob, PtyHandle};
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
-use alacritty_terminal::grid::{Dimensions, Grid};
-use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::Cell as AlacCell;
 use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{Config as TermConfig, Term};
-use alacritty_terminal::vte::ansi::Processor;
+use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
 use domain::TerminalSessionId;
 use parking_lot::Mutex;
 use std::io::Read;
@@ -14,6 +18,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
+pub const UNKNOWN_EXIT_CODE: i32 = -1;
 
 const EVENTS_CAPACITY: usize = 1024;
 
@@ -58,7 +63,7 @@ impl EventListener for TermListener {
                 let _ = self.events.send(TerminalEvent::TitleChanged(text));
             }
             AlacEvent::Exit => {
-                let _ = self.events.send(TerminalEvent::Exited { code: -1 });
+                let _ = self.events.send(TerminalEvent::Exited { code: UNKNOWN_EXIT_CODE });
             }
             _ => {}
         }
@@ -120,15 +125,74 @@ impl Terminal {
         let columns = grid.columns();
         let rows = screen_lines as u16;
         let cols = columns as u16;
+        let offset = grid.display_offset() as i32;
         let mut cells = Vec::with_capacity((rows as usize) * (cols as usize));
         for line_idx in 0..screen_lines {
-            let line = &grid[Line(line_idx as i32)];
+            let line = &grid[Line(line_idx as i32 - offset)];
             for col_idx in 0..columns {
                 let cell = &line[Column(col_idx)];
                 cells.push(alac_cell_to_cell(cell));
             }
         }
-        GridSnapshot { rows, cols, cells }
+        let cursor = visible_cursor(&state.term);
+        let selection = visible_selection(&state.term);
+        GridSnapshot { rows, cols, cells, cursor, selection }
+    }
+
+    pub fn input_modes(&self) -> InputModes {
+        let state = self.inner.state.lock();
+        let mode = state.term.mode();
+        InputModes {
+            app_cursor: mode.contains(TermMode::APP_CURSOR),
+            bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
+            alt_screen: mode.contains(TermMode::ALT_SCREEN),
+            mouse_reporting: mode.intersects(TermMode::MOUSE_MODE),
+        }
+    }
+
+    pub fn display_offset(&self) -> usize {
+        self.inner.state.lock().term.grid().display_offset()
+    }
+
+    pub fn scroll_lines(&self, delta: i32) {
+        self.inner.state.lock().term.scroll_display(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_to_bottom(&self) {
+        self.inner.state.lock().term.scroll_display(Scroll::Bottom);
+    }
+
+    pub fn start_selection(&self, kind: SelectionKind, point: GridPoint, side: Side) {
+        let mut state = self.inner.state.lock();
+        let location = viewport_to_grid(&state.term, point);
+        state.term.selection = Some(Selection::new(selection_type(kind), location, side));
+    }
+
+    pub fn update_selection(&self, point: GridPoint, side: Side) {
+        let mut state = self.inner.state.lock();
+        let location = viewport_to_grid(&state.term, point);
+        if let Some(selection) = state.term.selection.as_mut() {
+            selection.update(location, side);
+        }
+    }
+
+    pub fn select_all(&self) {
+        let mut state = self.inner.state.lock();
+        let grid = state.term.grid();
+        let start = Point::new(grid.topmost_line(), Column(0));
+        let end = Point::new(grid.bottommost_line(), grid.last_column());
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        state.term.selection = Some(selection);
+    }
+
+    pub fn clear_selection(&self) {
+        self.inner.state.lock().term.selection = None;
+    }
+
+    pub fn selection_text(&self) -> Option<String> {
+        let state = self.inner.state.lock();
+        state.term.selection_to_string().filter(|text| !text.is_empty())
     }
 
     pub fn scrollback_len(&self) -> usize {
@@ -163,9 +227,10 @@ impl TerminalHandle {
     pub fn attach(terminal: Terminal, pty: PtyHandle) -> Result<Self, TerminalError> {
         let reader = pty.take_reader().ok_or(TerminalError::Terminated)?;
         let inner = terminal.inner.clone();
+        let exit_source = pty.clone();
         std::thread::Builder::new()
             .name(format!("term-event-{}", terminal.id()))
-            .spawn(move || run_event_loop(inner, reader))
+            .spawn(move || run_event_loop(inner, reader, exit_source))
             .map_err(|e| TerminalError::PtyRead(format!("thread spawn failed: {e}")))?;
         Ok(Self { terminal, pty })
     }
@@ -203,40 +268,126 @@ impl TerminalHandle {
     pub fn subscribe(&self) -> broadcast::Receiver<TerminalEvent> {
         self.terminal.subscribe()
     }
+
+    pub fn input_modes(&self) -> InputModes {
+        self.terminal.input_modes()
+    }
+
+    pub fn terminal(&self) -> &Terminal {
+        &self.terminal
+    }
+
+    pub fn current_dir(&self) -> Option<std::path::PathBuf> {
+        self.pty.current_dir()
+    }
+
+    pub fn has_foreground_job(&self) -> bool {
+        self.pty.has_foreground_job()
+    }
+
+    pub fn foreground_process_group(&self) -> Option<i32> {
+        self.pty.foreground_process_group()
+    }
+
+    pub fn foreground_job(&self) -> Option<ForegroundJob> {
+        self.pty.foreground_job()
+    }
 }
 
-fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>) {
+fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, pty: PtyHandle) {
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
+                {
+                    let mut parser = inner.parser.lock();
+                    let mut state = inner.state.lock();
+                    parser.advance(&mut state.term, &buf[..n]);
+                }
                 let _ = inner.events.send(TerminalEvent::Output(TerminalOutput {
                     bytes: buf[..n].to_vec(),
                 }));
-                let mut parser = inner.parser.lock();
-                let mut state = inner.state.lock();
-                parser.advance(&mut state.term, &buf[..n]);
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
         }
     }
+    let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
+    let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn selection_type(kind: SelectionKind) -> SelectionType {
+    match kind {
+        SelectionKind::Simple => SelectionType::Simple,
+        SelectionKind::Word => SelectionType::Semantic,
+        SelectionKind::Line => SelectionType::Lines,
+    }
+}
+
+fn viewport_to_grid(term: &Term<TermListener>, point: GridPoint) -> Point {
+    let offset = term.grid().display_offset() as i32;
+    Point::new(Line(i32::from(point.row) - offset), Column(usize::from(point.col)))
+}
+
+fn visible_selection(term: &Term<TermListener>) -> Option<SelectionSpan> {
+    let range: SelectionRange = term.selection.as_ref()?.to_range(term)?;
+    let offset = term.grid().display_offset() as i32;
+    let rows = term.grid().screen_lines() as i32;
+    let last_col = term.grid().columns().saturating_sub(1) as u16;
+    let start_row = range.start.line.0 + offset;
+    let end_row = range.end.line.0 + offset;
+    if end_row < 0 || start_row >= rows {
+        return None;
+    }
+    let start = if start_row < 0 {
+        GridPoint { row: 0, col: 0 }
+    } else {
+        GridPoint { row: start_row as u16, col: range.start.column.0 as u16 }
+    };
+    let end = if end_row >= rows {
+        GridPoint { row: (rows - 1) as u16, col: last_col }
+    } else {
+        GridPoint { row: end_row as u16, col: range.end.column.0 as u16 }
+    };
+    Some(SelectionSpan { start, end })
+}
+
+fn visible_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {
+    let grid = term.grid();
+    if !term.mode().contains(TermMode::SHOW_CURSOR) || grid.display_offset() != 0 {
+        return None;
+    }
+    let point = grid.cursor.point;
+    Some(CursorPosition { row: point.line.0 as u16, col: point.column.0 as u16 })
 }
 
 fn alac_cell_to_cell(c: &AlacCell) -> Cell {
     Cell {
         ch: c.c,
-        fg: color_u32(&c.fg),
-        bg: color_u32(&c.bg),
+        fg: cell_color(&c.fg),
+        bg: cell_color(&c.bg),
         flags: c.flags.bits(),
     }
 }
 
-fn color_u32(color: &alacritty_terminal::vte::ansi::Color) -> u32 {
-    use alacritty_terminal::vte::ansi::Color;
+fn cell_color(color: &Color) -> CellColor {
     match color {
-        Color::Spec(rgb) => ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | (rgb.b as u32),
-        Color::Indexed(_) | Color::Named(_) => 0,
+        Color::Spec(rgb) => CellColor::Rgb(rgb.r, rgb.g, rgb.b),
+        Color::Indexed(index) => CellColor::Indexed(*index),
+        Color::Named(named) => named_cell_color(*named),
     }
+}
+
+fn named_cell_color(named: NamedColor) -> CellColor {
+    let index = named as usize;
+    let dim_black = NamedColor::DimBlack as usize;
+    let dim_white = NamedColor::DimWhite as usize;
+    if index <= NamedColor::BrightWhite as usize {
+        return CellColor::Indexed(index as u8);
+    }
+    if (dim_black..=dim_white).contains(&index) {
+        return CellColor::Indexed((index - dim_black) as u8);
+    }
+    CellColor::Default
 }
