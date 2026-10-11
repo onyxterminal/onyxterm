@@ -349,3 +349,34 @@ fn migration_adds_panel_path_to_v3_database() {
     });
     assert_eq!(path_count, 1);
 }
+
+#[test]
+fn migration_adds_panel_documents_to_v4_database() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("v4.db");
+    let conn = rusqlite::Connection::open(&path).expect("open v4");
+    conn.execute_batch(SCHEMA_SQL).expect("create v1 schema");
+    conn.execute_batch(
+        "ALTER TABLE panels ADD COLUMN cwd TEXT; ALTER TABLE panels ADD COLUMN name TEXT; \
+         ALTER TABLE panels ADD COLUMN path TEXT;",
+    )
+    .expect("add v2 to v4 columns");
+    conn.execute_batch(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2025-01-01');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (2, '2025-01-02');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2025-01-03');
+         INSERT INTO schema_migrations (version, applied_at) VALUES (4, '2025-01-04');",
+    )
+    .expect("record v4");
+    drop(conn);
+
+    let repo = Repository::open(&path).expect("migrate v4");
+    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
+    let documents_count: i64 = repo.pool().with_conn(|conn| {
+        conn.query_row("SELECT COUNT(*) FROM pragma_table_info('panels') WHERE name = 'documents'", [], |row| {
+            row.get(0)
+        })
+        .expect("panel documents column")
+    });
+    assert_eq!(documents_count, 1);
+}

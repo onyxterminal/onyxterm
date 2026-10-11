@@ -284,6 +284,7 @@ pub fn fresh_terminal(panel: PanelId, cwd: PathBuf) -> PanelSnapshot {
         cwd,
         name: None,
         path: None,
+        documents: Vec::new(),
     }
 }
 

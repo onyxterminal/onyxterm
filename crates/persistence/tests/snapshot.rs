@@ -10,7 +10,7 @@ fn workspace_with_tab(name: &str, cwd: &str) -> (Workspace, TabSnapshot) {
     workspace.tab_order = vec![tab.id];
     workspace.active_tab = Some(tab.id);
     let panel = Panel::new_terminal(panel_id, "Terminal".into(), TerminalSessionId::new());
-    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd), name: Some(format!("{name} pane")), path: None }];
+    let panels = vec![PanelSnapshot { panel, cwd: PathBuf::from(cwd), name: Some(format!("{name} pane")), path: None, documents: Vec::new() }];
     (workspace, TabSnapshot { tab, panels })
 }
 
@@ -55,6 +55,7 @@ fn editor_panel_roundtrips_kind_and_path() {
         cwd: PathBuf::from("/code/src"),
         name: None,
         path: Some(PathBuf::from("/code/src/main.rs")),
+        documents: Vec::new(),
     };
     let snapshot = WorkspaceSnapshot {
         workspaces: vec![workspace.clone()],
@@ -66,4 +67,52 @@ fn editor_panel_roundtrips_kind_and_path() {
 
     let loaded = repo.load_snapshot(Path::new("/default")).expect("load");
     assert_eq!(loaded.snapshot.tabs[0].panels, vec![editor]);
+}
+
+fn editor_snapshot(documents: Vec<PathBuf>, active: &str) -> (WorkspaceSnapshot, PanelSnapshot) {
+    let mut workspace = Workspace::new(WorkspaceId::new(), "Code".to_string());
+    let editor_id = PanelId::new();
+    let tab = Tab::new(TabId::new(), workspace.id, LayoutNode::leaf(editor_id));
+    workspace.tab_order = vec![tab.id];
+    workspace.active_tab = Some(tab.id);
+    let editor = PanelSnapshot {
+        panel: Panel::new_editor(editor_id, "lib.rs".into()),
+        cwd: PathBuf::from("/code/src"),
+        name: None,
+        path: Some(PathBuf::from(active)),
+        documents,
+    };
+    let snapshot = WorkspaceSnapshot {
+        workspaces: vec![workspace.clone()],
+        tabs: vec![TabSnapshot { tab, panels: vec![editor.clone()] }],
+        agents: Vec::new(),
+        active_workspace: Some(workspace.id),
+    };
+    (snapshot, editor)
+}
+
+#[test]
+fn editor_panel_roundtrips_every_open_document_and_the_active_one() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::open(&dir.path().join("snap.db")).expect("open");
+    let documents = vec![PathBuf::from("/code/src/main.rs"), PathBuf::from("/code/src/lib.rs")];
+    let (snapshot, editor) = editor_snapshot(documents, "/code/src/lib.rs");
+    repo.write_snapshot(&snapshot).expect("write");
+
+    let loaded = repo.load_snapshot(Path::new("/default")).expect("load");
+    assert_eq!(loaded.snapshot.tabs[0].panels, vec![editor]);
+}
+
+#[test]
+fn editor_row_without_a_document_list_keeps_its_single_path() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::open(&dir.path().join("snap.db")).expect("open");
+    let (snapshot, _) = editor_snapshot(vec![PathBuf::from("/code/src/main.rs")], "/code/src/main.rs");
+    repo.write_snapshot(&snapshot).expect("write");
+    repo.pool().with_conn(|conn| conn.execute("UPDATE panels SET documents = NULL", [])).expect("clear documents");
+
+    let loaded = repo.load_snapshot(Path::new("/default")).expect("load");
+    let panel = &loaded.snapshot.tabs[0].panels[0];
+    assert_eq!(panel.path, Some(PathBuf::from("/code/src/main.rs")));
+    assert!(panel.documents.is_empty());
 }

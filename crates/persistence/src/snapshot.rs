@@ -1,4 +1,4 @@
-use crate::codec::{agent_state_to_str, encode_json, encode_layout, panel_kind_to_str, parse_uuid_id, path_to_string_lossy, resource_ref_columns};
+use crate::codec::{agent_state_to_str, decode_json, encode_json, encode_layout, panel_kind_to_str, parse_uuid_id, path_to_string_lossy, resource_ref_columns};
 use crate::error::PersistenceError;
 use crate::repository::Repository;
 use crate::restore::RestoreWarning;
@@ -15,6 +15,7 @@ pub struct PanelSnapshot {
     pub cwd: PathBuf,
     pub name: Option<String>,
     pub path: Option<PathBuf>,
+    pub documents: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,14 +58,14 @@ impl Repository {
                 for panel in &tab.panels {
                     let (resource_kind, resource_id) = resource_ref_columns(panel.panel.resource);
                     tx.execute(
-                        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd, name, path) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+                        "INSERT INTO panels (id, tab_id, kind, title, resource_kind, resource_id, cwd, name, path, documents) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
                          ON CONFLICT(id) DO UPDATE SET tab_id=excluded.tab_id, kind=excluded.kind, title=excluded.title, \
                          resource_kind=excluded.resource_kind, resource_id=excluded.resource_id, cwd=excluded.cwd, name=excluded.name, \
-                         path=excluded.path",
+                         path=excluded.path, documents=excluded.documents",
                         rusqlite::params![panel.panel.id.to_string(), tab.tab.id.to_string(), panel_kind_to_str(panel.panel.kind),
                             panel.panel.title, resource_kind, resource_id, path_to_string_lossy(&panel.cwd), panel.name,
-                            panel.path.as_deref().map(path_to_string_lossy)],
+                            panel.path.as_deref().map(path_to_string_lossy), encode_documents(&panel.documents)?],
                     )?;
                 }
             }
@@ -93,6 +94,7 @@ impl Repository {
         let cwds = self.panel_cwds()?;
         let mut names = self.panel_names()?;
         let mut paths = self.panel_paths()?;
+        let mut documents = self.panel_documents()?;
         let panels_by_id: HashMap<PanelId, Panel> =
             restored.panels.into_iter().map(|p| (p.id, p)).collect();
         let tabs = restored
@@ -108,6 +110,7 @@ impl Repository {
                         cwd: cwds.get(&panel.id).cloned().unwrap_or_else(|| default_cwd.to_path_buf()),
                         name: names.remove(&panel.id),
                         path: paths.remove(&panel.id),
+                        documents: documents.remove(&panel.id).unwrap_or_default(),
                         panel,
                     })
                     .collect();
@@ -156,6 +159,20 @@ impl Repository {
         })
     }
 
+    fn panel_documents(&self) -> Result<HashMap<PanelId, Vec<PathBuf>>, PersistenceError> {
+        self.pool.with_conn(|conn| {
+            let mut stmt = conn.prepare("SELECT id, documents FROM panels WHERE documents IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+            let mut out = HashMap::new();
+            for row in rows {
+                let (id, raw) = row?;
+                let paths: Vec<String> = decode_json(&raw)?;
+                out.insert(parse_uuid_id(&id)?, paths.into_iter().map(PathBuf::from).collect());
+            }
+            Ok(out)
+        })
+    }
+
     fn panel_cwds(&self) -> Result<HashMap<PanelId, PathBuf>, PersistenceError> {
         self.pool.with_conn(|conn| {
             let mut stmt = conn.prepare("SELECT id, cwd FROM panels WHERE cwd IS NOT NULL")?;
@@ -170,6 +187,14 @@ impl Repository {
             Ok(out)
         })
     }
+}
+
+fn encode_documents(documents: &[PathBuf]) -> Result<Option<String>, PersistenceError> {
+    if documents.is_empty() {
+        return Ok(None);
+    }
+    let paths: Vec<String> = documents.iter().map(|path| path_to_string_lossy(path)).collect();
+    encode_json(&paths).map(Some)
 }
 
 fn delete_absent(

@@ -191,6 +191,7 @@ mod tests {
             cwd: PathBuf::from("/home/me/proj"),
             name: name.map(str::to_string),
             path: Some(PathBuf::from("/home/me/proj/main.rs")),
+            documents: Vec::new(),
         }
     }
 
@@ -245,6 +246,7 @@ mod tests {
             cwd: PathBuf::from("/home/me/proj"),
             name: None,
             path: Some(PathBuf::from("/home/me/proj")),
+            documents: Vec::new(),
         };
         let Some(DocumentPane::FileTree(pane)) = DocumentPane::from_snapshot(&record) else {
             panic!("expected a file tree pane");

@@ -241,7 +241,7 @@ impl Shell {
         let id = panel.id;
         let zone = document_zone(panel.kind);
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
-        self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path) });
+        self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path), documents: Vec::new() });
         self.restore_document(id, cx);
         let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
@@ -908,7 +908,8 @@ impl Shell {
         let title = shell_title(&command);
         let panel = PanelId::new();
         let session = self.spawn_session(panel, command, cx)?;
-        self.model.add_panel(PanelSnapshot { panel: Panel::new_terminal(panel, title, session), cwd, name: None, path: None });
+        let record = Panel::new_terminal(panel, title, session);
+        self.model.add_panel(PanelSnapshot { panel: record, cwd, name: None, path: None, documents: Vec::new() });
         Some(panel)
     }
 

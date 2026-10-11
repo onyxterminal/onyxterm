@@ -17,6 +17,7 @@ fn titled(panel: PanelId, title: &str, cwd: &Path) -> PanelSnapshot {
         cwd: cwd.to_path_buf(),
         name: None,
         path: None,
+        documents: Vec::new(),
     }
 }
 
@@ -325,6 +326,7 @@ fn editor_snapshot(panel: PanelId, file: &Path) -> PanelSnapshot {
         cwd: file.parent().map(Path::to_path_buf).unwrap_or_default(),
         name: None,
         path: Some(file.to_path_buf()),
+        documents: Vec::new(),
     }
 }
 
@@ -362,6 +364,7 @@ fn file_tree_snapshot(panel: PanelId, root: &Path) -> PanelSnapshot {
         cwd: root.to_path_buf(),
         name: None,
         path: Some(root.to_path_buf()),
+        documents: Vec::new(),
     }
 }
 
