@@ -363,6 +363,25 @@ async fn foreground_job_detected_while_child_runs() {
     service.terminate_session(id).expect("terminate");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn foreground_job_reports_command_line() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let command = ShellCommand { program: PathBuf::from(SHELL), args: vec!["-i".to_string()], cwd: cwd() };
+    let id = service.spawn_command(command, GridSize::new(40, 5)).expect("spawn");
+    let handle = service.handle_for(id).expect("handle");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(handle.foreground_job(), None);
+    handle.write(b"sleep 3\n").expect("write");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut argv = None;
+    while Instant::now() < deadline && argv.as_deref() != Some(&["sleep".to_string(), "3".to_string()][..]) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        argv = handle.foreground_job().map(|job| job.argv);
+    }
+    assert_eq!(argv, Some(vec!["sleep".to_string(), "3".to_string()]));
+    service.terminate_session(id).expect("terminate");
+}
+
 #[test]
 fn current_dir_follows_shell_cd() {
     let service = InMemoryTerminalService::new(Box::new(NativePty::new()));

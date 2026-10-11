@@ -43,6 +43,12 @@ impl Pty for NativePty {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForegroundJob {
+    pub process_group: i32,
+    pub argv: Vec<String>,
+}
+
 pub struct PtyHandle {
     inner: Arc<Mutex<PtyInner>>,
 }
@@ -138,11 +144,20 @@ impl PtyHandle {
     }
 
     pub fn has_foreground_job(&self) -> bool {
+        self.foreground_process_group().is_some()
+    }
+
+    pub fn foreground_process_group(&self) -> Option<i32> {
         let guard = self.inner.lock();
-        let (Some(shell), Some(leader)) = (guard.pid, guard.master.process_group_leader()) else {
-            return false;
-        };
-        leader as u32 != shell
+        let shell = guard.pid?;
+        let leader = guard.master.process_group_leader()?;
+        (leader as u32 != shell).then_some(leader)
+    }
+
+    pub fn foreground_job(&self) -> Option<ForegroundJob> {
+        let process_group = self.foreground_process_group()?;
+        let argv = process_argv(process_group as u32)?;
+        Some(ForegroundJob { process_group, argv })
     }
 
     pub fn wait_exit_code(&self) -> Option<i32> {
@@ -265,6 +280,68 @@ fn process_cwd(pid: u32) -> Option<PathBuf> {
 #[cfg(not(target_os = "macos"))]
 fn process_cwd(pid: u32) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn process_argv(pid: u32) -> Option<Vec<String>> {
+    procargs_argv(pid).or_else(|| executable_path(pid).map(|path| vec![path]))
+}
+
+#[cfg(target_os = "macos")]
+fn procargs_argv(pid: u32) -> Option<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    let mut size: libc::size_t = 0;
+    let null = std::ptr::null_mut();
+    let sized = unsafe { libc::sysctl(mib.as_mut_ptr(), mib.len() as libc::c_uint, null, &mut size, null, 0) };
+    if sized != 0 || size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; size];
+    let target = buffer.as_mut_ptr() as *mut libc::c_void;
+    let read = unsafe { libc::sysctl(mib.as_mut_ptr(), mib.len() as libc::c_uint, target, &mut size, null, 0) };
+    if read != 0 {
+        return None;
+    }
+    buffer.truncate(size);
+    parse_procargs(&buffer)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_procargs(buffer: &[u8]) -> Option<Vec<String>> {
+    let (count, rest) = buffer.split_first_chunk::<4>()?;
+    let argc = i32::from_ne_bytes(*count).max(0) as usize;
+    let exec_path_end = rest.iter().position(|byte| *byte == 0)?;
+    let after_path = &rest[exec_path_end..];
+    let args_start = after_path.iter().position(|byte| *byte != 0)?;
+    let argv: Vec<String> = after_path[args_start..]
+        .split(|byte| *byte == 0)
+        .take(argc)
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect();
+    (!argv.is_empty()).then_some(argv)
+}
+
+#[cfg(target_os = "macos")]
+fn executable_path(pid: u32) -> Option<String> {
+    let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let target = buffer.as_mut_ptr() as *mut libc::c_void;
+    let written = unsafe { libc::proc_pidpath(pid as libc::c_int, target, buffer.len() as u32) };
+    if written <= 0 {
+        return None;
+    }
+    buffer.truncate(written as usize);
+    Some(String::from_utf8_lossy(&buffer).into_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_argv(pid: u32) -> Option<Vec<String>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let argv: Vec<String> = raw
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .map(|arg| String::from_utf8_lossy(arg).into_owned())
+        .collect();
+    (!argv.is_empty()).then_some(argv)
 }
 
 fn to_pty_size(size: GridSize) -> PtySize {

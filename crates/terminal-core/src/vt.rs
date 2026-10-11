@@ -2,7 +2,7 @@ use crate::event::{
     Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
     TerminalError, TerminalEvent, TerminalOutput,
 };
-use crate::pty::PtyHandle;
+use crate::pty::{ForegroundJob, PtyHandle};
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -283,6 +283,14 @@ impl TerminalHandle {
 
     pub fn has_foreground_job(&self) -> bool {
         self.pty.has_foreground_job()
+    }
+
+    pub fn foreground_process_group(&self) -> Option<i32> {
+        self.pty.foreground_process_group()
+    }
+
+    pub fn foreground_job(&self) -> Option<ForegroundJob> {
+        self.pty.foreground_job()
     }
 }
 
