@@ -49,7 +49,34 @@ impl<'a> AgentRepo for SqliteAgentRepo<'a> {
     }
 
     fn upsert(&self, agent: Agent) -> Result<(), PersistenceError> {
-        self.pool.transaction(|tx| write_agent_row(tx, &agent))
+        self.pool.transaction(|tx| {
+            let started = agent.started_at.map(|d| d.to_rfc3339());
+            let ended = agent.ended_at.map(|d| d.to_rfc3339());
+            tx.execute(
+                "INSERT INTO agents \
+                  (id, provider, workspace_id, terminal_session_id, cwd, state, started_at, ended_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+                 ON CONFLICT(id) DO UPDATE SET \
+                   provider = excluded.provider, \
+                   workspace_id = excluded.workspace_id, \
+                   terminal_session_id = excluded.terminal_session_id, \
+                   cwd = excluded.cwd, \
+                   state = excluded.state, \
+                   started_at = excluded.started_at, \
+                   ended_at = excluded.ended_at",
+                rusqlite::params![
+                    agent.id.to_string(),
+                    agent.provider,
+                    agent.workspace.to_string(),
+                    agent.terminal_session.to_string(),
+                    path_to_string_lossy(agent.cwd.as_path()),
+                    agent_state_to_str(agent.state),
+                    started,
+                    ended,
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     fn delete(&self, id: AgentId) -> Result<(), PersistenceError> {
@@ -58,36 +85,6 @@ impl<'a> AgentRepo for SqliteAgentRepo<'a> {
             Ok(())
         })
     }
-}
-
-pub(crate) fn write_agent_row(
-    tx: &rusqlite::Transaction<'_>,
-    agent: &Agent,
-) -> Result<(), PersistenceError> {
-    tx.execute(
-        "INSERT INTO agents \
-          (id, provider, workspace_id, terminal_session_id, cwd, state, started_at, ended_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
-         ON CONFLICT(id) DO UPDATE SET \
-           provider = excluded.provider, \
-           workspace_id = excluded.workspace_id, \
-           terminal_session_id = excluded.terminal_session_id, \
-           cwd = excluded.cwd, \
-           state = excluded.state, \
-           started_at = excluded.started_at, \
-           ended_at = excluded.ended_at",
-        rusqlite::params![
-            agent.id.to_string(),
-            agent.provider,
-            agent.workspace.to_string(),
-            agent.terminal_session.to_string(),
-            path_to_string_lossy(agent.cwd.as_path()),
-            agent_state_to_str(agent.state),
-            agent.started_at.map(|d| d.to_rfc3339()),
-            agent.ended_at.map(|d| d.to_rfc3339()),
-        ],
-    )?;
-    Ok(())
 }
 
 fn row_to_agent(row: &rusqlite::Row<'_>) -> Result<Agent, rusqlite::Error> {

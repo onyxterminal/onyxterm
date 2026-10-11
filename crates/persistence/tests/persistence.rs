@@ -48,16 +48,16 @@ fn count_migrations(repo: &Repository) -> i64 {
 #[test]
 fn migrations_apply_once() {
     let (dir, repo) = fresh_repo();
-    assert_eq!(read_max_version(&repo), CURRENT_VERSION);
+    assert_eq!(read_max_version(&repo), 1);
     drop(repo);
 
     let path = dir.path().join("test.db");
     let repo2 = Repository::open(&path).expect("reopen");
-    assert_eq!(read_max_version(&repo2), CURRENT_VERSION);
+    assert_eq!(read_max_version(&repo2), 1);
     assert_eq!(
         count_migrations(&repo2),
-        CURRENT_VERSION,
-        "each migration must be applied once"
+        1,
+        "migration must be applied once"
     );
 }
 
@@ -70,7 +70,7 @@ fn migrations_reject_downgrade() {
         .with_conn(|c| {
             c.execute(
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-                params![CURRENT_VERSION + 1, "2025-01-01T00:00:00Z"],
+                params![2_i64, "2025-01-01T00:00:00Z"],
             )
         })
         .expect("seed future version");
@@ -78,7 +78,7 @@ fn migrations_reject_downgrade() {
 
     match Repository::open(&path) {
         Err(PersistenceError::DowngradeForbidden { from, to }) => {
-            assert_eq!(from, CURRENT_VERSION + 1);
+            assert_eq!(from, 2);
             assert_eq!(to, CURRENT_VERSION);
         }
         Err(other) => panic!("expected downgrade forbidden, got error: {:?}", other),

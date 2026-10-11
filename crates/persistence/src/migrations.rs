@@ -2,13 +2,7 @@ use crate::error::PersistenceError;
 use crate::schema::SCHEMA_SQL;
 use rusqlite::Connection;
 
-pub const CURRENT_VERSION: i64 = 3;
-
-const PANEL_CWD_SQL: &str = "ALTER TABLE panels ADD COLUMN cwd TEXT;";
-
-const PANEL_NAME_SQL: &str = "ALTER TABLE panels ADD COLUMN name TEXT;";
-
-const MIGRATIONS: &[(i64, &str)] = &[(1, SCHEMA_SQL), (2, PANEL_CWD_SQL), (3, PANEL_NAME_SQL)];
+pub const CURRENT_VERSION: i64 = 1;
 
 pub(crate) fn apply_migrations(conn: &mut Connection, target: i64) -> Result<(), PersistenceError> {
     let tx = conn.transaction()?;
@@ -35,17 +29,17 @@ pub(crate) fn apply_migrations(conn: &mut Connection, target: i64) -> Result<(),
             });
         }
     }
-    let applied = existing.unwrap_or(0);
-    for (version, sql) in MIGRATIONS {
-        if *version <= applied || *version > target {
-            continue;
-        }
-        tx.execute_batch(sql)
+    let needs_v1 = match existing {
+        Some(v) => v < 1,
+        None => true,
+    };
+    if needs_v1 {
+        tx.execute_batch(SCHEMA_SQL)
             .map_err(|e| PersistenceError::MigrationFailed(e.to_string()))?;
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES (?1, ?2)",
-            rusqlite::params![version, &now],
+            rusqlite::params![1_i64, &now],
         )?;
     }
     tx.commit()?;
