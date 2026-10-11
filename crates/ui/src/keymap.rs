@@ -170,6 +170,7 @@ impl Default for Keymap {
         map.bind(Combo::new(cmd_alt, "up"), FocusAdjacent);
         map.bind(Combo::new(cmd_alt, "left"), FocusAdjacent);
         map.bind(Combo::new(Modifiers::command_shift(), "m"), MaximizePane);
+        map.bind(Combo::new(Modifiers::command_shift(), "n"), NewWorkspace);
         map.bind(Combo::new(Modifiers::command() | Modifiers::control(), "f"), ToggleFullScreen);
         map.bind(Combo::new(Modifiers::command(), "m"), Minimize);
         map.bind(Combo::new(Modifiers::command(), "h"), Hide);

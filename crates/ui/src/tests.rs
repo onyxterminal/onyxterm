@@ -657,7 +657,8 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
         ("Split Right", Some("\u{2325}\u{2318}\u{2192}")),
         ("Split Down", Some("\u{2325}\u{2318}\u{2193}")),
         ("Maximize Pane", Some("\u{21e7}\u{2318}M")),
-        ("Rename Pane", None),
+        ("-", None),
+        ("Rename Pane\u{2026}", None),
         ("Move to New Tab", None),
         ("-", None),
         ("Close Pane", Some("\u{2318}W")),
@@ -670,6 +671,18 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
     let commands = selectable_commands(&entries);
     assert_eq!(commands.len(), 6);
     assert_eq!(commands.last(), Some(&CommandId::CloseActive));
+    let destructive: Vec<&str> = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            PaneMenuEntry::Item(item) if item.is_destructive() => Some(item.title),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(destructive, ["Close Pane"]);
+    assert_eq!(
+        map.combo_for(CommandId::NewWorkspace).map(|combo| combo.glyphs()).as_deref(),
+        Some("\u{21e7}\u{2318}N")
+    );
     assert_eq!(step_selection(0, -1, 6), 5);
     assert_eq!(step_selection(5, 1, 6), 0);
     assert_eq!(step_selection(2, 1, 6), 3);

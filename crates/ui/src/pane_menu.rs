@@ -11,6 +11,12 @@ pub struct PaneMenuItem {
     pub shortcut: Option<String>,
 }
 
+impl PaneMenuItem {
+    pub fn is_destructive(&self) -> bool {
+        self.command == CommandId::CloseActive
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaneMenuEntry {
     Item(PaneMenuItem),
@@ -27,7 +33,8 @@ pub fn pane_menu_entries(is_maximized: bool, keymap: &Keymap) -> Vec<PaneMenuEnt
         item(CommandId::SplitRight, "Split Right"),
         item(CommandId::SplitDown, "Split Down"),
         item(CommandId::MaximizePane, maximize_title),
-        item(CommandId::RenamePane, "Rename Pane"),
+        PaneMenuEntry::Divider,
+        item(CommandId::RenamePane, "Rename Pane\u{2026}"),
         item(CommandId::MoveToNewTab, "Move to New Tab"),
         PaneMenuEntry::Divider,
         item(CommandId::CloseActive, "Close Pane"),
