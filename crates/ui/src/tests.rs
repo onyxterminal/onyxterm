@@ -938,3 +938,39 @@ fn shadow_tokens_become_layered_box_shadows() {
     let palette = box_shadows(&theme.shadow.palette);
     assert_eq!((palette[0].offset.y, palette[0].blur_radius), (px(18.0), px(48.0)));
 }
+
+#[test]
+fn palette_rows_carry_category_and_bound_shortcut() {
+    use crate::app::PaletteChoice;
+    use crate::command::open_choice_palette;
+    use crate::palette::{palette_entries, PaletteRow, CHOICE_CATEGORY};
+    let mut state = AppState::new();
+    open_palette(&mut state);
+    let rows = palette_entries(&state);
+    let row = |title: &str| rows.iter().find(|row| row.title == title).cloned().unwrap();
+    assert_eq!(
+        row("Split Right"),
+        PaletteRow { title: "Split Right".into(), category: "Panes", shortcut: Some("\u{2325}\u{2318}\u{2192}".into()) }
+    );
+    assert_eq!(row("New Tab").category, "Tabs");
+    assert_eq!(row("New Tab").shortcut.as_deref(), Some("\u{2318}T"));
+    assert_eq!(row("New Workspace").category, "Workspaces");
+    assert_eq!(row("New Workspace").shortcut.as_deref(), Some("\u{21e7}\u{2318}N"));
+    assert_eq!(row("Rename Tab").shortcut, None);
+    let choice = PaletteChoice { key: "k".into(), title: "Backend".into() };
+    open_choice_palette(&mut state, vec![choice]);
+    let choices = palette_entries(&state);
+    assert_eq!(choices, [PaletteRow { title: "Backend".into(), category: CHOICE_CATEGORY, shortcut: None }]);
+    assert_eq!(CHOICE_CATEGORY, "Workspaces");
+}
+
+#[test]
+fn palette_window_keeps_the_selection_in_view() {
+    use crate::palette::visible_rows;
+    assert_eq!(visible_rows(4, 3, 9), 0..4);
+    assert_eq!(visible_rows(20, 0, 9), 0..9);
+    assert_eq!(visible_rows(20, 8, 9), 0..9);
+    assert_eq!(visible_rows(20, 9, 9), 1..10);
+    assert_eq!(visible_rows(20, 19, 9), 11..20);
+    assert_eq!(visible_rows(0, 0, 9), 0..0);
+}

@@ -2,135 +2,170 @@
 #![forbid(unsafe_code)]
 
 use crate::app::AppState;
-use crate::command::{filtered_choices, CommandRegistry};
-use crate::theme::Theme;
-use gpui::{div, Div, Hsla, ParentElement, Styled};
+use crate::command::filtered_choices;
+use crate::theme::icons::Icon;
+use crate::theme::{box_shadows, Theme};
+use crate::workspace_menu::CARET;
+use gpui::{div, prelude::*, px, Div, Hsla, SharedString};
+use std::ops::Range;
 
-pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
-    let backdrop_bg = Hsla {
-        h: 0.0,
-        s: 0.0,
-        l: 0.0,
-        a: 0.35,
-    };
-    let panel_bg = theme.surface.raised;
-    let query = state.palette_query.clone();
-    let query_bg = theme.surface.subtle;
-    let query_text = theme.text.default;
-    let selection = state.palette_selection;
-    let matches: Vec<(String, String, bool)> = palette_entries(state)
-        .into_iter()
-        .enumerate()
-        .map(|(idx, (title, category))| (title, category, idx == selection))
-        .collect();
+pub const CHOICE_CATEGORY: &str = "Workspaces";
+const QUERY_PLACEHOLDER: &str = "Search commands";
+const NO_RESULTS: &str = "No Results";
+const FOOTER_HINTS: [(&str, &str); 3] = [("\u{2191}\u{2193}", "Navigate"), ("\u{21b5}", "Run"), ("esc", "Close")];
+const SEARCH_PADDING_X_PX: f32 = 16.0;
+const SEARCH_GAP_PX: f32 = 10.0;
+const RESULTS_PADDING_PX: f32 = 6.0;
+const ROW_PADDING_X_PX: f32 = 10.0;
+const CATEGORY_GAP_PX: f32 = 8.0;
+const FOOTER_PADDING_X_PX: f32 = 16.0;
+const FOOTER_HINT_GAP_PX: f32 = 14.0;
+const FOOTER_KEY_GAP_PX: f32 = 4.0;
 
-    div()
-        .absolute()
-        .inset_0()
-        .bg(backdrop_bg)
-        .flex()
-        .items_start()
-        .justify_center()
-        .pt_8()
-        .child(
-            div()
-                .w(gpui::px(560.0))
-                .bg(panel_bg)
-                .border_1()
-                .border_color(theme.border_default())
-                .rounded(gpui::px(theme.layout.island_radius_px))
-                .shadow_md()
-                .overflow_hidden()
-                .flex_col()
-                .child(palette_query_panel(&query, query_bg, query_text))
-                .child(palette_results_list(&matches, theme)),
-        )
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteRow {
+    pub title: String,
+    pub category: &'static str,
+    pub shortcut: Option<String>,
 }
 
-const CHOICE_CATEGORY: &str = "Workspace";
-
-pub fn palette_entries(state: &AppState) -> Vec<(String, String)> {
+pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
     if state.palette_choices.is_some() {
         return filtered_choices(state)
             .into_iter()
-            .map(|choice| (choice.title.clone(), CHOICE_CATEGORY.to_string()))
+            .map(|choice| PaletteRow { title: choice.title.clone(), category: CHOICE_CATEGORY, shortcut: None })
             .collect();
     }
     state
         .registry
         .search(&state.palette_query)
         .into_iter()
-        .map(|cmd| (cmd.title.to_string(), cmd.category.to_string()))
+        .map(|cmd| PaletteRow {
+            title: cmd.title.to_string(),
+            category: cmd.category,
+            shortcut: state.keymap.combo_for(cmd.id).map(|combo| combo.glyphs()),
+        })
         .collect()
 }
 
-fn palette_query_panel(query: &str, bg: Hsla, fg: Hsla) -> Div {
-    div()
-        .px_3()
-        .py_2()
-        .bg(bg)
-        .rounded_t_md()
-        .child(query_element(query, fg))
-}
-
-fn query_element(query: &str, fg: Hsla) -> Div {
-    let display = if query.is_empty() {
-        "Type to search\u{2026}".to_string()
-    } else {
-        query.to_string()
-    };
-    div().text_color(fg).child(display)
-}
-
-fn palette_results_list(items: &[(String, String, bool)], theme: &Theme) -> Div {
-    let mut list = div().flex_col().py_1();
-    if items.is_empty() {
-        list = list.child(
-            div()
-                .px_3()
-                .py_2()
-                .text_color(theme.text.muted)
-                .child("No matches"),
-        );
-    } else {
-        for (title, category, selected) in items {
-            list = list.child(render_palette_row(title, category, *selected, theme));
-        }
+pub fn visible_rows(len: usize, selected: usize, max_rows: usize) -> Range<usize> {
+    if len <= max_rows {
+        return 0..len;
     }
-    list
+    let start = (selected + 1).saturating_sub(max_rows).min(len - max_rows);
+    start..start + max_rows
 }
 
-fn render_palette_row(title: &str, category: &str, selected: bool, theme: &Theme) -> Div {
-    let bg = if selected {
-        theme.accent.primary
-    } else {
-        theme.surface.raised
-    };
-    let fg = if selected {
-        theme.text.inverse
-    } else {
-        theme.text.default
+pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
+    let palette = theme.palette;
+    div().absolute().inset_0().flex().flex_col().items_center().pt(px(palette.top_px)).child(
+        div()
+            .w(px(palette.width_px))
+            .occlude()
+            .font_family(SharedString::from(theme.ui_font.family.clone()))
+            .bg(theme.chrome.palette_fill)
+            .border(px(palette.border_px))
+            .border_color(theme.chrome.menu_border)
+            .rounded(px(palette.radius_px))
+            .shadow(box_shadows(&theme.shadow.palette))
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(search_row(&state.palette_query, theme))
+            .child(results(&palette_entries(state), state.palette_selection, theme))
+            .child(footer(theme)),
+    )
+}
+
+fn search_row(query: &str, theme: &Theme) -> Div {
+    let palette = theme.palette;
+    let typed = match query.is_empty() {
+        true => div().text_color(theme.text.subtle).child(QUERY_PLACEHOLDER),
+        false => div().text_color(theme.text.default).child(query.to_string()),
     };
     div()
-        .px_3()
-        .py_1()
-        .bg(bg)
-        .text_color(fg)
+        .h(px(palette.search_height_px))
+        .flex_none()
+        .px(px(SEARCH_PADDING_X_PX))
         .flex()
+        .flex_row()
         .items_center()
-        .justify_between()
-        .child(title.to_string())
-        .child(category.to_string())
+        .gap(px(SEARCH_GAP_PX))
+        .border_b_1()
+        .border_color(theme.border.muted)
+        .text_size(px(theme.ui_font.palette_input_px))
+        .child(Icon::Magnifier.sized(palette.search_icon_px))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .when(query.is_empty(), |field| field.child(caret(theme)))
+                .child(typed)
+                .when(!query.is_empty(), |field| field.child(caret(theme))),
+        )
 }
 
-pub fn command_count(registry: &CommandRegistry) -> usize {
-    registry.list().len()
+fn caret(theme: &Theme) -> Div {
+    div().text_color(theme.accent.primary).child(CARET)
 }
 
-pub fn palette_placeholder_visible(state: &AppState) -> bool {
-    state.palette_visible
+fn results(rows: &[PaletteRow], selected: usize, theme: &Theme) -> Div {
+    let list = div().p(px(RESULTS_PADDING_PX)).flex().flex_col();
+    if rows.is_empty() {
+        return list.child(
+            div()
+                .h(px(theme.palette.row_height_px))
+                .px(px(ROW_PADDING_X_PX))
+                .flex()
+                .items_center()
+                .text_size(px(theme.ui_font.menu_px))
+                .text_color(theme.text.subtle)
+                .child(NO_RESULTS),
+        );
+    }
+    let window = visible_rows(rows.len(), selected, theme.palette.max_rows);
+    list.children(rows[window.clone()].iter().zip(window).map(|(row, index)| result_row(row, index == selected, theme)))
 }
 
-pub fn palette_empty_query_visible(state: &AppState) -> bool {
-    state.palette_visible && state.palette_query.is_empty()
+fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
+    let (fill, title_color, label_color) = match is_selected {
+        true => (theme.accent.primary, theme.text.inverse, theme.chrome.selected_shortcut),
+        false => (gpui::transparent_black(), theme.text.default, theme.text.subtle),
+    };
+    div()
+        .h(px(theme.palette.row_height_px))
+        .px(px(ROW_PADDING_X_PX))
+        .flex()
+        .flex_row()
+        .items_center()
+        .rounded(px(theme.palette.row_radius_px))
+        .bg(fill)
+        .text_size(px(theme.ui_font.menu_px))
+        .child(div().flex_none().text_color(title_color).child(row.title.clone()))
+        .child(label(row.category, label_color, theme).ml(px(CATEGORY_GAP_PX)))
+        .child(div().flex_1())
+        .children(row.shortcut.clone().map(|shortcut| label(shortcut, label_color, theme)))
+}
+
+fn label(text: impl Into<SharedString>, color: Hsla, theme: &Theme) -> Div {
+    div().flex_none().text_size(px(theme.ui_font.shortcut_px)).text_color(color).child(text.into())
+}
+
+fn footer(theme: &Theme) -> Div {
+    div()
+        .h(px(theme.palette.footer_height_px))
+        .flex_none()
+        .px(px(FOOTER_PADDING_X_PX))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(FOOTER_HINT_GAP_PX))
+        .border_t_1()
+        .border_color(theme.border.muted)
+        .text_size(px(theme.ui_font.hint_px))
+        .text_color(theme.text.subtle)
+        .children(FOOTER_HINTS.iter().map(|(keys, action)| {
+            div().flex().flex_row().gap(px(FOOTER_KEY_GAP_PX)).child(*keys).child(*action)
+        }))
 }
