@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::tabs::{Tab, Tabs};
-use domain::{DomainError, Panel, PanelId, TabId, TerminalSessionId, Workspace, WorkspaceId};
+use domain::{DomainError, Panel, PanelId, PanelKind, TabId, TerminalSessionId, Workspace, WorkspaceId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use workspace_service::{PanelSnapshot, StoreWarning, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
@@ -132,6 +132,18 @@ impl WorkspaceModel {
 
     pub fn focused_document(&self) -> Option<PanelId> {
         self.tabs().active().map(|tab| tab.focused()).filter(|panel| self.is_document(*panel))
+    }
+
+    pub fn file_tree_in_active_tab(&self, root: &Path) -> Option<PanelId> {
+        let tab = self.tabs().active()?;
+        self.panels
+            .values()
+            .find(|record| {
+                record.panel.kind == PanelKind::FileTree
+                    && record.path.as_deref() == Some(root)
+                    && tab.contains(record.panel.id)
+            })
+            .map(|record| record.panel.id)
     }
 
     pub fn panel_mut(&mut self, id: PanelId) -> Option<&mut PanelSnapshot> {

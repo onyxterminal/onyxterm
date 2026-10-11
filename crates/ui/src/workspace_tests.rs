@@ -355,3 +355,36 @@ fn focused_document_has_no_terminal_handle() {
     model.tabs_mut().active_mut().expect("tab").focus_next();
     assert_eq!(model.focused_document(), None);
 }
+
+fn file_tree_snapshot(panel: PanelId, root: &Path) -> PanelSnapshot {
+    PanelSnapshot {
+        panel: Panel::new_file_tree(panel, "proj".to_string()),
+        cwd: root.to_path_buf(),
+        name: None,
+        path: Some(root.to_path_buf()),
+    }
+}
+
+#[test]
+fn file_tree_in_active_tab_finds_the_tree_rooted_at_the_folder() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    open_terminal_tab(&mut model, home.path());
+    let tree = PanelId::new();
+    model.add_panel(file_tree_snapshot(tree, home.path()));
+    model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, tree).expect("split");
+
+    assert_eq!(model.file_tree_in_active_tab(home.path()), Some(tree));
+}
+
+#[test]
+fn file_tree_in_active_tab_ignores_other_folders() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    open_terminal_tab(&mut model, home.path());
+    let tree = PanelId::new();
+    model.add_panel(file_tree_snapshot(tree, home.path()));
+    model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, tree).expect("split");
+
+    assert_eq!(model.file_tree_in_active_tab(&home.path().join("other")), None);
+}

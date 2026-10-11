@@ -1181,3 +1181,10 @@ fn cmd_shift_o_opens_folder() {
     let combo = Combo::new(Modifiers::command_shift(), "o");
     assert_eq!(keymap.resolve(&combo), Some(CommandId::OpenFolder));
 }
+
+#[test]
+fn cmd_e_opens_editor_here() {
+    let keymap = Keymap::default();
+    let combo = Combo::new(Modifiers::command(), "e");
+    assert_eq!(keymap.resolve(&combo), Some(CommandId::OpenEditorHere));
+}

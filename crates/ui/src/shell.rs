@@ -211,6 +211,19 @@ impl Shell {
         }
     }
 
+    fn open_editor_here(&mut self, cx: &mut Context<Self>) {
+        let Some(focused) = self.model.tabs().active().map(|tab| tab.focused()) else {
+            return;
+        };
+        let folder = self.panel_cwd(focused);
+        if let Some(existing) = self.model.file_tree_in_active_tab(&folder) {
+            self.focus_pane(existing);
+            return;
+        }
+        let panel = Panel::new_file_tree(PanelId::new(), document_title(&folder));
+        self.open_document(panel, folder, cx);
+    }
+
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
         let id = panel.id;
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
@@ -302,6 +315,7 @@ impl Shell {
             CommandId::ToggleCopyMode => self.toggle_copy_mode(),
             CommandId::OpenFile => self.prompt_open(false, cx),
             CommandId::OpenFolder => self.prompt_open(true, cx),
+            CommandId::OpenEditorHere => self.open_editor_here(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {

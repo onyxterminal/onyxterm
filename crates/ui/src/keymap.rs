@@ -181,6 +181,7 @@ fn bind_application(map: &mut Keymap) {
     map.bind(Combo::new(cmd, "q"), Quit);
     map.bind(Combo::new(Modifiers::command_shift(), "p"), OpenPalette);
     map.bind(Combo::new(Modifiers::command_shift(), "o"), OpenFolder);
+    map.bind(Combo::new(cmd, "e"), OpenEditorHere);
     map.bind(Combo::new(cmd, ","), OpenSettings);
     map.bind(Combo::new(cmd, "c"), Copy);
     map.bind(Combo::new(cmd, "v"), Paste);
