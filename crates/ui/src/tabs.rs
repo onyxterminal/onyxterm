@@ -118,11 +118,15 @@ impl Tab {
         Ok(())
     }
 
-    fn adopt_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {
-        self.layout.insert_beside(self.focused, panel, DropZone::Right)?;
+    pub fn insert_beside_focused(&mut self, panel: PanelId, zone: DropZone) -> Result<(), DomainError> {
+        self.layout.insert_beside(self.focused, panel, zone)?;
         self.focused = panel;
         self.is_maximized = false;
         Ok(())
+    }
+
+    fn adopt_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {
+        self.insert_beside_focused(panel, DropZone::Right)
     }
 
     pub fn focus(&mut self, panel: PanelId) {

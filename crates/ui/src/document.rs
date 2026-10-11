@@ -1,10 +1,12 @@
 use crate::editor_view::EditorView;
 use crate::file_tree::FileTree;
 use crate::theme::Theme;
-use domain::PanelKind;
+use domain::{DropZone, PanelKind};
 use editor_core::io::LoadError;
 use fs_service::Entry;
-use gpui::{div, px, AnyElement, IntoElement, ParentElement, SharedString, Styled, UniformListScrollHandle};
+use gpui::{
+    div, px, AnyElement, IntoElement, ParentElement, ScrollStrategy, SharedString, Styled, UniformListScrollHandle,
+};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -41,11 +43,7 @@ impl DocumentPane {
     pub fn from_snapshot(record: &PanelSnapshot) -> Option<Self> {
         let path = record.path.clone()?;
         match record.panel.kind {
-            PanelKind::Editor => Some(Self::Editor(EditorPane {
-                path,
-                state: EditorState::Loading,
-                view: Rc::new(RefCell::new(EditorView::default())),
-            })),
+            PanelKind::Editor => Some(Self::Editor(EditorPane::loading(path))),
             PanelKind::FileTree => Some(Self::FileTree(FileTreePane::new(path))),
             PanelKind::Terminal | PanelKind::Agent => None,
         }
@@ -64,6 +62,10 @@ impl DocumentPane {
 }
 
 impl EditorPane {
+    pub fn loading(path: PathBuf) -> Self {
+        Self { path, state: EditorState::Loading, view: Rc::new(RefCell::new(EditorView::default())) }
+    }
+
     pub fn ready(&self) -> Option<&editor_core::Editor> {
         match &self.state {
             EditorState::Ready(editor) => Some(editor),
@@ -82,6 +84,10 @@ impl EditorPane {
 impl FileTreePane {
     fn new(root: PathBuf) -> Self {
         Self { tree: FileTree::new(root.clone()), root, exists: true, scroll: UniformListScrollHandle::new() }
+    }
+
+    pub fn reveal_selection(&self, strategy: ScrollStrategy) {
+        self.scroll.scroll_to_item(self.tree.selected_index(), strategy);
     }
 
     pub fn apply_listing(&mut self, dir: &Path, listed: std::io::Result<Vec<Entry>>) {
@@ -114,6 +120,13 @@ pub fn document_cwd(kind: PanelKind, path: &Path, fallback: PathBuf) -> PathBuf 
     match kind {
         PanelKind::FileTree => path.to_path_buf(),
         _ => path.parent().map(Path::to_path_buf).unwrap_or(fallback),
+    }
+}
+
+pub fn document_zone(kind: PanelKind) -> DropZone {
+    match kind {
+        PanelKind::FileTree => DropZone::Left,
+        _ => DropZone::Right,
     }
 }
 
@@ -200,6 +213,12 @@ mod tests {
     fn file_tree_cwd_is_the_folder_itself() {
         let cwd = document_cwd(PanelKind::FileTree, Path::new("/home/me/proj"), PathBuf::from("/fallback"));
         assert_eq!(cwd, PathBuf::from("/home/me/proj"));
+    }
+
+    #[test]
+    fn file_trees_open_on_the_left_and_editors_on_the_right() {
+        assert_eq!(document_zone(PanelKind::FileTree), DropZone::Left);
+        assert_eq!(document_zone(PanelKind::Editor), DropZone::Right);
     }
 
     #[test]

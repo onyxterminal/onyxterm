@@ -16,6 +16,7 @@ pub mod island_look;
 pub mod keymap;
 pub mod menus;
 pub mod motion;
+pub mod open_target;
 pub mod palette;
 pub mod pane_drop;
 pub mod pane_layout;

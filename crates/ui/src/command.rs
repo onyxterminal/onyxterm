@@ -49,6 +49,7 @@ pub enum CommandId {
     OpenFile,
     OpenFolder,
     OpenEditorHere,
+    ToggleFileTree,
     Save,
 }
 
@@ -241,6 +242,7 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(OpenFile, "Open File…", "Files", no_op).build(),
         Command::builder(OpenFolder, "Open Folder…", "Files", no_op).build(),
         Command::builder(OpenEditorHere, "Open Editor Here", "Files", no_op).build(),
+        Command::builder(ToggleFileTree, "Toggle File Tree", "Files", no_op).build(),
         Command::builder(Save, "Save", "Files", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),

@@ -388,3 +388,17 @@ fn file_tree_in_active_tab_ignores_other_folders() {
 
     assert_eq!(model.file_tree_in_active_tab(&home.path().join("other")), None);
 }
+
+#[test]
+fn any_file_tree_in_active_tab_finds_a_tree_whatever_its_root() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    open_terminal_tab(&mut model, home.path());
+    assert_eq!(model.any_file_tree_in_active_tab(), None);
+
+    let tree = PanelId::new();
+    model.add_panel(file_tree_snapshot(tree, &home.path().join("elsewhere")));
+    model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, tree).expect("split");
+
+    assert_eq!(model.any_file_tree_in_active_tab(), Some(tree));
+}

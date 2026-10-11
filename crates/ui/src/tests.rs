@@ -684,6 +684,24 @@ fn set_split_ratio_targets_the_nested_split_by_path() {
 }
 
 #[test]
+fn insert_beside_focused_on_the_left_puts_the_new_leaf_first() {
+    use crate::tabs::Tab;
+    use domain::DropZone;
+    let (existing, inserted) = (PanelId::new(), PanelId::new());
+    let mut tab = Tab::new(existing);
+    tab.insert_beside_focused(inserted, DropZone::Left).unwrap();
+    assert_eq!(tab.layout().leaves(), vec![inserted, existing]);
+    assert_eq!(tab.focused(), inserted);
+}
+
+#[test]
+fn cmd_shift_b_toggles_file_tree() {
+    let keymap = Keymap::default();
+    let combo = Combo::new(Modifiers::command_shift(), "b");
+    assert_eq!(keymap.resolve(&combo), Some(CommandId::ToggleFileTree));
+}
+
+#[test]
 fn drop_zone_uses_edge_bands_with_nearest_edge_winning() {
     use crate::pane_drop::drop_zone_at;
     use domain::DropZone;

@@ -7,7 +7,9 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{document_cwd, document_title, render_document, DocumentPane, EditorPane, EditorState};
+use crate::document::{
+    document_cwd, document_title, document_zone, render_document, DocumentPane, EditorPane, EditorState,
+};
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
 use crate::confirm::{
     close_pane_copy, close_tab_copy, delete_workspace_copy, discard_pane_copy, discard_tab_copy, quit_copy, ConfirmCopy,
@@ -107,6 +109,7 @@ pub struct Shell {
     model: WorkspaceModel,
     panes: HashMap<PanelId, Pane>,
     documents: HashMap<PanelId, DocumentPane>,
+    last_editor: Option<PanelId>,
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
@@ -145,6 +148,7 @@ impl Shell {
             model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
             panes: HashMap::new(),
             documents: HashMap::new(),
+            last_editor: None,
             pending: None,
             is_workspace_menu_open: false,
             menu_field: None,
@@ -230,27 +234,24 @@ impl Shell {
             return;
         };
         let folder = self.panel_cwd(focused);
-        if let Some(existing) = self.model.file_tree_in_active_tab(&folder) {
-            self.focus_pane(existing);
-            return;
-        }
-        let panel = Panel::new_file_tree(PanelId::new(), document_title(&folder));
-        self.open_document(panel, folder, cx);
+        self.open_file_tree(folder, cx);
     }
 
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
         let id = panel.id;
+        let zone = document_zone(panel.kind);
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
         self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path) });
         self.restore_document(id, cx);
         let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
         };
-        if let Err(err) = tab.split_focused(Axis::Horizontal, id) {
+        if let Err(err) = tab.insert_beside_focused(id, zone) {
             tracing::warn!(?err, "open document failed");
             self.discard_pane(id, cx);
             return;
         }
+        self.remember_focused_editor();
         self.persist();
     }
 
@@ -334,8 +335,10 @@ impl Shell {
             CommandId::OpenFile => self.prompt_open(false, cx),
             CommandId::OpenFolder => self.prompt_open(true, cx),
             CommandId::OpenEditorHere => self.open_editor_here(cx),
+            CommandId::ToggleFileTree => self.toggle_file_tree(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
+        self.remember_focused_editor();
         if id.is_structural() {
             self.persist();
         }
@@ -384,6 +387,9 @@ impl Shell {
         }
         if self.state.palette_visible {
             return !is_composed_text(keystroke, false);
+        }
+        if self.send_key_to_tree(event, cx) {
+            return true;
         }
         if self.model.focused_document().is_some() {
             return self.send_key_to_document(event, cx);
@@ -855,7 +861,15 @@ impl Shell {
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus(panel);
         }
+        self.remember_focused_editor();
         self.persist();
+    }
+
+    fn remember_focused_editor(&mut self) {
+        let is_editor = |panel: &PanelId| matches!(self.documents.get(panel), Some(DocumentPane::Editor(_)));
+        if let Some(panel) = self.model.focused_document().filter(is_editor) {
+            self.last_editor = Some(panel);
+        }
     }
 
     fn close_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {

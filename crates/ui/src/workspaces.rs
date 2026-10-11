@@ -92,7 +92,11 @@ impl WorkspaceModel {
     }
 
     pub fn active_root(&self) -> PathBuf {
-        self.entries[self.active].workspace.root.clone().unwrap_or_else(|| self.home.clone())
+        self.workspace_root().unwrap_or_else(|| self.home.clone())
+    }
+
+    pub fn workspace_root(&self) -> Option<PathBuf> {
+        self.entries[self.active].workspace.root.clone()
     }
 
     pub fn workspace_id_at(&self, index: usize) -> Option<WorkspaceId> {
@@ -135,14 +139,20 @@ impl WorkspaceModel {
     }
 
     pub fn file_tree_in_active_tab(&self, root: &Path) -> Option<PanelId> {
+        self.find_in_active_tab(|record| {
+            record.panel.kind == PanelKind::FileTree && record.path.as_deref() == Some(root)
+        })
+    }
+
+    pub fn any_file_tree_in_active_tab(&self) -> Option<PanelId> {
+        self.find_in_active_tab(|record| record.panel.kind == PanelKind::FileTree)
+    }
+
+    fn find_in_active_tab(&self, matches: impl Fn(&PanelSnapshot) -> bool) -> Option<PanelId> {
         let tab = self.tabs().active()?;
         self.panels
             .values()
-            .find(|record| {
-                record.panel.kind == PanelKind::FileTree
-                    && record.path.as_deref() == Some(root)
-                    && tab.contains(record.panel.id)
-            })
+            .find(|record| matches(record) && tab.contains(record.panel.id))
             .map(|record| record.panel.id)
     }
 

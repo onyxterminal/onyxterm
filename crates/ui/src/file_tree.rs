@@ -96,6 +96,20 @@ impl FileTree {
         TreeAction::Load(row.path)
     }
 
+    pub fn expand_selected(&mut self) -> TreeAction {
+        let is_collapsed_dir = self.selected_row().is_some_and(|row| row.is_dir && !row.is_expanded);
+        if !is_collapsed_dir {
+            return TreeAction::None;
+        }
+        self.toggle_selected()
+    }
+
+    pub fn select_index(&mut self, index: usize) {
+        if index < self.rows.len() {
+            self.selected = index;
+        }
+    }
+
     pub fn collapse_or_parent(&mut self) {
         let Some(row) = self.selected_row().cloned() else {
             return;
@@ -234,6 +248,30 @@ mod tests {
 
         tree.select_path(&PathBuf::from("/r/src/main.rs"));
         assert_eq!(tree.toggle_selected(), TreeAction::Open(PathBuf::from("/r/src/main.rs")));
+    }
+
+    #[test]
+    fn expand_only_opens_collapsed_directories() {
+        let mut tree = sample_tree();
+        tree.select_path(&PathBuf::from("/r/a.txt"));
+        assert_eq!(tree.expand_selected(), TreeAction::None);
+
+        tree.select_path(&PathBuf::from("/r/src"));
+        assert_eq!(tree.expand_selected(), TreeAction::Load(PathBuf::from("/r/src")));
+        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+
+        assert_eq!(tree.expand_selected(), TreeAction::None);
+        assert!(tree.selected_row().unwrap().is_expanded);
+    }
+
+    #[test]
+    fn select_index_ignores_rows_past_the_end() {
+        let mut tree = sample_tree();
+        tree.select_index(2);
+        assert_eq!(tree.selected_row().unwrap().path, PathBuf::from("/r/a.txt"));
+
+        tree.select_index(3);
+        assert_eq!(tree.selected_index(), 2);
     }
 
     #[test]
