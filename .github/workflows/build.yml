@@ -16,6 +16,7 @@ env:
 jobs:
   build:
     name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +40,7 @@ jobs:
     steps:
       - name: Resolve version
         id: version
+        shell: bash
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
