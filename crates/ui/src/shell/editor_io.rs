@@ -228,8 +228,6 @@ impl Shell {
                 self.press_in_editor(panel, offset, down_click_mode(click_count, shift, alt), window, cx);
             }
             PointerEvent::Drag { offset } => self.click_in_editor(panel, offset, ClickMode::Extend, cx),
-            PointerEvent::Up => {}
-            PointerEvent::Scroll { dx: _, dy: _ } => {}
         }
     }
 

@@ -234,11 +234,6 @@ impl EntityInputHandler for Shell {
         if self.with_active_field(cx, mark).is_some() {
             return;
         }
-        if self.model.focused_document().is_some() {
-            self.marked_text = Some(new_text.to_string()).filter(|text| !text.is_empty());
-            cx.notify();
-            return;
-        }
         self.marked_text = Some(new_text.to_string()).filter(|text| !text.is_empty());
         cx.notify();
     }

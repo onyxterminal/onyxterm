@@ -22,11 +22,11 @@ const NEWLINE_EXTRA_CELLS: f32 = 1.0;
 pub struct EditorView {
     pub scroll_top: f32,
     pub scroll_left: f32,
-    pub layout: Option<FrameLayout>,
+    pub layout: Option<Rc<FrameLayout>>,
     pub is_selecting: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FrameLayout {
     pub text_origin: Point<Pixels>,
     pub line_height: Pixels,
@@ -125,7 +125,7 @@ pub fn visible_range(scroll_top: f32, viewport_height: f32, line_height: f32, li
     first.min(line_count)..last.min(line_count)
 }
 
-pub fn max_scroll_top(line_count: usize, line_height: f32, _viewport_height: f32) -> f32 {
+pub fn max_scroll_top(line_count: usize, line_height: f32) -> f32 {
     line_count.saturating_sub(1) as f32 * line_height
 }
 
@@ -222,19 +222,16 @@ pub struct EditorFrame {
 pub enum PointerEvent {
     Down { offset: usize, click_count: usize, shift: bool, alt: bool },
     Drag { offset: usize },
-    Up,
-    Scroll { dx: f32, dy: f32 },
 }
 
 pub type PointerHandler = Rc<dyn Fn(PointerEvent, &mut Window, &mut App)>;
 
 pub struct CanvasState {
-    layout: FrameLayout,
+    layout: Rc<FrameLayout>,
     cell: Size<Pixels>,
     text_rect: Bounds<Pixels>,
     gutter_rect: Bounds<Pixels>,
     hitbox: Hitbox,
-    pub _on_pointer: PointerHandler,
 }
 
 pub fn editor_canvas(
@@ -247,11 +244,10 @@ pub fn editor_canvas(
     let prepare_style = style.clone();
     let prepare_frame = frame.clone();
     let prepare_view = view.clone();
-    let paint_on_pointer = on_pointer.clone();
     let canvas = canvas(
         move |bounds, window, _cx| {
             let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-            prepare_state(&prepare_frame, &prepare_style, &prepare_view, on_pointer.clone(), bounds, hitbox, window)
+            prepare_state(&prepare_frame, &prepare_style, &prepare_view, bounds, hitbox, window)
         },
         move |bounds, state: CanvasState, window, cx| {
             let text_origin = state.layout.text_origin;
@@ -283,7 +279,7 @@ pub fn editor_canvas(
                 text_rect,
                 hitbox: state.hitbox.clone(),
             };
-            register_editor_mouse_handlers(area, &view, &paint_on_pointer, window);
+            register_editor_mouse_handlers(area, &view, &on_pointer, window);
             if let Some(focus) = focus {
                 let rect = content_bounds(bounds, style.insets);
                 (focus.register_input)(rect, window, cx);
@@ -296,7 +292,7 @@ pub fn editor_canvas(
 
 #[derive(Clone)]
 struct PointerArea {
-    layout: FrameLayout,
+    layout: Rc<FrameLayout>,
     rope: Rope,
     text_rect: Bounds<Pixels>,
     hitbox: Hitbox,
@@ -317,8 +313,8 @@ fn register_editor_mouse_handlers(
 ) {
     register_press(area.clone(), view.clone(), on_pointer.clone(), window);
     register_drag(area.clone(), view.clone(), on_pointer.clone(), window);
-    register_release(view.clone(), on_pointer.clone(), window);
-    register_scroll(area, view.clone(), on_pointer.clone(), window);
+    register_release(view.clone(), window);
+    register_scroll(area, view.clone(), window);
 }
 
 fn register_press(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
@@ -348,18 +344,16 @@ fn register_drag(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: P
     });
 }
 
-fn register_release(view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
-    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
-            return;
+fn register_release(view: Rc<RefCell<EditorView>>, window: &mut Window) {
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, _cx| {
+        if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+            view.borrow_mut().is_selecting = false;
         }
-        view.borrow_mut().is_selecting = false;
-        on_pointer(PointerEvent::Up, window, cx);
     });
 }
 
-fn register_scroll(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
-    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+fn register_scroll(area: PointerArea, view: Rc<RefCell<EditorView>>, window: &mut Window) {
+    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, _cx| {
         if phase != DispatchPhase::Bubble || !area.hitbox.should_handle_scroll(window) {
             return;
         }
@@ -367,12 +361,10 @@ fn register_scroll(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer:
         let delta = event.delta.pixel_delta(line_height);
         let dx = f32::from(delta.x);
         let dy = f32::from(delta.y);
-        let max_scroll = max_scroll_top(area.rope.len_lines(), f32::from(line_height), f32::from(area.layout.viewport.height));
+        let max_scroll = max_scroll_top(area.rope.len_lines(), f32::from(line_height));
         let mut view_mut = view.borrow_mut();
         view_mut.scroll_top = (view_mut.scroll_top - dy).clamp(0.0, max_scroll);
         view_mut.scroll_left = (view_mut.scroll_left - dx).max(0.0);
-        drop(view_mut);
-        on_pointer(PointerEvent::Scroll { dx, dy }, window, cx);
         window.refresh();
     });
 }
@@ -381,7 +373,6 @@ fn prepare_state(
     frame: &EditorFrame,
     style: &EditorStyle,
     view: &Rc<RefCell<EditorView>>,
-    on_pointer: PointerHandler,
     bounds: Bounds<Pixels>,
     hitbox: Hitbox,
     window: &Window,
@@ -400,7 +391,7 @@ fn prepare_state(
     );
     let line_height_f = f32::from(style.line_height);
     let viewport_height = f32::from(text_rect.size.height);
-    let max_scroll = max_scroll_top(line_count, line_height_f, viewport_height);
+    let max_scroll = max_scroll_top(line_count, line_height_f);
     let mut view_ref = view.borrow_mut();
     view_ref.scroll_top = view_ref.scroll_top.clamp(0.0, max_scroll);
     let range = visible_range(view_ref.scroll_top, viewport_height, line_height_f, line_count);
@@ -439,6 +430,7 @@ fn prepare_state(
         cursor_line: frame.is_focused.then(|| frame.rope.char_to_line(head.min(frame.rope.len_chars()))),
     };
     layout.cursor_bounds = layout.caret_bounds(&frame.rope, head, cell.width);
+    let layout = Rc::new(layout);
     view_ref.layout = Some(layout.clone());
     CanvasState {
         layout,
@@ -446,7 +438,6 @@ fn prepare_state(
         text_rect,
         gutter_rect,
         hitbox,
-        _on_pointer: on_pointer,
     }
 }
 
@@ -668,8 +659,8 @@ mod tests {
 
     #[test]
     fn scrolling_clamps_and_reveals_the_cursor_with_margin() {
-        assert_eq!(max_scroll_top(100, 20.0, 200.0), 1980.0);
-        assert_eq!(max_scroll_top(1, 20.0, 200.0), 0.0);
+        assert_eq!(max_scroll_top(100, 20.0), 1980.0);
+        assert_eq!(max_scroll_top(1, 20.0), 0.0);
         assert_eq!(scroll_to_reveal(0.0, 2, 20.0, 200.0), 0.0);
         assert_eq!(scroll_to_reveal(0.0, 20, 20.0, 200.0), 280.0);
         assert_eq!(scroll_to_reveal(400.0, 19, 20.0, 200.0), 320.0);
