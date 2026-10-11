@@ -129,6 +129,10 @@ pub fn max_scroll_top(line_count: usize, line_height: f32, _viewport_height: f32
     line_count.saturating_sub(1) as f32 * line_height
 }
 
+pub fn max_scroll_left(widest_line_width: f32, cell_width: f32, text_width: f32) -> f32 {
+    (widest_line_width + cell_width - text_width).max(0.0)
+}
+
 pub fn scroll_to_reveal(scroll_top: f32, line: usize, line_height: f32, viewport_height: f32) -> f32 {
     let margin = REVEAL_MARGIN_LINES * line_height;
     let top = line as f32 * line_height;
@@ -399,7 +403,6 @@ fn prepare_state(
     let max_scroll = max_scroll_top(line_count, line_height_f, viewport_height);
     let mut view_ref = view.borrow_mut();
     view_ref.scroll_top = view_ref.scroll_top.clamp(0.0, max_scroll);
-    view_ref.scroll_left = view_ref.scroll_left.max(0.0);
     let range = visible_range(view_ref.scroll_top, viewport_height, line_height_f, line_count);
     let first_line = range.start;
     let text_system = window.text_system();
@@ -419,6 +422,9 @@ fn prepare_state(
         let shaped = text_system.shape_line(display.text.clone().into(), style.font_size, &[run], None);
         lines.push(LaidLine { line: line_index, start_char, shaped, display });
     }
+    let widest = lines.iter().map(|laid| f32::from(laid.shaped.width)).fold(0.0, f32::max);
+    let max_left = max_scroll_left(widest, f32::from(cell.width), f32::from(text_rect.size.width));
+    view_ref.scroll_left = view_ref.scroll_left.clamp(0.0, max_left);
     let text_offset_x = -view_ref.scroll_left;
     let text_offset_y = -view_ref.scroll_top % line_height_f;
     let text_origin = point(text_rect.origin.x + px(text_offset_x), text_rect.origin.y + px(text_offset_y));
@@ -667,6 +673,12 @@ mod tests {
         assert_eq!(scroll_to_reveal(0.0, 2, 20.0, 200.0), 0.0);
         assert_eq!(scroll_to_reveal(0.0, 20, 20.0, 200.0), 280.0);
         assert_eq!(scroll_to_reveal(400.0, 19, 20.0, 200.0), 320.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_stops_one_cell_past_the_widest_line() {
+        assert_eq!(max_scroll_left(500.0, 10.0, 300.0), 210.0);
+        assert_eq!(max_scroll_left(100.0, 10.0, 300.0), 0.0);
     }
 
     #[test]
