@@ -1,23 +1,10 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::pane_drop::DropTarget;
 use domain::{Axis, DomainError, DropZone, LayoutNode, PanelId, TabId};
 
 pub const SPLIT_RATIO: f32 = 0.5;
-const CENTER_ZONE_HALF_EXTENT: f32 = 0.25;
-
-pub fn drop_zone_at(x_fraction: f32, y_fraction: f32) -> DropZone {
-    let (dx, dy) = (x_fraction - 0.5, y_fraction - 0.5);
-    if dx.abs() < CENTER_ZONE_HALF_EXTENT && dy.abs() < CENTER_ZONE_HALF_EXTENT {
-        return DropZone::Center;
-    }
-    match (dx.abs() >= dy.abs(), dx < 0.0, dy < 0.0) {
-        (true, true, _) => DropZone::Left,
-        (true, false, _) => DropZone::Right,
-        (false, _, true) => DropZone::Top,
-        (false, _, false) => DropZone::Bottom,
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SplitSide {
@@ -218,6 +205,16 @@ impl Tabs {
     pub fn select_previous(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+        }
+    }
+
+    pub fn drop_panel(&mut self, source: PanelId, target: DropTarget) -> Result<(), DomainError> {
+        match target {
+            DropTarget::Tab(index) => self.move_panel_to_tab(source, index),
+            DropTarget::Pane(panel, zone) => {
+                let index = self.position_of(panel).ok_or_else(|| DomainError::PanelNotFound(panel.to_string()))?;
+                self.tabs[index].move_panel(source, panel, zone)
+            }
         }
     }
 

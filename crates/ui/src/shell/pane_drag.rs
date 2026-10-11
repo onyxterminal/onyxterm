@@ -1,137 +1,193 @@
 use super::Shell;
 use crate::motion::fade_in;
-use crate::tabs::drop_zone_at;
+use crate::pane_drop::{has_left_dead_zone, pane_drop_target, tab_drop_target, DropTarget};
 use domain::{DropZone, PanelId};
-use gpui::{div, prelude::*, px, relative, AnyElement, Context, DragMoveEvent, Hsla, SharedString, Window};
+use gpui::{
+    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, MouseMoveEvent, Pixels, Point, SharedString,
+    Window,
+};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 const GHOST_WIDTH_PX: f32 = 240.0;
 const GHOST_HEIGHT_PX: f32 = 150.0;
 const GHOST_OPACITY: f32 = 0.6;
+const GHOST_GRIP_INSET_PX: f32 = 16.0;
 const DROP_HIGHLIGHT_ALPHA: f32 = 0.18;
+const SWAP_OUTLINE_PX: f32 = 2.0;
+const SWAP_LABEL: &str = "Swap";
 const HALF: f32 = 0.5;
 
-#[derive(Clone)]
-pub(super) struct DraggedPane {
-    pub(super) panel: PanelId,
-    title: SharedString,
+pub(super) type BoundsMap<K> = Rc<RefCell<HashMap<K, Bounds<Pixels>>>>;
+
+pub(super) struct PaneDrag {
+    panel: PanelId,
+    press: Point<Pixels>,
+    grab: Point<Pixels>,
+    cursor: Point<Pixels>,
+    is_active: bool,
 }
 
-impl DraggedPane {
-    pub(super) fn new(panel: PanelId, title: SharedString) -> Self {
-        Self { panel, title }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct GhostStyle {
-    colors: (Hsla, Hsla, Hsla),
-    radius: f32,
-}
-
-pub(super) struct PaneGhost {
-    title: SharedString,
-    style: GhostStyle,
-}
-
-impl PaneGhost {
-    pub(super) fn new(dragged: &DraggedPane, style: GhostStyle) -> Self {
-        Self { title: dragged.title.clone(), style }
-    }
-}
-
-impl Render for PaneGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let (bg, border, fg) = self.style.colors;
-        div()
-            .w(px(GHOST_WIDTH_PX))
-            .h(px(GHOST_HEIGHT_PX))
-            .opacity(GHOST_OPACITY)
-            .bg(bg)
-            .border_1()
-            .border_color(border)
-            .rounded(px(self.style.radius))
-            .shadow_md()
-            .px_2()
-            .py_1()
-            .text_color(fg)
-            .child(self.title.clone())
-    }
+pub(super) fn bounds_probe<K>(sink: &BoundsMap<K>, key: K) -> impl IntoElement
+where
+    K: std::hash::Hash + Eq + 'static,
+{
+    let sink = sink.clone();
+    canvas(
+        move |bounds, _window, _cx| {
+            sink.borrow_mut().insert(key, bounds);
+        },
+        |_bounds, _state, _window, _cx| {},
+    )
+    .absolute()
+    .size_full()
 }
 
 impl Shell {
-    pub(super) fn ghost_style(&self) -> GhostStyle {
-        let theme = &self.state.theme;
-        GhostStyle {
-            colors: (theme.canvas(), theme.accent.primary, theme.text_default()),
-            radius: theme.layout.island_radius_px,
-        }
+    pub(super) fn press_pane_title(&mut self, panel: PanelId, press: Point<Pixels>) {
+        let origin = self.pane_bounds.borrow().get(&panel).map(|bounds| bounds.origin).unwrap_or(press);
+        self.pane_drag = Some(PaneDrag { panel, press, grab: press - origin, cursor: press, is_active: false });
     }
 
-    pub(super) fn track_pane_drag(
-        &mut self,
-        panel: PanelId,
-        event: &DragMoveEvent<DraggedPane>,
-        cx: &mut Context<Self>,
-    ) {
-        let bounds = event.bounds;
-        let target = match bounds.contains(&event.event.position) {
-            true => {
-                let local = event.event.position - bounds.origin;
-                let zone = drop_zone_at(local.x / bounds.size.width, local.y / bounds.size.height);
-                (event.drag(cx).panel != panel).then_some((panel, zone))
-            }
-            false => self.drop_target.filter(|(current, _)| *current != panel),
-        };
-        if target != self.drop_target {
-            self.drop_target = target;
-            cx.notify();
-        }
+    pub(super) fn is_dragging_pane(&self) -> bool {
+        self.pane_drag.as_ref().is_some_and(|drag| drag.is_active)
     }
 
-    pub(super) fn drop_pane(&mut self, source: PanelId, cx: &mut Context<Self>) {
-        let Some((target, zone)) = self.drop_target.take() else {
+    pub(super) fn drag_pane(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = self.pane_drag.as_mut() else {
             return;
         };
-        let moved = self.model.tabs_mut().active_mut().map(|tab| tab.move_panel(source, target, zone));
-        if let Some(Err(err)) = moved {
-            tracing::debug!(?err, "pane move rejected");
+        if event.pressed_button != Some(gpui::MouseButton::Left) {
+            self.cancel_pane_drag(cx);
+            return;
         }
-        self.persist();
+        drag.cursor = event.position;
+        drag.is_active = drag.is_active || has_left_dead_zone(drag.press, event.position);
+        if !drag.is_active {
+            return;
+        }
+        let (source, cursor) = (drag.panel, drag.cursor);
+        self.drop_target = self.hit_test(source, cursor);
         cx.notify();
     }
 
-    pub(super) fn move_pane_to_tab(&mut self, source: PanelId, index: usize, cx: &mut Context<Self>) {
+    fn hit_test(&self, source: PanelId, cursor: Point<Pixels>) -> Option<DropTarget> {
+        let source_tab = self.model.tabs().position_of(source)?;
+        let tabs: Vec<(usize, Bounds<Pixels>)> = self.tab_bounds.borrow().iter().map(|(i, b)| (*i, *b)).collect();
+        if let Some(index) = tab_drop_target(cursor, &tabs, source_tab) {
+            return Some(DropTarget::Tab(index));
+        }
+        let visible = self.model.tabs().active().map(|tab| tab.layout().leaves()).unwrap_or_default();
+        let panes: Vec<(PanelId, Bounds<Pixels>)> = self
+            .pane_bounds
+            .borrow()
+            .iter()
+            .filter(|(panel, _)| visible.contains(panel))
+            .map(|(panel, bounds)| (*panel, *bounds))
+            .collect();
+        pane_drop_target(cursor, &panes, source).map(|(panel, zone)| DropTarget::Pane(panel, zone))
+    }
+
+    pub(super) fn release_pane_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.pane_drag.take() else {
+            return;
+        };
+        let target = self.drop_target.take();
+        if !drag.is_active {
+            return;
+        }
+        cx.notify();
+        let Some(target) = target else {
+            return;
+        };
+        if self.apply_drop(drag.panel, target) {
+            window.focus(&self.focus_handle);
+            self.persist();
+        }
+    }
+
+    fn apply_drop(&mut self, source: PanelId, target: DropTarget) -> bool {
+        let result = self.model.tabs_mut().drop_panel(source, target);
+        result.inspect_err(|err| tracing::debug!(?err, "pane drop rejected")).is_ok()
+    }
+
+    pub(super) fn cancel_pane_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        let was_active = self.is_dragging_pane();
+        self.pane_drag = None;
         self.drop_target = None;
-        if let Err(err) = self.model.tabs_mut().move_panel_to_tab(source, index) {
-            tracing::debug!(?err, "pane move into tab rejected");
-        }
-        self.persist();
         cx.notify();
+        was_active
     }
 
-    pub(super) fn cancel_pane_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        self.drop_target = None;
-        let was_dragging = cx.stop_active_drag(window);
-        cx.notify();
-        was_dragging
+    pub(super) fn is_tab_drop_target(&self, index: usize) -> bool {
+        self.drop_target == Some(DropTarget::Tab(index))
     }
 
-    pub(super) fn clear_drop_target(&mut self, cx: &mut Context<Self>) {
-        if self.drop_target.take().is_some() {
-            cx.notify();
-        }
+    pub(super) fn render_pane_ghost(&self) -> Option<AnyElement> {
+        let drag = self.pane_drag.as_ref().filter(|drag| drag.is_active)?;
+        let theme = &self.state.theme;
+        let grip_x = f32::from(drag.grab.x).clamp(GHOST_GRIP_INSET_PX, GHOST_WIDTH_PX - GHOST_GRIP_INSET_PX);
+        let grip_y = theme.layout.pane_header_height_px * HALF;
+        let title = SharedString::from(self.pane_display_title(drag.panel));
+        let ghost = div()
+            .absolute()
+            .left(drag.cursor.x - px(grip_x))
+            .top(drag.cursor.y - px(grip_y))
+            .w(px(GHOST_WIDTH_PX))
+            .h(px(GHOST_HEIGHT_PX))
+            .opacity(GHOST_OPACITY)
+            .bg(theme.canvas())
+            .border_1()
+            .border_color(theme.accent.primary)
+            .rounded(px(theme.layout.island_radius_px))
+            .shadow_md()
+            .child(
+                div()
+                    .h(px(theme.layout.pane_header_height_px))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(theme.border.muted)
+                    .text_color(theme.text_default())
+                    .child(title),
+            );
+        Some(ghost.into_any_element())
     }
 
     pub(super) fn render_drop_highlight(&self, panel: PanelId) -> Option<AnyElement> {
-        let (_, zone) = self.drop_target.filter(|(target, _)| *target == panel)?;
+        let Some(DropTarget::Pane(target, zone)) = self.drop_target else {
+            return None;
+        };
+        if target != panel {
+            return None;
+        }
         let theme = &self.state.theme;
-        let highlight = div().absolute().bg(theme.accent.primary.opacity(DROP_HIGHLIGHT_ALPHA));
+        let fill = theme.accent.primary.opacity(DROP_HIGHLIGHT_ALPHA);
+        let highlight = div().absolute();
         let highlight = match zone {
-            DropZone::Left => highlight.left_0().top_0().h_full().w(relative(HALF)),
-            DropZone::Right => highlight.right_0().top_0().h_full().w(relative(HALF)),
-            DropZone::Top => highlight.left_0().top_0().w_full().h(relative(HALF)),
-            DropZone::Bottom => highlight.left_0().bottom_0().w_full().h(relative(HALF)),
-            DropZone::Center => highlight.inset_0(),
+            DropZone::Left => highlight.bg(fill).left_0().top_0().h_full().w(relative(HALF)),
+            DropZone::Right => highlight.bg(fill).right_0().top_0().h_full().w(relative(HALF)),
+            DropZone::Top => highlight.bg(fill).left_0().top_0().w_full().h(relative(HALF)),
+            DropZone::Bottom => highlight.bg(fill).left_0().bottom_0().w_full().h(relative(HALF)),
+            DropZone::Center => highlight
+                .inset_0()
+                .border(px(SWAP_OUTLINE_PX))
+                .border_color(theme.accent.primary)
+                .rounded(px(theme.layout.island_radius_px))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .rounded(px(theme.layout.border_radius_px))
+                        .bg(theme.accent.primary)
+                        .text_color(theme.text.inverse)
+                        .child(SWAP_LABEL),
+                ),
         };
         let id = SharedString::from(format!("drop-{panel}-{zone:?}"));
         Some(fade_in(highlight, id, theme.layout.animation_ms))

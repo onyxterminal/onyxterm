@@ -1,4 +1,4 @@
-use super::pane_drag::DraggedPane;
+use super::pane_drag::bounds_probe;
 use super::{edit_field, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::workspace_menu::CARET;
 use gpui::{div, img, prelude::*, px, Context, Image, ImageFormat, Keystroke, MouseButton, SharedString, Window};
@@ -72,10 +72,9 @@ impl Shell {
                     .border_1()
                     .border_color(border)
                     .when(!is_active, |el| el.hover(move |style| style.bg(hover_bg)))
-                    .drag_over::<DraggedPane>(move |style, _dragged, _window, _cx| style.border_color(drop_border))
-                    .on_drop(cx.listener(move |shell, dragged: &DraggedPane, _window, cx| {
-                        shell.move_pane_to_tab(dragged.panel, index, cx)
-                    }))
+                    .when(self.is_tab_drop_target(index), |el| el.border_color(drop_border))
+                    .relative()
+                    .child(bounds_probe(&self.tab_bounds, index))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {

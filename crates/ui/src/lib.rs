@@ -9,6 +9,7 @@ pub mod keymap;
 pub mod menus;
 pub mod motion;
 pub mod palette;
+pub mod pane_drop;
 pub mod pane_menu;
 pub mod shell;
 pub mod tabs;

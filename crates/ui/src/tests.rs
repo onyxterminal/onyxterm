@@ -588,14 +588,57 @@ fn set_split_ratio_targets_the_nested_split_by_path() {
 }
 
 #[test]
-fn drop_zone_picks_the_nearest_edge_or_the_center() {
-    use crate::tabs::drop_zone_at;
+fn drop_zone_uses_edge_bands_with_nearest_edge_winning() {
+    use crate::pane_drop::drop_zone_at;
     use domain::DropZone;
     assert_eq!(drop_zone_at(0.5, 0.5), DropZone::Center);
-    assert_eq!(drop_zone_at(0.1, 0.5), DropZone::Left);
-    assert_eq!(drop_zone_at(0.9, 0.4), DropZone::Right);
-    assert_eq!(drop_zone_at(0.5, 0.05), DropZone::Top);
-    assert_eq!(drop_zone_at(0.45, 0.95), DropZone::Bottom);
+    assert_eq!(drop_zone_at(0.31, 0.69), DropZone::Center);
+    assert_eq!(drop_zone_at(0.29, 0.5), DropZone::Left);
+    assert_eq!(drop_zone_at(0.75, 0.5), DropZone::Right);
+    assert_eq!(drop_zone_at(0.5, 0.1), DropZone::Top);
+    assert_eq!(drop_zone_at(0.5, 0.9), DropZone::Bottom);
+    assert_eq!(drop_zone_at(0.05, 0.2), DropZone::Left);
+    assert_eq!(drop_zone_at(0.2, 0.05), DropZone::Top);
+}
+
+fn rect(x: f32, y: f32, w: f32, h: f32) -> gpui::Bounds<gpui::Pixels> {
+    gpui::Bounds::new(gpui::point(px(x), px(y)), gpui::size(px(w), px(h)))
+}
+
+#[test]
+fn pane_hit_testing_only_targets_the_pane_under_the_cursor() {
+    use crate::pane_drop::pane_drop_target;
+    use domain::DropZone;
+    let (source, target, tiny) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let panes = [
+        (source, rect(0.0, 0.0, 400.0, 600.0)),
+        (target, rect(406.0, 0.0, 400.0, 600.0)),
+        (tiny, rect(812.0, 0.0, 20.0, 20.0)),
+    ];
+    let at = |x: f32, y: f32| pane_drop_target(gpui::point(px(x), px(y)), &panes, source);
+    assert_eq!(at(403.0, 300.0), None, "gap between islands");
+    assert_eq!(at(2000.0, 300.0), None, "outside the window");
+    assert_eq!(at(-5.0, -5.0), None, "outside the window");
+    assert_eq!(at(200.0, 300.0), None, "own pane");
+    assert_eq!(at(410.0, 300.0), Some((target, DropZone::Left)));
+    assert_eq!(at(800.0, 300.0), Some((target, DropZone::Right)));
+    assert_eq!(at(606.0, 5.0), Some((target, DropZone::Top)));
+    assert_eq!(at(606.0, 595.0), Some((target, DropZone::Bottom)));
+    assert_eq!(at(606.0, 300.0), Some((target, DropZone::Center)));
+    assert_eq!(at(822.0, 10.0), Some((tiny, DropZone::Center)));
+    assert_eq!(at(813.0, 10.0), Some((tiny, DropZone::Left)));
+}
+
+#[test]
+fn tab_hit_testing_skips_the_source_tab_and_drags_need_a_dead_zone() {
+    use crate::pane_drop::{has_left_dead_zone, tab_drop_target};
+    let tabs = [(0, rect(90.0, 4.0, 80.0, 28.0)), (1, rect(176.0, 4.0, 80.0, 28.0))];
+    assert_eq!(tab_drop_target(gpui::point(px(100.0), px(10.0)), &tabs, 0), None);
+    assert_eq!(tab_drop_target(gpui::point(px(200.0), px(10.0)), &tabs, 0), Some(1));
+    assert_eq!(tab_drop_target(gpui::point(px(200.0), px(60.0)), &tabs, 0), None);
+    let press = gpui::point(px(10.0), px(10.0));
+    assert!(!has_left_dead_zone(press, gpui::point(px(13.0), px(13.0))));
+    assert!(has_left_dead_zone(press, gpui::point(px(16.0), px(10.0))));
 }
 
 #[test]
@@ -643,4 +686,33 @@ fn move_to_new_tab_detaches_a_split_pane_and_rejects_a_lone_pane() {
     assert_eq!(tabs.active().unwrap().focused(), b);
     assert!(tabs.move_panel_to_new_tab(b).is_err());
     assert_eq!(tabs.len(), 2);
+}
+
+#[test]
+fn releasing_over_nothing_leaves_the_layout_and_a_pane_drop_moves_it() {
+    use crate::pane_drop::{pane_drop_target, DropTarget};
+    use domain::DropZone;
+    let mut tabs = Tabs::default();
+    let (a, b) = (PanelId::new(), PanelId::new());
+    tabs.open(a);
+    tabs.active_mut().unwrap().split_focused(Axis::Horizontal, b).unwrap();
+    let before = tabs.active().unwrap().layout().clone();
+    let panes = [(a, rect(0.0, 0.0, 400.0, 600.0)), (b, rect(406.0, 0.0, 400.0, 600.0))];
+    let in_gap = pane_drop_target(gpui::point(px(403.0), px(300.0)), &panes, b);
+    assert_eq!(in_gap, None);
+    if let Some((panel, zone)) = in_gap {
+        tabs.drop_panel(b, DropTarget::Pane(panel, zone)).unwrap();
+    }
+    assert_eq!(tabs.active().unwrap().layout(), &before);
+    let (panel, zone) = pane_drop_target(gpui::point(px(200.0), px(590.0)), &panes, b).unwrap();
+    assert_eq!((panel, zone), (a, DropZone::Bottom));
+    tabs.drop_panel(b, DropTarget::Pane(panel, zone)).unwrap();
+    let expected = LayoutNode::Split {
+        axis: Axis::Vertical,
+        ratio: 0.5,
+        first: Box::new(LayoutNode::leaf(a)),
+        second: Box::new(LayoutNode::leaf(b)),
+    };
+    assert_eq!(tabs.active().unwrap().layout(), &expected);
+    assert_eq!(tabs.active().unwrap().focused(), b);
 }

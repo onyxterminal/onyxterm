@@ -2,15 +2,13 @@ use super::{edit_field, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::motion::fade_in;
 use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuItem};
 use domain::PanelId;
-use gpui::{canvas, div, prelude::*, px, AnyElement, Bounds, Context, Keystroke, MouseButton, Pixels, SharedString, Window};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use super::pane_drag::{bounds_probe, BoundsMap};
+use gpui::{div, prelude::*, px, AnyElement, Context, Keystroke, MouseButton, SharedString, Window};
 
 const MENU_WIDTH_PX: f32 = 240.0;
 const MENU_OFFSET_PX: f32 = 4.0;
 
-pub(super) type GearBounds = Rc<RefCell<HashMap<PanelId, Bounds<Pixels>>>>;
+pub(super) type GearBounds = BoundsMap<PanelId>;
 
 pub(super) struct PaneMenu {
     panel: PanelId,
@@ -30,15 +28,7 @@ impl Shell {
     }
 
     pub(super) fn gear_bounds_probe(&self, panel: PanelId) -> impl IntoElement {
-        let sink = self.gear_bounds.clone();
-        canvas(
-            move |bounds, _window, _cx| {
-                sink.borrow_mut().insert(panel, bounds);
-            },
-            |_bounds, _state, _window, _cx| {},
-        )
-        .absolute()
-        .size_full()
+        bounds_probe(&self.gear_bounds, panel)
     }
 
     pub(super) fn toggle_pane_menu(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {

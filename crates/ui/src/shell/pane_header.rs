@@ -1,4 +1,3 @@
-use super::pane_drag::{DraggedPane, PaneGhost};
 use super::{short_cwd, Shell};
 use crate::command::CommandId;
 use crate::workspace_menu::CARET;
@@ -26,13 +25,30 @@ impl Shell {
                 .border_1()
                 .border_color(theme.border_focus())
                 .child(format!("{}{CARET}", field.text)),
-            None => div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title.clone()),
+            None => div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title),
         };
-        let dragged = DraggedPane::new(panel, title.into());
-        let ghost_style = self.ghost_style();
+        let drag_handle = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    shell.focus_pane(panel);
+                    window.focus(&shell.focus_handle);
+                    shell.commit_tab_field_on_click(cx);
+                    shell.press_pane_title(panel, event.position);
+                    cx.notify();
+                }),
+            )
+            .child(title_element)
+            .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd));
         div()
-            .id(SharedString::from(format!("pane-header-{panel}")))
-            .on_drag(dragged, move |dragged, _offset, _window, cx| cx.new(|_| PaneGhost::new(dragged, ghost_style)))
             .absolute()
             .top_0()
             .left_0()
@@ -47,8 +63,7 @@ impl Shell {
             .rounded_t(px(theme.layout.island_radius_px))
             .border_b_1()
             .border_color(theme.border.muted)
-            .child(title_element)
-            .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd))
+            .child(drag_handle)
             .child(
                 div()
                     .flex_none()

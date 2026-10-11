@@ -301,3 +301,52 @@ mod pane_moves {
         assert_eq!(layout, before);
     }
 }
+
+mod pane_move_edge_cases {
+    use domain::{Axis, DropZone, LayoutNode, PanelId};
+
+    #[test]
+    fn moving_a_sibling_around_its_target_keeps_a_valid_two_pane_tree() {
+        for zone in [DropZone::Left, DropZone::Right, DropZone::Top, DropZone::Bottom, DropZone::Center] {
+            let (a, b) = (PanelId::new(), PanelId::new());
+            let mut layout = LayoutNode::leaf(a);
+            layout.split_with(a, Axis::Horizontal, 0.5, b).unwrap();
+            layout.move_leaf(b, a, zone).unwrap();
+            layout.validate().unwrap();
+            let mut leaves = layout.leaves();
+            leaves.sort_by_key(|id| id.to_string());
+            let mut expected = vec![a, b];
+            expected.sort_by_key(|id| id.to_string());
+            assert_eq!(leaves, expected, "{zone:?}");
+            assert!(matches!(layout, LayoutNode::Split { .. }), "{zone:?}");
+        }
+    }
+
+    #[test]
+    fn moving_out_of_a_nested_split_collapses_only_that_parent() {
+        let (a, b, c, d) = (PanelId::new(), PanelId::new(), PanelId::new(), PanelId::new());
+        let mut layout = LayoutNode::leaf(a);
+        layout.split_with(a, Axis::Horizontal, 0.5, b).unwrap();
+        layout.split_with(b, Axis::Vertical, 0.5, c).unwrap();
+        layout.split_with(c, Axis::Horizontal, 0.5, d).unwrap();
+        layout.move_leaf(d, a, DropZone::Bottom).unwrap();
+        layout.validate().unwrap();
+        let expected = LayoutNode::Split {
+            axis: Axis::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Split {
+                axis: Axis::Vertical,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::leaf(a)),
+                second: Box::new(LayoutNode::leaf(d)),
+            }),
+            second: Box::new(LayoutNode::Split {
+                axis: Axis::Vertical,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::leaf(b)),
+                second: Box::new(LayoutNode::leaf(c)),
+            }),
+        };
+        assert_eq!(layout, expected);
+    }
+}

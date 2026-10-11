@@ -10,7 +10,6 @@ use crate::command::{
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
-use pane_drag::DraggedPane;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
@@ -19,7 +18,7 @@ use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
-    DragMoveEvent, FocusHandle,
+    FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
     TitlebarOptions, Window, WindowOptions,
 };
@@ -99,7 +98,10 @@ pub struct Shell {
     notice: Option<String>,
     marked_text: Option<String>,
     split_drag: Option<splits::SplitDrag>,
-    drop_target: Option<(PanelId, domain::DropZone)>,
+    drop_target: Option<crate::pane_drop::DropTarget>,
+    pane_drag: Option<pane_drag::PaneDrag>,
+    pane_bounds: pane_drag::BoundsMap<PanelId>,
+    tab_bounds: pane_drag::BoundsMap<usize>,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     gear_bounds: pane_options::GearBounds,
@@ -128,6 +130,9 @@ impl Shell {
             marked_text: None,
             split_drag: None,
             drop_target: None,
+            pane_drag: None,
+            pane_bounds: pane_drag::BoundsMap::default(),
+            tab_bounds: pane_drag::BoundsMap::default(),
             pane_menu: None,
             pane_field: None,
             gear_bounds: pane_options::GearBounds::default(),
@@ -240,8 +245,8 @@ impl Shell {
 
     fn consume_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let keystroke = &event.keystroke;
-        if keystroke.key == ESCAPE_KEY && cx.has_active_drag() {
-            return self.cancel_pane_drag(window, cx);
+        if keystroke.key == ESCAPE_KEY && self.is_dragging_pane() {
+            return self.cancel_pane_drag(cx);
         }
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
@@ -719,10 +724,7 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .on_drag_move(cx.listener(move |shell, event: &DragMoveEvent<DraggedPane>, _window, cx| {
-                shell.track_pane_drag(panel, event, cx)
-            }))
-            .on_drop(cx.listener(|shell, dragged: &DraggedPane, _window, cx| shell.drop_pane(dragged.panel, cx)))
+            .child(pane_drag::bounds_probe(&self.pane_bounds, panel))
             .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx))))
             .child(header)
             .children(self.render_drop_highlight(panel))
@@ -732,6 +734,8 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.pane_bounds.borrow_mut().clear();
+        self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
         let palette_overlay = palette_render::build_overlay(&self.state, theme);
         let palette_visible = self.state.palette_visible;
@@ -743,6 +747,7 @@ impl Render for Shell {
         let pane_area = layout.map(|layout| self.render_layout(&layout, Vec::new(), cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let pane_menu = self.render_pane_menu(cx);
+        let pane_ghost = self.render_pane_ghost();
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
@@ -759,10 +764,13 @@ impl Render for Shell {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
             .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
-            .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| shell.drag_split(event, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
+            .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| {
+                shell.drag_split(event, cx);
+                shell.drag_pane(event, cx);
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, window, cx| {
                 shell.end_split_drag(cx);
-                shell.clear_drop_target(cx);
+                shell.release_pane_drag(window, cx);
             }))
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
@@ -771,6 +779,7 @@ impl Render for Shell {
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
+            .children(pane_ghost)
             .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
     }
