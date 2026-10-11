@@ -28,12 +28,15 @@ pub enum CommandId {
     Hide,
     HideOthers,
     ShowAll,
+    About,
+    CloseTab,
+    SelectAll,
 }
 
 impl CommandId {
     pub fn is_structural(self) -> bool {
         use CommandId::*;
-        matches!(self, NewTab | NextTab | PrevTab | SplitRight | SplitDown | FocusAdjacent | CloseActive)
+        matches!(self, NewTab | NextTab | PrevTab | SplitRight | SplitDown | FocusAdjacent | CloseActive | CloseTab)
     }
 }
 
@@ -201,7 +204,9 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
+        Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
+        Command::builder(SelectAll, "Select All", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
         Command::builder(Quit, "Quit Onyxterm", "Application", no_op)

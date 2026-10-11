@@ -6,6 +6,7 @@ pub mod command;
 pub mod confirm;
 pub mod input;
 pub mod keymap;
+pub mod menus;
 pub mod palette;
 pub mod shell;
 pub mod tabs;
@@ -39,6 +40,7 @@ pub use shell::Startup;
 pub fn run_app(startup: Startup) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
+        menus::install_menus(cx);
         let options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Onyxterm".into()),

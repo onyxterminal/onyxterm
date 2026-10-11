@@ -383,3 +383,12 @@ fn current_dir_follows_shell_cd() {
     assert_eq!(seen, Some(target));
     service.terminate_session(id).expect("terminate");
 }
+
+#[test]
+fn select_all_covers_scrollback_and_screen() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(20, 2), 100);
+    terminal.feed(b"first\r\nsecond\r\nthird");
+    terminal.select_all();
+    let text = terminal.selection_text().expect("selection");
+    assert!(text.contains("first") && text.contains("third"), "got {text:?}");
+}

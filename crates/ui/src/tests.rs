@@ -482,3 +482,31 @@ fn tab_rename_trims_and_blank_reverts_to_automatic_title() {
     let titles: Vec<&str> = CommandRegistry::with_defaults().list().iter().map(|c| c.title).collect();
     assert!(titles.contains(&"Rename Tab"));
 }
+
+#[test]
+fn every_keymap_binding_round_trips_into_a_gpui_menu_shortcut() {
+    let map = Keymap::default();
+    assert_eq!(Combo::new(Modifiers::command() | Modifiers::alt(), "right").binding_text(), "alt-cmd-right");
+    assert_eq!(Combo::new(Modifiers::command() | Modifiers::control(), "f").binding_text(), "ctrl-cmd-f");
+    for (combo, _) in map.iter() {
+        let parsed = gpui::Keystroke::parse(&combo.binding_text()).expect("binding text parses");
+        assert_eq!((parsed.modifiers, parsed.key.as_str()), (combo.modifiers, combo.key.as_str()));
+    }
+    let shortcuts = crate::menus::menu_shortcuts(&map);
+    assert_eq!(shortcuts.len(), map.len());
+    let quit = crate::menus::RunCommand(CommandId::Quit);
+    assert!(shortcuts.iter().any(|binding| binding.action().partial_eq(&quit)));
+}
+
+#[test]
+fn menu_bar_lists_native_sections_and_window_shortcuts() {
+    let names: Vec<String> = crate::menus::app_menus().iter().map(|menu| menu.name.to_string()).collect();
+    assert_eq!(names, ["Onyxterm", "File", "Edit", "View", "Window"]);
+    let map = Keymap::default();
+    let cmd = Modifiers::command();
+    assert_eq!(map.resolve(&Combo::new(cmd, "m")), Some(CommandId::Minimize));
+    assert_eq!(map.resolve(&Combo::new(cmd, "h")), Some(CommandId::Hide));
+    assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::alt(), "h")), Some(CommandId::HideOthers));
+    assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::control(), "f")), Some(CommandId::ToggleFullScreen));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "w")), Some(CommandId::CloseTab));
+}

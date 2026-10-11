@@ -176,6 +176,16 @@ impl Terminal {
         }
     }
 
+    pub fn select_all(&self) {
+        let mut state = self.inner.state.lock();
+        let grid = state.term.grid();
+        let start = Point::new(grid.topmost_line(), Column(0));
+        let end = Point::new(grid.bottommost_line(), grid.last_column());
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        state.term.selection = Some(selection);
+    }
+
     pub fn clear_selection(&self) {
         self.inner.state.lock().term.selection = None;
     }

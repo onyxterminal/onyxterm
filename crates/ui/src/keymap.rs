@@ -20,6 +20,18 @@ impl Combo {
             key: key.into(),
         }
     }
+
+    pub fn binding_text(&self) -> String {
+        let flags = [
+            (self.modifiers.control, "ctrl-"),
+            (self.modifiers.alt, "alt-"),
+            (self.modifiers.shift, "shift-"),
+            (self.modifiers.platform, "cmd-"),
+            (self.modifiers.function, "fn-"),
+        ];
+        let prefix: String = flags.iter().filter(|(is_held, _)| *is_held).map(|(_, text)| *text).collect();
+        format!("{prefix}{}", self.key)
+    }
 }
 
 #[derive(Debug)]
@@ -85,6 +97,8 @@ impl Default for Keymap {
         let mut map = Self::new();
         map.bind(Combo::new(Modifiers::command(), "t"), NewTab);
         map.bind(Combo::new(Modifiers::command(), "w"), CloseActive);
+        map.bind(Combo::new(Modifiers::command_shift(), "w"), CloseTab);
+        map.bind(Combo::new(Modifiers::command(), "a"), SelectAll);
         map.bind(Combo::new(Modifiers::command(), "q"), Quit);
         map.bind(Combo::new(Modifiers::command(), "k"), OpenPalette);
         map.bind(Combo::new(Modifiers::command(), "c"), Copy);

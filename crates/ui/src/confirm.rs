@@ -1,11 +1,12 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use domain::{PanelId, WorkspaceId};
+use domain::{PanelId, TabId, WorkspaceId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confirmation {
     ClosePane(PanelId),
+    CloseTab(TabId),
     DeleteWorkspace(WorkspaceId),
     Quit { sessions: usize },
 }
@@ -22,6 +23,14 @@ pub fn close_pane_copy() -> ConfirmCopy {
         title: "Terminate running process?".into(),
         body: "A command is still running in this pane. Closing it will end the process.".into(),
         action: "Close and terminate",
+    }
+}
+
+pub fn close_tab_copy() -> ConfirmCopy {
+    ConfirmCopy {
+        title: "Terminate running processes?".into(),
+        body: "A command is still running in this tab. Closing it will end every process in it.".into(),
+        action: "Close tab",
     }
 }
 

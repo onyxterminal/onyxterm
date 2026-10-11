@@ -7,14 +7,15 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_backspace, palette_move, palette_selected,
     palette_selected_choice, palette_type, CommandId,
 };
-use crate::confirm::{close_pane_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
+use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
+use crate::menus::RunCommand;
 use crate::input::{encode_keystroke, page_scroll_lines, paste_bytes};
 use crate::keymap::Combo;
 use crate::palette as palette_render;
 use crate::terminal_view::{terminal_canvas, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
-use domain::{Axis, LayoutNode, Panel, PanelId, TerminalSessionId, WorkspaceId};
+use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     div, point, prelude::*, px, relative, AnyElement, ClipboardItem, Context, FocusHandle,
     IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
@@ -43,6 +44,8 @@ const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
 const CWD_TAIL_SEGMENTS: usize = 2;
 const HOME_MARK: &str = "~";
+const ABOUT_TITLE: &str = "Onyxterm";
+const ABOUT_OK: &str = "OK";
 const ELLIPSIS: &str = "\u{2026}";
 
 struct Pane {
@@ -193,6 +196,9 @@ impl Shell {
             CommandId::Hide => cx.hide(),
             CommandId::HideOthers => cx.hide_other_apps(),
             CommandId::ShowAll => cx.unhide_other_apps(),
+            CommandId::About => show_about(window, cx),
+            CommandId::CloseTab => self.request_close_tab(cx),
+            CommandId::SelectAll => self.select_all(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -202,43 +208,51 @@ impl Shell {
     }
 
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.consume_key(event, window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    fn consume_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let keystroke = &event.keystroke;
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
-            return;
+            return true;
         }
         if self.is_workspace_menu_open {
             self.handle_menu_key(keystroke, cx);
-            return;
+            return true;
         }
         if self.tab_field.is_some() {
             self.handle_tab_field_key(keystroke, cx);
-            return;
+            return true;
         }
         if let Some(id) = self.resolve_combo(event) {
             self.run_command(id, window, cx);
-            return;
+            return true;
         }
         if self.state.palette_visible {
             self.handle_palette_key(keystroke, window, cx);
-            return;
+            return true;
         }
-        self.send_key_to_terminal(keystroke, cx);
+        self.send_key_to_terminal(keystroke, cx)
     }
 
-    fn send_key_to_terminal(&self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    fn send_key_to_terminal(&self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         let Some(handle) = self.focused_handle() else {
-            return;
+            return false;
         };
         if let Some(lines) = page_scroll_lines(keystroke, handle.grid_size().rows) {
             handle.terminal().scroll_lines(lines);
             cx.notify();
-            return;
+            return true;
         }
-        if let Some(bytes) = encode_keystroke(keystroke, handle.input_modes()) {
-            write_to(handle, &bytes);
-            cx.notify();
-        }
+        let Some(bytes) = encode_keystroke(keystroke, handle.input_modes()) else {
+            return false;
+        };
+        write_to(handle, &bytes);
+        cx.notify();
+        true
     }
 
     fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
@@ -375,6 +389,12 @@ impl Shell {
         write_to(handle, &paste_bytes(&text, handle.input_modes()));
     }
 
+    fn select_all(&self) {
+        if let Some(handle) = self.focused_handle() {
+            handle.terminal().select_all();
+        }
+    }
+
     fn focused_handle(&self) -> Option<&TerminalHandle> {
         let panel = self.model.tabs().active()?.focused();
         self.panes.get(&panel).map(|pane| &pane.terminal.handle)
@@ -392,6 +412,32 @@ impl Shell {
         self.close_pane(panel, cx);
     }
 
+    fn request_close_tab(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.model.tabs().active() else {
+            return;
+        };
+        let id = tab.id();
+        let is_busy = tab
+            .layout()
+            .leaves()
+            .iter()
+            .any(|panel| self.panes.get(panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job()));
+        if is_busy {
+            self.pending = Some(Confirmation::CloseTab(id));
+            return;
+        }
+        self.close_tab(id, cx);
+    }
+
+    fn close_tab(&mut self, id: TabId, cx: &mut Context<Self>) {
+        let Some(panels) = self.model.tabs().iter().find(|tab| tab.id() == id).map(|tab| tab.layout().leaves()) else {
+            return;
+        };
+        for panel in panels {
+            self.close_pane(panel, cx);
+        }
+    }
+
     fn cancel_confirmation(&mut self, cx: &mut Context<Self>) {
         self.pending = None;
         cx.notify();
@@ -400,6 +446,7 @@ impl Shell {
     fn accept_confirmation(&mut self, cx: &mut Context<Self>) {
         match self.pending.take() {
             Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
+            Some(Confirmation::CloseTab(id)) => self.close_tab(id, cx),
             Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
             Some(Confirmation::Quit { .. }) => cx.quit(),
             None => {}
@@ -410,6 +457,7 @@ impl Shell {
     fn confirmation_copy(&self, confirmation: Confirmation) -> ConfirmCopy {
         match confirmation {
             Confirmation::ClosePane(_) => close_pane_copy(),
+            Confirmation::CloseTab(_) => close_tab_copy(),
             Confirmation::Quit { sessions } => quit_copy(sessions),
             Confirmation::DeleteWorkspace(id) => {
                 let live = self.model.workspace_panels(id).iter().filter(|p| self.panes.contains_key(p)).count();
@@ -661,6 +709,7 @@ impl Render for Shell {
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
+            .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)
             .children(notice)
@@ -669,6 +718,11 @@ impl Render for Shell {
             .children(workspace_menu)
             .children(close_prompt)
     }
+}
+
+fn show_about(window: &mut Window, cx: &mut gpui::App) {
+    let detail = format!("Version {}", crate::version());
+    let _dismissed = window.prompt(gpui::PromptLevel::Info, ABOUT_TITLE, Some(&detail), &[ABOUT_OK], cx);
 }
 
 fn watch_session(panel: PanelId, mut events: Receiver<TerminalEvent>, cx: &mut Context<Shell>) -> Task<()> {
