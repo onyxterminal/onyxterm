@@ -275,6 +275,10 @@ impl Shell {
             CommandId::Copy | CommandId::Paste | CommandId::SelectAll if self.active_field().is_some() => {
                 self.run_field_command(id, cx)
             }
+            CommandId::Copy if self.has_focused_editor() => self.copy_from_editor(cx),
+            CommandId::Paste if self.has_focused_editor() => self.paste_into_editor(cx),
+            CommandId::SelectAll if self.has_focused_editor() => self.select_all_in_editor(cx),
+            CommandId::Save => self.save_focused_editor(cx),
             CommandId::OpenPalette => {
                 crate::command::CommandRegistry::dispatch(&mut self.state, id);
                 self.scroll_palette_to_top();
@@ -378,7 +382,7 @@ impl Shell {
             return !is_composed_text(keystroke, false);
         }
         if self.model.focused_document().is_some() {
-            return false;
+            return self.send_key_to_document(event, cx);
         }
         if self.is_copy_mode_active() {
             return self.handle_copy_mode_key(keystroke, cx);

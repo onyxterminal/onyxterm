@@ -110,7 +110,7 @@ fn render_editor_pane(pane: &EditorPane, theme: &Theme) -> AnyElement {
     match &pane.state {
         EditorState::Loading => div().size_full().into_any_element(),
         EditorState::Failed(message) => centered_label(format!("{name} — {message}"), theme),
-        EditorState::Ready(_) => centered_label(name, theme),
+        EditorState::Ready(_) => div().size_full().into_any_element(),
     }
 }
 

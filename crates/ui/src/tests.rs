@@ -1198,3 +1198,9 @@ fn cmd_e_opens_editor_here() {
     let combo = Combo::new(Modifiers::command(), "e");
     assert_eq!(keymap.resolve(&combo), Some(CommandId::OpenEditorHere));
 }
+
+#[test]
+fn cmd_s_saves() {
+    let keymap = Keymap::default();
+    assert_eq!(keymap.resolve(&Combo::new(Modifiers::command(), "s")), Some(CommandId::Save));
+}

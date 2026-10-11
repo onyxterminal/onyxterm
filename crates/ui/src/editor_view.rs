@@ -194,7 +194,6 @@ pub fn editor_canvas(
                     text_origin,
                     cell,
                     tokens,
-                    text_color: style.text,
                     line_height,
                     is_focused: focused,
                 };
@@ -204,8 +203,6 @@ pub fn editor_canvas(
                 }
             });
             paint_gutter(&state.layout, &state.gutter_rect, &style, tokens, window, cx);
-            let _ = view.clone();
-            let _ = state._on_pointer.clone();
             if let Some(focus) = focus {
                 let rect = content_bounds(bounds, style.insets);
                 (focus.register_input)(rect, window, cx);
@@ -303,7 +300,6 @@ struct FramePainter<'a> {
     text_origin: Point<Pixels>,
     cell: Size<Pixels>,
     tokens: EditorTokens,
-    text_color: Hsla,
     line_height: Pixels,
     is_focused: bool,
 }
@@ -312,7 +308,9 @@ impl<'a> FramePainter<'a> {
     fn paint(&self, window: &mut Window, cx: &mut App) {
         for laid in &self.layout.lines {
             let y = self.row_y(laid);
-            self.paint_current_line(laid, y, window);
+            if self.is_focused {
+                self.paint_current_line(laid, y, window);
+            }
             self.paint_selections(laid, y, window);
             self.paint_text(laid, y, window, cx);
             if self.is_focused {
@@ -350,7 +348,6 @@ impl<'a> FramePainter<'a> {
         }
         window.paint_quad(fill(bounds, self.tokens.selection));
         let underline = UnderlineStyle { thickness: px(1.0), color: None, wavy: false };
-        let _ = self.text_color;
         let run = TextRun {
             len: text.len(),
             font: style.font(),
@@ -421,7 +418,6 @@ impl<'a> FramePainter<'a> {
     }
 
     fn paint_cursors(&self, laid: &LaidLine, y: Pixels, window: &mut Window) {
-        let cell_width = self.cell.width;
         for selection in self.frame.selections.as_slice() {
             let head = selection.head;
             let line_chars = line_len(&self.frame.rope, laid.line);
@@ -441,8 +437,6 @@ impl<'a> FramePainter<'a> {
                 continue;
             }
             window.paint_quad(fill(bounds, self.tokens.cursor));
-            let _ = cell_width;
-            let _ = self.text_color;
         }
     }
 
