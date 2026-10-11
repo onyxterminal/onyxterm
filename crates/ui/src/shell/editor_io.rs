@@ -4,7 +4,7 @@ use crate::editor_keys::{key_input, should_defer_to_input_handler};
 use crate::editor_view::{scroll_to_reveal, PointerEvent, PointerHandler};
 use domain::PanelId;
 use editor_core::{io, standard_action, Buffer, ClickMode, Editor, EditorAction};
-use gpui::{ClipboardItem, Context, KeyDownEvent};
+use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
@@ -216,43 +216,47 @@ impl Shell {
     pub(super) fn editor_pointer_handler(&self, panel: PanelId, cx: &gpui::Context<Self>) -> PointerHandler {
         let shell = cx.entity();
         Rc::new(move |event, window, cx| {
-            shell.update(cx, |shell, cx| shell.handle_editor_pointer(panel, event, cx));
+            shell.update(cx, |shell, cx| shell.handle_editor_pointer(panel, event, window, cx));
             window.refresh();
         })
     }
 
-    pub(super) fn handle_editor_pointer(&mut self, panel: PanelId, event: PointerEvent, cx: &mut Context<Self>) {
+    fn handle_editor_pointer(&mut self, panel: PanelId, event: PointerEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            PointerEvent::Down { offset, click_count, shift, alt } => {
+                self.press_in_editor(panel, offset, down_click_mode(click_count, shift, alt), window, cx);
+            }
+            PointerEvent::Drag { offset } => self.click_in_editor(panel, offset, ClickMode::Extend, cx),
+            PointerEvent::Up => {}
+            PointerEvent::Scroll { dx: _, dy: _ } => {}
+        }
+    }
+
+    fn press_in_editor(
+        &mut self,
+        panel: PanelId,
+        offset: usize,
+        mode: ClickMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_pane(panel);
+        window.focus(&self.focus_handle);
+        self.click_in_editor(panel, offset, mode, cx);
+    }
+
+    fn click_in_editor(&mut self, panel: PanelId, offset: usize, mode: ClickMode, cx: &mut Context<Self>) {
         let Some((focused, pane)) = self.focused_editor_mut() else {
             return;
         };
         if focused != panel {
             return;
         }
-        match event {
-            PointerEvent::Down { offset, click_count, shift, alt } => {
-                let mode = down_click_mode(click_count, shift, alt);
-                pane.view.borrow_mut().last_click_mode = Some(mode);
-                let Some(editor) = pane.ready_mut() else {
-                    return;
-                };
-                editor.click(offset, mode);
-                cx.notify();
-            }
-            PointerEvent::Drag { offset } => {
-                let mode = pane
-                    .view
-                    .borrow()
-                    .last_click_mode
-                    .unwrap_or(ClickMode::Extend);
-                let Some(editor) = pane.ready_mut() else {
-                    return;
-                };
-                editor.click(offset, mode);
-                cx.notify();
-            }
-            PointerEvent::Up => {}
-            PointerEvent::Scroll { dx: _, dy: _ } => {}
-        }
+        let Some(editor) = pane.ready_mut() else {
+            return;
+        };
+        editor.click(offset, mode);
+        cx.notify();
     }
 }
 

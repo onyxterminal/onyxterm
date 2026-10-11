@@ -24,7 +24,6 @@ pub struct EditorView {
     pub scroll_left: f32,
     pub layout: Option<FrameLayout>,
     pub is_selecting: bool,
-    pub last_click_mode: Option<editor_core::ClickMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +213,7 @@ pub struct CanvasState {
     cell: Size<Pixels>,
     text_rect: Bounds<Pixels>,
     gutter_rect: Bounds<Pixels>,
+    hitbox: Hitbox,
     pub _on_pointer: PointerHandler,
 }
 
@@ -257,9 +257,13 @@ pub fn editor_canvas(
                 }
             });
             paint_gutter(&state.layout, &state.gutter_rect, &style, tokens, window, cx);
-            if focused {
-                register_editor_mouse_handlers(&state, &frame, &view, &paint_on_pointer, window);
-            }
+            let area = PointerArea {
+                layout: state.layout.clone(),
+                rope: frame.rope.clone(),
+                text_rect,
+                hitbox: state.hitbox.clone(),
+            };
+            register_editor_mouse_handlers(area, &view, &paint_on_pointer, window);
             if let Some(focus) = focus {
                 let rect = content_bounds(bounds, style.insets);
                 (focus.register_input)(rect, window, cx);
@@ -270,93 +274,85 @@ pub fn editor_canvas(
     canvas
 }
 
+#[derive(Clone)]
+struct PointerArea {
+    layout: FrameLayout,
+    rope: Rope,
+    text_rect: Bounds<Pixels>,
+    hitbox: Hitbox,
+}
+
+impl PointerArea {
+    fn offset_at(&self, position: Point<Pixels>) -> usize {
+        let clamped = position.clamp(&self.text_rect.origin, &self.text_rect.bottom_right());
+        offset_at(&self.layout, &self.rope, clamped)
+    }
+}
+
 fn register_editor_mouse_handlers(
-    state: &CanvasState,
-    frame: &EditorFrame,
+    area: PointerArea,
     view: &Rc<RefCell<EditorView>>,
     on_pointer: &PointerHandler,
     window: &mut Window,
 ) {
-    let bounds = state.text_rect;
-    let line_height = state.layout.line_height;
-    let down_handler = on_pointer.clone();
-    let down_view = view.clone();
-    let down_layout = state.layout.clone();
-    let down_rope = frame.rope.clone();
-    let down_bounds = bounds;
+    register_press(area.clone(), view.clone(), on_pointer.clone(), window);
+    register_drag(area.clone(), view.clone(), on_pointer.clone(), window);
+    register_release(view.clone(), on_pointer.clone(), window);
+    register_scroll(area, view.clone(), on_pointer.clone(), window);
+}
+
+fn register_press(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-        let is_inside = down_bounds.contains(&event.position) && event.button == MouseButton::Left;
-        if phase != DispatchPhase::Bubble || !is_inside {
+        let is_inside = area.text_rect.contains(&event.position) && area.hitbox.is_hovered(window);
+        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !is_inside {
             return;
         }
-        let offset = offset_at(&down_layout, &down_rope, event.position);
-        down_view.borrow_mut().is_selecting = true;
-        down_handler(
-            PointerEvent::Down {
-                offset,
-                click_count: event.click_count,
-                shift: event.modifiers.shift,
-                alt: event.modifiers.alt,
-            },
-            window,
-            cx,
-        );
+        let offset = area.offset_at(event.position);
+        view.borrow_mut().is_selecting = true;
+        let shift = event.modifiers.shift;
+        let alt = event.modifiers.alt;
+        on_pointer(PointerEvent::Down { offset, click_count: event.click_count, shift, alt }, window, cx);
         window.refresh();
     });
-    let drag_handler = on_pointer.clone();
-    let drag_view = view.clone();
-    let drag_layout = state.layout.clone();
-    let drag_rope = frame.rope.clone();
-    let drag_bounds = bounds;
+}
+
+fn register_drag(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
-        let is_dragging = drag_view.borrow().is_selecting && event.pressed_button == Some(MouseButton::Left);
+        let is_dragging = view.borrow().is_selecting && event.pressed_button == Some(MouseButton::Left);
         if phase != DispatchPhase::Bubble || !is_dragging {
             return;
         }
-        if !drag_bounds.contains(&event.position) {
-            return;
-        }
-        let offset = offset_at(&drag_layout, &drag_rope, event.position);
-        drag_handler(PointerEvent::Drag { offset }, window, cx);
+        let offset = area.offset_at(event.position);
+        on_pointer(PointerEvent::Drag { offset }, window, cx);
         window.refresh();
     });
-    let up_handler = on_pointer.clone();
-    let up_view = view.clone();
+}
+
+fn register_release(view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
             return;
         }
-        let mut view_mut = up_view.borrow_mut();
-        view_mut.is_selecting = false;
-        view_mut.last_click_mode = None;
-        drop(view_mut);
-        up_handler(PointerEvent::Up, window, cx);
+        view.borrow_mut().is_selecting = false;
+        on_pointer(PointerEvent::Up, window, cx);
     });
-    let scroll_handler = on_pointer.clone();
-    let scroll_view = view.clone();
-    let scroll_bounds = bounds;
-    let scroll_rope = frame.rope.clone();
-    let scroll_line_height = line_height;
+}
+
+fn register_scroll(area: PointerArea, view: Rc<RefCell<EditorView>>, on_pointer: PointerHandler, window: &mut Window) {
     window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || !scroll_bounds.contains(&event.position) {
+        if phase != DispatchPhase::Bubble || !area.hitbox.should_handle_scroll(window) {
             return;
         }
-        let delta = event.delta.pixel_delta(scroll_line_height);
+        let line_height = area.layout.line_height;
+        let delta = event.delta.pixel_delta(line_height);
         let dx = f32::from(delta.x);
         let dy = f32::from(delta.y);
-        let line_count = scroll_rope.len_lines();
-        let layout_snapshot = scroll_view.borrow().layout.clone();
-        if let Some(layout) = layout_snapshot {
-            let max_scroll = max_scroll_top(
-                line_count,
-                f32::from(scroll_line_height),
-                f32::from(layout.viewport.height),
-            );
-            let mut view_mut = scroll_view.borrow_mut();
-            view_mut.scroll_top = (view_mut.scroll_top - dy).clamp(0.0, max_scroll);
-            view_mut.scroll_left = (view_mut.scroll_left - dx).max(0.0);
-        }
-        scroll_handler(PointerEvent::Scroll { dx, dy }, window, cx);
+        let max_scroll = max_scroll_top(area.rope.len_lines(), f32::from(line_height), f32::from(area.layout.viewport.height));
+        let mut view_mut = view.borrow_mut();
+        view_mut.scroll_top = (view_mut.scroll_top - dy).clamp(0.0, max_scroll);
+        view_mut.scroll_left = (view_mut.scroll_left - dx).max(0.0);
+        drop(view_mut);
+        on_pointer(PointerEvent::Scroll { dx, dy }, window, cx);
         window.refresh();
     });
 }
@@ -367,7 +363,7 @@ fn prepare_state(
     view: &Rc<RefCell<EditorView>>,
     on_pointer: PointerHandler,
     bounds: Bounds<Pixels>,
-    _hitbox: Hitbox,
+    hitbox: Hitbox,
     window: &Window,
 ) -> CanvasState {
     let content = content_bounds(bounds, style.insets);
@@ -425,6 +421,7 @@ fn prepare_state(
         cell,
         text_rect,
         gutter_rect,
+        hitbox,
         _on_pointer: on_pointer,
     }
 }
