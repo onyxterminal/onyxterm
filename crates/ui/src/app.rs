@@ -25,7 +25,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            theme: Theme::load_default().expect("github-light theme must load"),
+            theme: Theme::load_default().expect("default theme must load"),
             registry: CommandRegistry::with_defaults(),
             keymap: Keymap::default(),
             palette_visible: false,

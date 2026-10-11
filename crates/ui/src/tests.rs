@@ -19,7 +19,7 @@ use terminal_core::{Cell, CellColor, GridPoint, GridSize, InputModes, SelectionK
 #[test]
 fn theme_loads_from_assets() {
     let theme = Theme::load_default().expect("theme parses");
-    assert_eq!(theme.name, "github-light");
+    assert_eq!(theme.name, "apple-light");
     assert!((theme.surface.canvas.l - 1.0).abs() < 1e-3);
     assert!(theme.accent.primary.s > 0.5);
     assert!(theme.layout.tab_strip_height_px > 0.0);
@@ -435,15 +435,15 @@ fn island_padding_and_header_inset_content_and_grid_uses_inner_size() {
     let theme = Theme::load_default().unwrap();
     let padding = px(theme.layout.island_padding_px);
     let header = px(theme.layout.pane_header_height_px);
-    assert_eq!(theme.layout.pane_header_height_px, 28.0);
+    assert_eq!(theme.layout.pane_header_height_px, 26.0);
     assert_eq!(theme.layout.island_padding_px, 8.0);
     assert_eq!(theme.layout.island_radius_px, 10.0);
     assert_eq!(theme.layout.island_gap_px, 6.0);
-    assert_eq!(theme.layout.window_margin_px, 8.0);
+    assert_eq!(theme.layout.window_margin_px, 6.0);
     let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(513.0)));
     let inner = content_bounds(island, padding, header);
-    assert_eq!(inner.origin, gpui::point(px(108.0), px(86.0)));
-    assert_eq!(inner.size, gpui::size(px(800.0), px(469.0)));
+    assert_eq!(inner.origin, gpui::point(px(108.0), px(84.0)));
+    assert_eq!(inner.size, gpui::size(px(800.0), px(471.0)));
     let cell = gpui::size(px(8.0), px(18.0));
     assert_eq!(grid_size_for(inner.size, cell), GridSize::new(100, 26));
     assert_eq!(grid_size_for(island.size, cell), GridSize::new(102, 28));
@@ -846,4 +846,82 @@ fn named_tab_shows_its_name_until_cleared() {
     assert_eq!(tabs.labels(), ["#1", "logs"]);
     tabs.get_mut(1).unwrap().rename(Some("   ".to_string()));
     assert_eq!(tabs.labels(), ["#1", "#2"]);
+}
+
+fn assert_color(actual: gpui::Hsla, hex: &str) {
+    let expected = hex_to_hsla(hex, "test.expected").unwrap();
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    assert!(
+        close(actual.h, expected.h) && close(actual.s, expected.s) && close(actual.l, expected.l) && close(actual.a, expected.a),
+        "{actual:?} != {hex}"
+    );
+}
+
+#[test]
+fn rgba_colors_parse_channels_and_alpha_and_reject_garbage() {
+    use crate::theme::parse_color;
+    let separator = parse_color("rgba(0,0,0,0.08)", "test.separator").unwrap();
+    assert!(separator.l.abs() < 1e-3);
+    assert!((separator.a - 0.08).abs() < 1e-3);
+    let menu = parse_color("rgba(255, 255, 255, 0.94)", "test.menu").unwrap();
+    assert!((menu.l - 1.0).abs() < 1e-3);
+    assert!((menu.a - 0.94).abs() < 1e-3);
+    assert_color(parse_color("#007AFF", "test.accent").unwrap(), "#007AFF");
+    assert!(parse_color("rgba(0,0,0)", "test.short").is_err());
+    assert!(parse_color("rgba(0,0,0,x)", "test.bad").is_err());
+    assert!(parse_color("rgba(0,0,0,1", "test.open").is_err());
+}
+
+#[test]
+fn apple_light_theme_loads_every_redesign_token() {
+    let theme = Theme::load_default().unwrap();
+    assert_color(theme.surface.subtle, "#F5F5F7");
+    assert_color(theme.surface.canvas, "#FFFFFF");
+    assert_color(theme.text.default, "#1D1D1F");
+    assert_color(theme.text.muted, "#6E6E73");
+    assert_color(theme.text.subtle, "#86868B");
+    assert_color(theme.accent.primary, "#007AFF");
+    assert_color(theme.chrome.destructive, "#D70015");
+    assert_color(theme.status.running, "#34C759");
+    assert_color(theme.status.idle, "#C7C7CC");
+    assert!((theme.border.muted.a - 0.08).abs() < 1e-3);
+    assert!((theme.border.default.a - 0.10).abs() < 1e-3);
+    assert!((theme.chrome.menu_fill.a - 0.94).abs() < 1e-3);
+    assert!((theme.chrome.palette_fill.a - 0.96).abs() < 1e-3);
+    assert_eq!(theme.ui_font.family, ".SystemUIFont");
+    assert_eq!(
+        [theme.ui_font.tab_px, theme.ui_font.pane_title_px, theme.ui_font.menu_px, theme.ui_font.palette_input_px],
+        [12.0, 11.5, 13.0, 16.0]
+    );
+    assert_eq!(theme.ui_font.hint_px, 11.0);
+    assert_eq!(theme.layout.tab_strip_height_px, 38.0);
+    assert_eq!(theme.top_bar.control_height_px, 26.0);
+    assert_eq!(theme.top_bar.tab_gap_px, 2.0);
+    assert_eq!(theme.menu.row_height_px, 26.0);
+    assert_eq!(theme.palette.width_px, 600.0);
+    assert_eq!(theme.palette.row_height_px, 32.0);
+    assert_eq!(theme.dialog.radius_px, 12.0);
+    assert!(theme.island.dim_unfocused);
+    assert_eq!(theme.island.unfocused_opacity, 0.55);
+    assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 6.0));
+    assert_eq!(theme.island.focus_ring_px, 1.0);
+}
+
+#[test]
+fn shadow_tokens_become_layered_box_shadows() {
+    use crate::theme::box_shadows;
+    let theme = Theme::load_default().unwrap();
+    let tab = box_shadows(&theme.shadow.tab);
+    assert_eq!(tab.len(), 2);
+    assert_eq!(tab[0].spread_radius, px(0.5));
+    assert_eq!(tab[0].blur_radius, px(0.0));
+    assert!((tab[0].color.a - 0.10).abs() < 1e-3);
+    assert_eq!(tab[1].offset, gpui::point(px(0.0), px(1.0)));
+    assert_eq!(tab[1].blur_radius, px(2.0));
+    let card = box_shadows(&theme.shadow.card);
+    assert_eq!((card[0].offset.y, card[0].blur_radius), (px(1.0), px(3.0)));
+    let menu = box_shadows(&theme.shadow.menu);
+    assert_eq!((menu[0].offset.y, menu[0].blur_radius), (px(12.0), px(32.0)));
+    let palette = box_shadows(&theme.shadow.palette);
+    assert_eq!((palette[0].offset.y, palette[0].blur_radius), (px(18.0), px(48.0)));
 }
