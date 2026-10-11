@@ -31,6 +31,7 @@ mod tests;
 mod workspace_tests;
 
 use gpui::{Bounds, WindowOptions};
+use std::borrow::Cow;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -50,6 +51,14 @@ pub use shell::Startup;
 pub fn run_app(startup: Startup) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
+        if let Err(err) = cx.text_system().add_fonts(vec![
+            Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf")),
+            Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf")),
+            Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Italic.ttf")),
+            Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-BoldItalic.ttf")),
+        ]) {
+            tracing::error!(?err, "failed to load bundled JetBrains Mono");
+        }
         menus::install_menus(cx);
         let options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
