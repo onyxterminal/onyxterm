@@ -86,13 +86,20 @@ impl FileTreePane {
 
     pub fn apply_listing(&mut self, dir: &Path, listed: std::io::Result<Vec<Entry>>) {
         match listed {
-            Ok(entries) => self.tree.set_children(dir, entries),
+            Ok(entries) => self.apply_entries(dir, entries),
             Err(err) if dir == self.root => {
                 tracing::warn!(%err, root = %dir.display(), "file tree root listing failed");
                 self.exists = false;
             }
             Err(err) => tracing::warn!(%err, dir = %dir.display(), "file tree listing failed"),
         }
+    }
+
+    fn apply_entries(&mut self, dir: &Path, entries: Vec<Entry>) {
+        if dir == self.root {
+            self.exists = true;
+        }
+        self.tree.set_children(dir, entries);
     }
 }
 
@@ -249,6 +256,14 @@ mod tests {
         let mut pane = tree_pane();
         pane.apply_listing(&PathBuf::from("/home/me/proj"), listing_error());
         assert!(!pane.exists);
+    }
+
+    #[test]
+    fn successful_root_listing_recovers_a_missing_tree() {
+        let mut pane = tree_pane();
+        pane.apply_listing(&PathBuf::from("/home/me/proj"), listing_error());
+        pane.apply_listing(&PathBuf::from("/home/me/proj"), Ok(Vec::new()));
+        assert!(pane.exists);
     }
 
     #[test]

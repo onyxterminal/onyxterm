@@ -52,6 +52,9 @@ impl FileTree {
     }
 
     pub fn set_children(&mut self, dir: &Path, entries: Vec<Entry>) {
+        if !self.is_known_dir(dir) {
+            return;
+        }
         let removed_dirs = self.removed_subdirectories(dir, &entries);
         for removed in &removed_dirs {
             self.forget_subtree(removed);
@@ -114,6 +117,10 @@ impl FileTree {
             .filter(|dir| changed.iter().any(|path| path.parent() == Some(dir.as_path())))
             .cloned()
             .collect()
+    }
+
+    fn is_known_dir(&self, dir: &Path) -> bool {
+        dir == self.root || self.children.contains_key(dir) || self.expanded.contains(dir)
     }
 
     fn removed_subdirectories(&self, dir: &Path, entries: &[Entry]) -> Vec<PathBuf> {
@@ -186,6 +193,13 @@ mod tests {
         tree
     }
 
+    fn load_collapsed_src(tree: &mut FileTree) {
+        tree.select_path(&PathBuf::from("/r/src"));
+        tree.toggle_selected();
+        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+        tree.toggle_selected();
+    }
+
     fn row_names(tree: &FileTree) -> Vec<&str> {
         tree.rows().iter().map(|row| row.name.as_str()).collect()
     }
@@ -193,7 +207,7 @@ mod tests {
     #[test]
     fn rows_flatten_only_expanded_directories() {
         let mut tree = sample_tree();
-        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+        load_collapsed_src(&mut tree);
 
         assert_eq!(row_names(&tree), ["src", "docs", "a.txt"]);
 
@@ -257,7 +271,7 @@ mod tests {
     #[test]
     fn changed_paths_map_to_their_loaded_parent_directories() {
         let mut tree = sample_tree();
-        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+        load_collapsed_src(&mut tree);
 
         let changed = vec![PathBuf::from("/r/src/new.rs"), PathBuf::from("/r/b.txt"), PathBuf::from("/elsewhere/x")];
 
@@ -268,7 +282,7 @@ mod tests {
     #[test]
     fn refresh_covers_expanded_unloaded_and_loaded_collapsed_directories() {
         let mut tree = sample_tree();
-        tree.set_children(&PathBuf::from("/r/src"), vec![entry("/r/src", "main.rs", false)]);
+        load_collapsed_src(&mut tree);
         tree.select_path(&PathBuf::from("/r/docs"));
         assert_eq!(tree.toggle_selected(), TreeAction::Load(PathBuf::from("/r/docs")));
 
@@ -307,6 +321,15 @@ mod tests {
         tree.set_children(&root(), vec![entry("/r", "src", true)]);
         assert_eq!(row_names(&tree), ["src"]);
         assert!(!tree.rows()[0].is_expanded);
+    }
+
+    #[test]
+    fn listings_for_unknown_directories_are_dropped() {
+        let mut tree = sample_tree();
+        tree.set_children(&PathBuf::from("/r/gone"), vec![entry("/r/gone", "x.rs", false)]);
+
+        assert!(tree.dirs_needing_refresh(&[PathBuf::from("/r/gone/y")]).is_empty());
+        assert_eq!(tree.expanded_dirs(), vec![root()]);
     }
 
     #[test]
