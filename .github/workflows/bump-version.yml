@@ -1,0 +1,101 @@
+name: Bump Version
+run-name: "branch: ${{ github.ref_name }}; bump: ${{ inputs.bump }}; prerelease: ${{ inputs.is_prerelease }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: SemVer bump
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      is_prerelease:
+        description: Mark as prerelease
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compute next version
+        id: next-version
+        env:
+          BUMP: ${{ inputs.bump }}
+          IS_PRERELEASE: ${{ inputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
+          if [ -z "$CURRENT" ]; then
+            echo "::error::cannot read version from crates/app/Cargo.toml" >&2
+            exit 1
+          fi
+
+          BASE=$(echo "$CURRENT" | sed -E 's/-.*$//')
+          MAJOR=$(echo "$BASE" | cut -d. -f1)
+          MINOR=$(echo "$BASE" | cut -d. -f2)
+          PATCH=$(echo "$BASE" | cut -d. -f3)
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "::error::unknown bump: $BUMP" >&2; exit 1 ;;
+          esac
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            NEXT="$MAJOR.$MINOR.$PATCH-rc.1"
+          else
+            NEXT="$MAJOR.$MINOR.$PATCH"
+          fi
+
+          if git ls-remote --tags origin "v$NEXT" | grep -q "v$NEXT"; then
+            echo "::error::tag v$NEXT already exists on origin" >&2
+            exit 1
+          fi
+
+          {
+            echo "NEXT=$NEXT"
+            echo "CURRENT=$CURRENT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.next-version.outputs.NEXT }}\"/" crates/app/Cargo.toml
+
+      - name: Verify version reads back
+        run: |
+          ACTUAL=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
+          if [ "$ACTUAL" != "${{ steps.next-version.outputs.NEXT }}" ]; then
+            echo "::error::version mismatch: expected ${{ steps.next-version.outputs.NEXT }}, got $ACTUAL" >&2
+            exit 1
+          fi
+
+      - name: Commit and tag
+        run: |
+          git add crates/app/Cargo.toml
+          git commit -m "chore(release): bump version to ${{ steps.next-version.outputs.NEXT }}"
+          git tag -a "v${{ steps.next-version.outputs.NEXT }}" -m "Release v${{ steps.next-version.outputs.NEXT }}"
+          git push origin HEAD
+          git push origin "v${{ steps.next-version.outputs.NEXT }}"
