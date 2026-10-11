@@ -454,7 +454,7 @@ fn island_padding_and_header_inset_content_and_grid_uses_inner_size() {
 
 #[test]
 fn short_cwd_uses_home_mark_and_last_two_segments() {
-    use crate::shell::short_cwd;
+    use crate::pane_title::short_cwd;
     use std::path::Path;
     let home = Path::new("/Users/me");
     assert_eq!(short_cwd(Path::new("/Users/me"), home), "~");
@@ -715,4 +715,112 @@ fn releasing_over_nothing_leaves_the_layout_and_a_pane_drop_moves_it() {
     };
     assert_eq!(tabs.active().unwrap().layout(), &expected);
     assert_eq!(tabs.active().unwrap().focused(), b);
+}
+
+mod pane_titles {
+    use crate::pane_title::{display_title, short_cwd, title_tooltip, OscTitle, TitleSource, MAX_TITLE_CHARS};
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+    use terminal_core::{ForegroundJob, GridSize, InMemoryTerminalService, NativePty, ShellCommand, TerminalHandle};
+
+    const HOME: &str = "/Users/me";
+    const JOB_GROUP: i32 = 4242;
+    const SHELL_PROMPT_TITLE: &str = "me@host:~";
+
+    fn job(argv: &[&str]) -> ForegroundJob {
+        ForegroundJob { process_group: JOB_GROUP, argv: argv.iter().map(|arg| arg.to_string()).collect() }
+    }
+
+    fn source<'a>(job: Option<&'a ForegroundJob>, osc: Option<&'a OscTitle>, cwd: &'a str) -> TitleSource<'a> {
+        TitleSource { name: None, job, osc, cwd: Path::new(cwd), home: Path::new(HOME) }
+    }
+
+    #[test]
+    fn rename_wins_over_job_and_cwd() {
+        let running = job(&["vim", "notes.md"]);
+        let named = TitleSource { name: Some("build"), ..source(Some(&running), None, HOME) };
+        assert_eq!(display_title(&named), "build");
+    }
+
+    #[test]
+    fn running_job_prefers_its_own_osc_title() {
+        let running = job(&["/usr/bin/vim", "notes.md"]);
+        let osc = OscTitle { text: "notes.md - VIM".to_string(), owner: Some(JOB_GROUP) };
+        assert_eq!(display_title(&source(Some(&running), Some(&osc), HOME)), "notes.md - VIM");
+    }
+
+    #[test]
+    fn running_job_without_osc_title_shows_shortened_argv() {
+        let running = job(&["/opt/homebrew/bin/htop", "-d", "10"]);
+        let shell_title = OscTitle { text: SHELL_PROMPT_TITLE.to_string(), owner: None };
+        assert_eq!(display_title(&source(Some(&running), Some(&shell_title), HOME)), "htop -d 10");
+    }
+
+    #[test]
+    fn idle_shell_shows_short_cwd_ignoring_shell_title() {
+        let shell_title = OscTitle { text: SHELL_PROMPT_TITLE.to_string(), owner: None };
+        let idle = source(None, Some(&shell_title), "/Users/me/Development/onyxterm");
+        assert_eq!(display_title(&idle), "~/Development/onyxterm");
+    }
+
+    #[test]
+    fn idle_home_shows_tilde() {
+        assert_eq!(display_title(&source(None, None, HOME)), "~");
+    }
+
+    #[test]
+    fn idle_long_path_collapses_to_last_two_segments() {
+        let deep = source(None, None, "/Users/me/Development/Personal/onyxterm/crates");
+        assert_eq!(display_title(&deep), "~/\u{2026}/onyxterm/crates");
+    }
+
+    #[test]
+    fn long_command_truncates_with_ellipsis() {
+        let running = job(&["cargo", "test", "--workspace", "--all-targets", "--", "--nocapture", "--test-threads=1"]);
+        let title = display_title(&source(Some(&running), None, HOME));
+        assert_eq!(title.chars().count(), MAX_TITLE_CHARS);
+        assert!(title.starts_with("cargo test --workspace"), "got {title:?}");
+        assert!(title.ends_with('\u{2026}'), "got {title:?}");
+    }
+
+    #[test]
+    fn tooltip_carries_full_title_and_full_cwd() {
+        let running = job(&["sleep", "5"]);
+        let busy = source(Some(&running), None, "/Users/me/Development/Personal/onyxterm");
+        assert_eq!(title_tooltip(&busy), "sleep 5\n/Users/me/Development/Personal/onyxterm");
+        assert_eq!(title_tooltip(&source(None, None, HOME)), HOME);
+    }
+
+    fn live_title(handle: &TerminalHandle, home: &Path) -> String {
+        let job = handle.foreground_job();
+        let cwd = handle.current_dir().unwrap_or_default();
+        display_title(&TitleSource { name: None, job: job.as_ref(), osc: None, cwd: &cwd, home })
+    }
+
+    fn wait_for_title(handle: &TerminalHandle, home: &Path, expected: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut title = live_title(handle, home);
+        while Instant::now() < deadline && title != expected {
+            std::thread::sleep(Duration::from_millis(50));
+            title = live_title(handle, home);
+        }
+        title
+    }
+
+    #[test]
+    fn live_title_follows_foreground_job_in_real_pty() {
+        let cwd = std::fs::canonicalize(std::env::temp_dir()).expect("temp dir");
+        let home = PathBuf::from(HOME);
+        let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+        let command = ShellCommand { program: PathBuf::from("/bin/sh"), args: vec!["-i".to_string()], cwd: cwd.clone() };
+        let id = service.spawn_command(command, GridSize::new(40, 5)).expect("spawn");
+        let handle = service.handle_for(id).expect("handle");
+        let idle = short_cwd(&cwd, &home);
+        assert_eq!(wait_for_title(&handle, &home, &idle), idle);
+        handle.write(b"sleep 5\n").expect("write");
+        assert_eq!(wait_for_title(&handle, &home, "sleep 5"), "sleep 5");
+        handle.write(b"\x03").expect("interrupt");
+        assert_eq!(wait_for_title(&handle, &home, &idle), idle);
+        service.terminate_session(id).expect("terminate");
+    }
 }

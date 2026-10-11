@@ -11,6 +11,7 @@ pub mod motion;
 pub mod palette;
 pub mod pane_drop;
 pub mod pane_menu;
+pub mod pane_title;
 pub mod shell;
 pub mod tabs;
 pub mod terminal_view;
