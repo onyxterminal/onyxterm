@@ -7,7 +7,8 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{document_cwd, document_title, render_document, DocumentPane};
+use crate::document::{document_cwd, document_title, render_document, DocumentPane, EditorPane, EditorState};
+use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle, PointerHandler};
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
@@ -27,6 +28,7 @@ use gpui::{
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use terminal_core::broadcast::{error::RecvError, Receiver};
@@ -903,6 +905,34 @@ impl Shell {
         })
     }
 
+    fn editor_pointer_handler(&self, _panel: PanelId, _cx: &mut Context<Self>) -> PointerHandler {
+        Rc::new(|_, _, _| {})
+    }
+
+    fn render_document_pane(
+        &self,
+        panel: PanelId,
+        document: &DocumentPane,
+        is_focused: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match document {
+            DocumentPane::Editor(EditorPane { state: EditorState::Ready(editor), view, .. }) => {
+                let frame = EditorFrame {
+                    rope: editor.buffer().rope().clone(),
+                    selections: editor.selections().clone(),
+                    is_focused,
+                    marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
+                };
+                let style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
+                let focus = is_focused.then(|| self.pane_focus(cx));
+                let handler = self.editor_pointer_handler(panel, cx);
+                editor_canvas(frame, style, view.clone(), focus, handler).into_any_element()
+            }
+            _ => render_document(document, &self.state.theme),
+        }
+    }
+
     fn field_input_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let register = self.input_registration(cx);
         canvas(|_bounds, _window, _cx| {}, move |bounds, _state, window, cx| register(bounds, window, cx))
@@ -913,7 +943,7 @@ impl Shell {
     fn render_pane(&self, panel: PanelId, cx: &mut Context<Self>) -> AnyElement {
         let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
         let content = if let Some(document) = self.documents.get(&panel) {
-            render_document(document, &self.state.theme)
+            self.render_document_pane(panel, document, is_focused, cx)
         } else if let Some(pane) = self.panes.get(&panel) {
             terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)))
                 .into_any_element()

@@ -6213,6 +6213,7 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "domain",
+ "editor-core",
  "gpui",
  "parking_lot",
  "serde",
