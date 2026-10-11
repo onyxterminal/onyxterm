@@ -168,6 +168,27 @@ fn row_button(
         .child(icon.sized(ROW_ACTION_ICON_PX))
 }
 
+fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandler) -> impl IntoElement {
+    let style = row_style(NEW_WORKSPACE_GROUP.into());
+    let shortcut = shortcut.map(|shortcut| menu_shortcut(shortcut, &style, theme));
+    menu_row(NEW_WORKSPACE_GROUP, style, theme)
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| create(window, cx))
+        .child(div().w(px(CHECK_COLUMN_PX)).flex_none())
+        .child(div().flex_1().child(NEW_WORKSPACE_LABEL))
+        .children(shortcut)
+}
+
+fn name_field(text: &SharedString, theme: &Theme) -> impl IntoElement {
+    focused_field(theme)
+        .h(px(theme.menu.row_height_px))
+        .flex_none()
+        .px(px(theme.menu.row_padding_x_px))
+        .rounded(px(theme.menu.row_radius_px))
+        .flex()
+        .items_center()
+        .child(caret_text(text, NAME_PLACEHOLDER, theme))
+}
+
 #[cfg(test)]
 mod paint_tests {
     use super::*;
@@ -223,25 +244,4 @@ mod paint_tests {
         assert_eq!(rename_count.get(), 1);
         cx.simulate_mouse_move(point(px(390.0), px(290.0)), None, Modifiers::default());
     }
-}
-
-fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandler) -> impl IntoElement {
-    let style = row_style(NEW_WORKSPACE_GROUP.into());
-    let shortcut = shortcut.map(|shortcut| menu_shortcut(shortcut, &style, theme));
-    menu_row(NEW_WORKSPACE_GROUP, style, theme)
-        .on_mouse_down(MouseButton::Left, move |_event, window, cx| create(window, cx))
-        .child(div().w(px(CHECK_COLUMN_PX)).flex_none())
-        .child(div().flex_1().child(NEW_WORKSPACE_LABEL))
-        .children(shortcut)
-}
-
-fn name_field(text: &SharedString, theme: &Theme) -> impl IntoElement {
-    focused_field(theme)
-        .h(px(theme.menu.row_height_px))
-        .flex_none()
-        .px(px(theme.menu.row_padding_x_px))
-        .rounded(px(theme.menu.row_radius_px))
-        .flex()
-        .items_center()
-        .child(caret_text(text, NAME_PLACEHOLDER, theme))
 }
