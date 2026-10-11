@@ -4,8 +4,8 @@
 use crate::app::AppState;
 use crate::app::PaletteChoice;
 use crate::command::{
-    close_palette, open_choice_palette, open_palette, palette_backspace, palette_move, palette_selected,
-    palette_selected_choice, palette_type, CommandId,
+    close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
+    CommandId,
 };
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
@@ -14,15 +14,15 @@ use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_
 use crate::palette as palette_render;
 use crate::settings::Settings;
 use crate::pane_title::OscTitle;
-use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
+use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle};
+use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
-    div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
-    FocusHandle,
-    IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, SharedString, Styled, Subscription, Task,
-    TitlebarOptions, Window, WindowOptions,
+    canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
+    FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
+    Styled, Subscription, Task, TitlebarOptions, UniformListScrollHandle, Window, WindowOptions,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -44,13 +44,13 @@ mod tab_strip;
 mod text_input;
 
 use tab_strip::TabField;
+use text_input::FieldTarget;
 
 const DEFAULT_SHELL: &str = "/bin/zsh";
 const LOGIN_FLAG: &str = "-l";
 const INITIAL_GRID: GridSize = GridSize { cols: 80, rows: 24 };
 const ESCAPE_KEY: &str = "escape";
 const ENTER_KEY: &str = "enter";
-const BACKSPACE_KEY: &str = "backspace";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
 const ABOUT_TITLE: &str = "Onyxterm";
@@ -111,6 +111,8 @@ pub struct Shell {
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     gear_bounds: pane_options::GearBounds,
+    palette_scroll: UniformListScrollHandle,
+    font_list_scroll: UniformListScrollHandle,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -143,6 +145,8 @@ impl Shell {
             pane_menu: None,
             pane_field: None,
             gear_bounds: pane_options::GearBounds::default(),
+            palette_scroll: UniformListScrollHandle::new(),
+            font_list_scroll: UniformListScrollHandle::new(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -207,6 +211,13 @@ impl Shell {
 
     fn run_command(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
         match id {
+            CommandId::Copy | CommandId::Paste | CommandId::SelectAll if self.active_field().is_some() => {
+                self.run_field_command(id, cx)
+            }
+            CommandId::OpenPalette => {
+                crate::command::CommandRegistry::dispatch(&mut self.state, id);
+                self.scroll_palette_to_top();
+            }
             CommandId::NewTab => self.open_tab(cx),
             CommandId::OpenSettings => {
                 self.state.settings_visible = !self.state.settings_visible;
@@ -264,30 +275,24 @@ impl Shell {
             return true;
         }
         if self.state.settings_visible {
-            if self.state.theme_editor_visible {
-                self.handle_theme_editor_key(keystroke, cx);
-            } else if self.state.theme_picker_visible {
-                self.handle_theme_picker_key(keystroke, cx);
-            } else if self.state.font_picker_visible {
-                self.handle_font_picker_key(keystroke, cx);
-            } else if keystroke.key == ESCAPE_KEY { self.state.settings_visible = false; }
+            let is_consumed = self.handle_settings_key(keystroke, cx);
             cx.notify();
-            return true;
+            return is_consumed;
         }
         if self.is_workspace_menu_open {
-            self.handle_menu_key(keystroke, cx);
-            return true;
+            return self.handle_menu_key(keystroke, cx);
         }
         if self.is_pane_menu_open() {
             self.handle_pane_menu_key(keystroke, window, cx);
             return true;
         }
         if self.pane_field.is_some() {
-            self.handle_pane_field_key(keystroke, cx);
-            return true;
+            return self.handle_pane_field_key(keystroke, cx);
         }
         if self.tab_field.is_some() {
-            self.handle_tab_field_key(keystroke, cx);
+            return self.handle_tab_field_key(keystroke, cx);
+        }
+        if self.state.palette_visible && self.handle_palette_key(keystroke, window, cx) {
             return true;
         }
         if let Some(id) = self.resolve_combo(event) {
@@ -295,8 +300,7 @@ impl Shell {
             return true;
         }
         if self.state.palette_visible {
-            self.handle_palette_key(keystroke, window, cx);
-            return true;
+            return !is_composed_text(keystroke, false);
         }
         self.send_key_to_terminal(event, cx)
     }
@@ -339,22 +343,21 @@ impl Shell {
         cx.notify();
     }
 
-    fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
-        let modifiers = keystroke.modifiers;
+    fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         match keystroke.key.as_str() {
             ESCAPE_KEY => close_palette(&mut self.state),
             ENTER_KEY => self.run_palette_selection(window, cx),
-            BACKSPACE_KEY => palette_backspace(&mut self.state),
-            UP_KEY => palette_move(&mut self.state, -1),
-            DOWN_KEY => palette_move(&mut self.state, 1),
-            _ if modifiers.control || modifiers.platform => {}
-            _ => {
-                if let Some(text) = keystroke.key_char.as_deref() {
-                    palette_type(&mut self.state, text);
-                }
-            }
+            UP_KEY => self.move_palette_selection(-1, ScrollStrategy::Top),
+            DOWN_KEY => self.move_palette_selection(1, ScrollStrategy::Bottom),
+            _ => return self.edit_field(FieldTarget::PaletteQuery, keystroke, cx),
         }
         cx.notify();
+        true
+    }
+
+    fn move_palette_selection(&mut self, step: isize, strategy: ScrollStrategy) {
+        palette_move(&mut self.state, step);
+        self.palette_scroll.scroll_to_item(self.state.palette_selection, strategy);
     }
 
     fn run_palette_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -377,26 +380,27 @@ impl Shell {
         }
     }
 
-    fn handle_menu_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        let Some(field) = self.menu_field.as_mut() else {
+    fn handle_menu_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+        if self.menu_field.is_none() {
             if keystroke.key == ESCAPE_KEY {
                 self.close_workspace_menu(cx);
             }
-            return;
-        };
+            return true;
+        }
         match keystroke.key.as_str() {
             ESCAPE_KEY => self.menu_field = None,
             ENTER_KEY => self.commit_menu_field(cx),
-            _ => edit_field(&mut field.text, keystroke),
+            _ => return self.type_into_field(FieldTarget::MenuName, keystroke, cx),
         }
         cx.notify();
+        true
     }
 
     fn commit_menu_field(&mut self, cx: &mut Context<Self>) {
         let Some(field) = self.menu_field.take() else {
             return;
         };
-        let name = field.text.trim().to_string();
+        let name = field.input.text().trim().to_string();
         if name.is_empty() {
             return;
         }
@@ -420,11 +424,16 @@ impl Shell {
             .map(|entry| PaletteChoice { key: entry.workspace.id.to_string(), title: entry.workspace.name.clone() })
             .collect();
         open_choice_palette(&mut self.state, choices);
+        self.scroll_palette_to_top();
+    }
+
+    fn scroll_palette_to_top(&self) {
+        self.palette_scroll.scroll_to_item(0, ScrollStrategy::Top);
     }
 
     fn start_new_workspace(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = true;
-        self.menu_field = Some(MenuField { renaming: None, text: SharedString::default() });
+        self.menu_field = Some(MenuField { renaming: None, input: TextField::default() });
         cx.notify();
     }
 
@@ -432,7 +441,7 @@ impl Shell {
         let Some(name) = self.workspace_by_key(key).and_then(|id| self.model.workspace_name(id)) else {
             return;
         };
-        self.menu_field = Some(MenuField { renaming: Some(key.clone()), text: name.to_string().into() });
+        self.menu_field = Some(MenuField { renaming: Some(key.clone()), input: TextField::new(name) });
         cx.notify();
     }
 
@@ -722,14 +731,22 @@ impl Shell {
     }
 
     fn pane_focus(&self, cx: &mut Context<Self>) -> PaneFocus {
+        PaneFocus { marked_text: self.marked_text.clone(), register_input: self.input_registration(cx) }
+    }
+
+    fn input_registration(&self, cx: &mut Context<Self>) -> InputRegistration {
         let focus_handle = self.focus_handle.clone();
         let shell = cx.entity();
-        PaneFocus {
-            marked_text: self.marked_text.clone(),
-            register_input: Box::new(move |bounds, window, cx| {
-                window.handle_input(&focus_handle, ElementInputHandler::new(bounds, shell), cx)
-            }),
-        }
+        Box::new(move |bounds, window, cx| {
+            window.handle_input(&focus_handle, ElementInputHandler::new(bounds, shell), cx)
+        })
+    }
+
+    fn field_input_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let register = self.input_registration(cx);
+        canvas(|_bounds, _window, _cx| {}, move |bounds, _state, window, cx| register(bounds, window, cx))
+            .absolute()
+            .inset_0()
     }
 
     fn render_pane(&self, panel: PanelId, cx: &mut Context<Self>) -> AnyElement {
@@ -769,14 +786,15 @@ impl Render for Shell {
         }
         self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
-        let palette_overlay = palette_render::build_overlay(&self.state, theme);
+        let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll);
         let palette_visible = self.state.palette_visible;
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
-        let settings_overlay = self.state.settings_visible.then(|| self.render_settings(cx));
+        let settings_overlay = self.state.settings_visible.then(|| self.render_settings(window, cx));
+        let field_input = self.active_field().map(|_| self.field_input_probe(cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
         let margin = px(theme.layout.window_margin_px);
@@ -811,6 +829,7 @@ impl Render for Shell {
             .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
             .children(settings_overlay)
+            .children(field_input)
     }
 }
 
@@ -841,22 +860,6 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
-}
-
-fn edit_field(text: &mut SharedString, keystroke: &Keystroke) {
-    let modifiers = keystroke.modifiers;
-    if keystroke.key == BACKSPACE_KEY {
-        let mut edited = text.to_string();
-        edited.pop();
-        *text = edited.into();
-        return;
-    }
-    if modifiers.control || modifiers.platform {
-        return;
-    }
-    if let Some(typed) = keystroke.key_char.as_deref() {
-        *text = format!("{text}{typed}").into();
-    }
 }
 
 fn write_to(handle: &TerminalHandle, bytes: &[u8]) {

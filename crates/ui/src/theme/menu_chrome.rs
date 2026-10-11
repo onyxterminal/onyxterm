@@ -1,11 +1,20 @@
 use super::{box_shadows, Theme};
-use gpui::{div, prelude::*, px, Div, ElementId, FontWeight, Hsla, SharedString, Stateful};
+use crate::text_field::TextField;
+use gpui::{canvas, div, prelude::*, px, AnyElement, Div, ElementId, FontWeight, Hsla, SharedString, Stateful};
+use std::ops::Range;
 
-pub const CARET: &str = "\u{258f}";
+const CARET_WIDTH_PX: f32 = 1.5;
+const FIELD_SELECTION_ALPHA: f32 = 0.35;
 const SEPARATOR_MARGIN_Y_PX: f32 = 5.0;
 const SEPARATOR_THICKNESS_PX: f32 = 1.0;
 const FOCUS_RING_ALPHA: f32 = 0.25;
 const FOCUS_RING_SPREAD_PX: f32 = 3.0;
+
+#[derive(Clone, Copy)]
+struct SpanStyle {
+    is_selected: bool,
+    is_marked: bool,
+}
 
 pub struct MenuRowStyle {
     pub group: SharedString,
@@ -101,11 +110,55 @@ fn focus_ring(accent: Hsla) -> gpui::BoxShadow {
     }
 }
 
-pub fn caret_text(text: &str, placeholder: &str, theme: &Theme) -> Div {
-    let caret = div().text_color(theme.accent.primary).child(CARET);
-    let field = div().flex().flex_row().items_center();
-    if text.is_empty() {
-        return field.child(caret).child(div().text_color(theme.text.subtle).child(placeholder.to_string()));
+pub fn field_text(field: &TextField, placeholder: &str, theme: &Theme) -> Div {
+    let row = div().flex().flex_row().whitespace_nowrap();
+    if field.is_empty() {
+        let placeholder = div().text_color(theme.text.subtle).child(placeholder.to_string());
+        return row.child(caret(field, theme)).child(placeholder);
     }
-    field.child(div().text_color(theme.text.default).child(text.to_string())).child(caret)
+    row.children(field_spans(field, theme))
+}
+
+fn field_spans(field: &TextField, theme: &Theme) -> Vec<AnyElement> {
+    let text = field.text();
+    let selection = field.selection();
+    let marked = field.marked_range().unwrap_or_default();
+    let mut cuts = vec![0, text.len(), field.caret(), selection.start, selection.end, marked.start, marked.end];
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut spans = Vec::new();
+    for span in cuts.windows(2).map(|pair| pair[0]..pair[1]) {
+        if span.start == field.caret() && selection.is_empty() {
+            spans.push(caret(field, theme).into_any_element());
+        }
+        let style = SpanStyle { is_selected: covers(&selection, &span), is_marked: covers(&marked, &span) };
+        spans.push(field_span(text[span].to_string(), style, theme).into_any_element());
+    }
+    if field.caret() == text.len() && selection.is_empty() {
+        spans.push(caret(field, theme).into_any_element());
+    }
+    spans
+}
+
+fn covers(outer: &Range<usize>, inner: &Range<usize>) -> bool {
+    !outer.is_empty() && outer.start <= inner.start && inner.end <= outer.end
+}
+
+fn field_span(text: String, style: SpanStyle, theme: &Theme) -> Div {
+    div()
+        .text_color(theme.text.default)
+        .when(style.is_selected, |span| span.bg(theme.accent.primary.opacity(FIELD_SELECTION_ALPHA)))
+        .when(style.is_marked, |span| span.underline())
+        .child(text)
+}
+
+fn caret(field: &TextField, theme: &Theme) -> Div {
+    let caret_bounds = field.caret_bounds().clone();
+    let probe = canvas(move |bounds, _window, _cx| caret_bounds.set(Some(bounds)), |_bounds, _state, _window, _cx| {});
+    div()
+        .flex_none()
+        .w(px(CARET_WIDTH_PX))
+        .mx(px(-CARET_WIDTH_PX / 2.0))
+        .bg(theme.accent.primary)
+        .child(probe.size_full())
 }

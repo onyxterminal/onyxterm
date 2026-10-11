@@ -5,8 +5,8 @@ use crate::input::wheel_bytes;
 use crate::theme::Theme;
 use gpui::{
     canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, ContentMask, DispatchPhase, Font,
-    FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent,
-    SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
+    FontWeight, Hitbox, HitboxBehavior, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    ScrollWheelEvent, SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -210,12 +210,19 @@ pub fn cursor_bounds(content: Bounds<Pixels>, cell: Size<Pixels>, cursor: Cursor
     Bounds::new(origin, cell)
 }
 
-pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<PaneFocus>) -> Canvas<Frame> {
+pub fn terminal_canvas(
+    pane: TerminalPane,
+    style: TerminalStyle,
+    focus: Option<PaneFocus>,
+) -> Canvas<(Frame, Hitbox)> {
     let prepare_style = style.clone();
     let prepare_handle = pane.handle.clone();
     canvas(
-        move |_bounds, window, _cx| prepare_frame(&prepare_handle, &prepare_style, window),
-        move |bounds, frame, window, cx| {
+        move |bounds, window, _cx| {
+            let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+            (prepare_frame(&prepare_handle, &prepare_style, window), hitbox)
+        },
+        move |bounds, (frame, hitbox), window, cx| {
             let bounds = content_bounds(bounds, style.insets);
             let is_focused = focus.is_some();
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
@@ -229,7 +236,7 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<P
                 (focus.register_input)(bounds, window, cx);
             }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
-            register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid }, window);
+            register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid, hitbox }, window);
         },
     )
     .size_full()
@@ -248,11 +255,12 @@ pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<
     .size_full()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct PaneArea {
     bounds: Bounds<Pixels>,
     cell: Size<Pixels>,
     grid: GridSize,
+    hitbox: Hitbox,
 }
 
 impl PaneArea {
@@ -263,23 +271,25 @@ impl PaneArea {
 
 fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Window) {
     let down = pane.clone();
+    let down_area = area.clone();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _cx| {
-        let is_left_press_inside = event.button == MouseButton::Left && area.bounds.contains(&event.position);
-        if phase != DispatchPhase::Bubble || !is_left_press_inside {
+        let is_inside = down_area.bounds.contains(&event.position) && down_area.hitbox.is_hovered(window);
+        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !is_inside {
             return;
         }
-        let (point, side) = area.point_at(event.position);
+        let (point, side) = down_area.point_at(event.position);
         down.handle.terminal().start_selection(selection_kind_for(event.click_count), point, side);
         down.pointer.borrow_mut().is_selecting = true;
         window.refresh();
     });
     let drag = pane.clone();
+    let drag_area = area.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
         let is_dragging = event.pressed_button == Some(MouseButton::Left) && drag.pointer.borrow().is_selecting;
         if phase != DispatchPhase::Bubble || !is_dragging {
             return;
         }
-        let (point, side) = area.point_at(event.position);
+        let (point, side) = drag_area.point_at(event.position);
         drag.handle.terminal().update_selection(point, side);
         window.refresh();
     });
@@ -290,7 +300,8 @@ fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Wind
         }
     });
     window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, _cx| {
-        if phase != DispatchPhase::Bubble || !area.bounds.contains(&event.position) {
+        let is_over_pane = area.bounds.contains(&event.position) && area.hitbox.should_handle_scroll(window);
+        if phase != DispatchPhase::Bubble || !is_over_pane {
             return;
         }
         let delta = f32::from(event.delta.pixel_delta(area.cell.height).y);

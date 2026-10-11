@@ -4,14 +4,15 @@
 use crate::app::AppState;
 use crate::command::filtered_choices;
 use crate::theme::icons::Icon;
-use crate::theme::menu_chrome::caret_text;
+use crate::text_field::TextField;
+use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme};
-use gpui::{div, prelude::*, px, Div, Hsla, SharedString};
-use std::ops::Range;
+use gpui::{div, prelude::*, px, uniform_list, Div, Hsla, SharedString, UniformListScrollHandle};
 
 pub const CHOICE_CATEGORY: &str = "Workspaces";
 const QUERY_PLACEHOLDER: &str = "Search commands";
 const NO_RESULTS: &str = "No Results";
+const RESULTS_ID: &str = "palette-results";
 const FOOTER_HINTS: [(&str, &str); 3] = [("\u{2191}\u{2193}", "Navigate"), ("\u{21b5}", "Run"), ("esc", "Close")];
 const SEARCH_PADDING_X_PX: f32 = 16.0;
 const SEARCH_GAP_PX: f32 = 10.0;
@@ -38,7 +39,7 @@ pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
     }
     state
         .registry
-        .search(&state.palette_query)
+        .search(state.palette_query.text())
         .into_iter()
         .map(|cmd| PaletteRow {
             title: cmd.title.to_string(),
@@ -48,15 +49,7 @@ pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
         .collect()
 }
 
-pub fn visible_rows(len: usize, selected: usize, max_rows: usize) -> Range<usize> {
-    if len <= max_rows {
-        return 0..len;
-    }
-    let start = (selected + 1).saturating_sub(max_rows).min(len - max_rows);
-    start..start + max_rows
-}
-
-pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
+pub fn build_overlay(state: &AppState, theme: &Theme, scroll: &UniformListScrollHandle) -> Div {
     let palette = theme.palette;
     div().absolute().inset_0().flex().flex_col().items_center().pt(px(palette.top_px)).child(
         div()
@@ -72,12 +65,12 @@ pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
             .flex()
             .flex_col()
             .child(search_row(&state.palette_query, theme))
-            .child(results(&palette_entries(state), state.palette_selection, theme))
+            .child(results(palette_entries(state), state.palette_selection, theme, scroll))
             .child(footer(theme)),
     )
 }
 
-fn search_row(query: &str, theme: &Theme) -> Div {
+fn search_row(query: &TextField, theme: &Theme) -> Div {
     let palette = theme.palette;
     div()
         .h(px(palette.search_height_px))
@@ -91,10 +84,10 @@ fn search_row(query: &str, theme: &Theme) -> Div {
         .border_color(theme.border.muted)
         .text_size(px(theme.ui_font.palette_input_px))
         .child(Icon::Magnifier.sized(palette.search_icon_px))
-        .child(caret_text(query, QUERY_PLACEHOLDER, theme))
+        .child(field_text(query, QUERY_PLACEHOLDER, theme))
 }
 
-fn results(rows: &[PaletteRow], selected: usize, theme: &Theme) -> Div {
+fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &UniformListScrollHandle) -> Div {
     let list = div().p(px(RESULTS_PADDING_PX)).flex().flex_col();
     if rows.is_empty() {
         return list.child(
@@ -108,8 +101,13 @@ fn results(rows: &[PaletteRow], selected: usize, theme: &Theme) -> Div {
                 .child(NO_RESULTS),
         );
     }
-    let window = visible_rows(rows.len(), selected, theme.palette.max_rows);
-    list.children(rows[window.clone()].iter().zip(window).map(|(row, index)| result_row(row, index == selected, theme)))
+    let height = theme.palette.row_height_px * rows.len().min(theme.palette.max_rows) as f32;
+    let row_theme = theme.clone();
+    let count = rows.len();
+    let scrolling_rows = uniform_list(RESULTS_ID, count, move |range, _window, _cx| {
+        range.map(|index| result_row(&rows[index], index == selected, &row_theme)).collect::<Vec<_>>()
+    });
+    list.child(scrolling_rows.h(px(height)).track_scroll(scroll.clone()))
 }
 
 fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {

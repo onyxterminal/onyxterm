@@ -1,6 +1,10 @@
 use super::{hex_to_hsla, Theme};
+use crate::text_field::TextField;
 use gpui::{Hsla, Rgba};
 use serde::{Deserialize, Serialize};
+
+const HEX_PREFIX: char = '#';
+const HEX_COLOR_CHARS: usize = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorField {
@@ -131,8 +135,22 @@ fn shifted_lightness(mut color: Hsla, shift: f32) -> Hsla {
     color
 }
 
+pub fn hex_color_field(saved: &str) -> TextField {
+    TextField::new(saved).with_filter(is_hex_color_char).with_max_chars(HEX_COLOR_CHARS).with_all_selected()
+}
+
+pub fn normalized_hex(typed: &str) -> String {
+    format!("{HEX_PREFIX}{}", typed.trim().trim_start_matches(HEX_PREFIX))
+}
+
+fn is_hex_color_char(typed: char) -> bool {
+    typed == HEX_PREFIX || typed.is_ascii_hexdigit()
+}
+
 fn valid_hex(value: &str) -> bool {
-    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == HEX_COLOR_CHARS
+        && value.starts_with(HEX_PREFIX)
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn hex(value: Hsla) -> String {

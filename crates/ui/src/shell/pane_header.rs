@@ -2,7 +2,7 @@ use super::islands::pane_group;
 use super::Shell;
 use crate::command::CommandId;
 use crate::theme::icons::Icon;
-use crate::theme::menu_chrome::{caret_text, focused_field};
+use crate::theme::menu_chrome::{field_text, focused_field};
 use domain::PanelId;
 use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 
@@ -86,7 +86,7 @@ impl Shell {
                 .min_w(px(0.0))
                 .px(px(RENAME_PADDING_X_PX))
                 .rounded(px(RENAME_RADIUS_PX))
-                .child(caret_text(&field.text, &self.pane_display_title(panel), theme));
+                .child(field_text(&field.input, &self.pane_display_title(panel), theme));
         }
         let (color, weight) = match is_focused {
             true => (theme.text.default, FontWeight::SEMIBOLD),

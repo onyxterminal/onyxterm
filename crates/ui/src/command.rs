@@ -130,7 +130,7 @@ pub fn filtered_choices(state: &AppState) -> Vec<&PaletteChoice> {
     let Some(choices) = state.palette_choices.as_ref() else {
         return Vec::new();
     };
-    let needle = state.palette_query.trim().to_ascii_lowercase();
+    let needle = state.palette_query.text().trim().to_ascii_lowercase();
     let mut scored: Vec<(&PaletteChoice, usize)> = choices
         .iter()
         .filter_map(|choice| fuzzy_score(&choice.title.to_ascii_lowercase(), &needle).map(|score| (choice, score)))
@@ -163,12 +163,12 @@ pub fn toggle_palette(state: &mut AppState) {
 }
 
 pub fn palette_type(state: &mut AppState, text: &str) {
-    state.palette_query.push_str(text);
+    state.palette_query.insert(text);
     state.palette_selection = 0;
 }
 
 pub fn palette_backspace(state: &mut AppState) {
-    state.palette_query.pop();
+    state.palette_query.delete_backward();
     state.palette_selection = 0;
 }
 

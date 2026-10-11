@@ -1,12 +1,21 @@
-use super::{Shell, BACKSPACE_KEY, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
+use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::settings::{filtered_fonts, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
     FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
-use crate::theme::custom::ColorField;
+use crate::theme::custom::{hex_color_field, normalized_hex, ColorField};
+use crate::theme::menu_chrome::field_text;
 use crate::theme::{hex_to_hsla, Theme, ThemeKind};
-use gpui::{div, prelude::*, px, Context, Div, Keystroke, MouseButton, SharedString, Stateful};
+use gpui::{div, prelude::*, px, uniform_list, Context, Div, Keystroke, MouseButton, ScrollStrategy, SharedString,
+    Stateful, Window};
+use std::ops::Range;
 
 const FONT_ROWS: usize = 9;
+const FONT_ROW_PX: f32 = 34.0;
+const CARD_WINDOW_MARGIN_PX: f32 = 24.0;
+const SYSTEM_MONOSPACE: &str = "ui-monospace";
+const SYSTEM_MONOSPACE_LABEL: &str = "System monospace";
+const FONT_SEARCH_PLACEHOLDER: &str = "Search installed fonts\u{2026}";
+const HEX_PLACEHOLDER: &str = "#RRGGBB";
 
 #[derive(Clone, Copy)]
 enum SettingAction { ThemePicker, Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, Close }
@@ -31,6 +40,7 @@ impl Shell {
             let fonts = self.font_picker_matches(cx);
             self.state.font_picker_selection = fonts.iter()
                 .position(|name| name == &self.state.settings.font_family).unwrap_or(0);
+            self.font_list_scroll.scroll_to_item(self.state.font_picker_selection, ScrollStrategy::Center);
             cx.notify();
             return;
         }
@@ -81,10 +91,10 @@ impl Shell {
     }
 
     fn font_picker_matches(&self, cx: &Context<Self>) -> Vec<String> {
-        let query = self.state.font_picker_query.trim().to_lowercase();
+        let query = self.state.font_picker_query.text().trim().to_lowercase();
         let mut fonts = filtered_fonts(&cx.text_system().all_font_names(), &query);
-        if "system monospace".contains(&query) {
-            fonts.insert(0, "ui-monospace".into());
+        if SYSTEM_MONOSPACE_LABEL.to_lowercase().contains(&query) {
+            fonts.insert(0, SYSTEM_MONOSPACE.into());
         }
         fonts
     }
@@ -132,7 +142,7 @@ impl Shell {
     }
 
     fn edit_custom_color(&mut self, field: ColorField, cx: &mut Context<Self>) {
-        self.state.theme_color_input = "#".into();
+        self.state.theme_color_input = hex_color_field(self.state.settings.custom_colors.get(field));
         self.state.theme_color_field = Some(field);
         self.state.settings_error = None;
         cx.notify();
@@ -140,7 +150,7 @@ impl Shell {
 
     fn commit_custom_color(&mut self, cx: &mut Context<Self>) {
         let Some(field) = self.state.theme_color_field else { return; };
-        match self.state.settings.set_custom_color(field, &self.state.theme_color_input) {
+        match self.state.settings.set_custom_color(field, &normalized_hex(self.state.theme_color_input.text())) {
             Ok(()) => {
                 self.state.theme_color_field = None;
                 self.state.settings_error = None;
@@ -151,7 +161,34 @@ impl Shell {
         }
     }
 
-    pub(super) fn handle_theme_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
+    pub(super) fn settings_field(&self) -> Option<FieldTarget> {
+        if self.state.theme_editor_visible {
+            return self.state.theme_color_field.map(|_| FieldTarget::HexColor);
+        }
+        if self.state.theme_picker_visible {
+            return None;
+        }
+        self.state.font_picker_visible.then_some(FieldTarget::FontQuery)
+    }
+
+    pub(super) fn handle_settings_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
+        if self.state.theme_editor_visible {
+            return self.handle_theme_editor_key(key, cx);
+        }
+        if self.state.theme_picker_visible {
+            self.handle_theme_picker_key(key, cx);
+            return true;
+        }
+        if self.state.font_picker_visible {
+            return self.handle_font_picker_key(key, cx);
+        }
+        if key.key == ESCAPE_KEY {
+            self.state.settings_visible = false;
+        }
+        true
+    }
+
+    fn handle_theme_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
         match key.key.as_str() {
             ESCAPE_KEY => self.state.theme_picker_visible = false,
             UP_KEY => self.state.theme_picker_selection =
@@ -163,10 +200,10 @@ impl Shell {
         }
     }
 
-    pub(super) fn handle_theme_editor_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
+    fn handle_theme_editor_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
         if self.state.theme_color_field.is_none() {
             if key.key == ESCAPE_KEY { self.state.theme_editor_visible = false; }
-            return;
+            return true;
         }
         match key.key.as_str() {
             ESCAPE_KEY => {
@@ -174,19 +211,12 @@ impl Shell {
                 self.state.settings_error = None;
             }
             ENTER_KEY => self.commit_custom_color(cx),
-            BACKSPACE_KEY => { self.state.theme_color_input.pop(); }
-            _ if !key.modifiers.control && !key.modifiers.platform => {
-                if let Some(text) = key.key_char.as_deref() {
-                    if self.state.theme_color_input.len() < 7 {
-                        self.state.theme_color_input.push_str(text);
-                    }
-                }
-            }
-            _ => {}
+            _ => return self.type_into_field(FieldTarget::HexColor, key, cx),
         }
+        true
     }
 
-    pub(super) fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
+    fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
         match key.key.as_str() {
             ESCAPE_KEY => self.state.font_picker_visible = false,
             ENTER_KEY => {
@@ -198,22 +228,16 @@ impl Shell {
             UP_KEY | DOWN_KEY => {
                 let count = self.font_picker_matches(cx).len();
                 if count > 0 {
-                    let step = if key.key == UP_KEY { count - 1 } else { 1 };
+                    let (step, strategy) = if key.key == UP_KEY {
+                        (count - 1, ScrollStrategy::Top)
+                    } else { (1, ScrollStrategy::Bottom) };
                     self.state.font_picker_selection = (self.state.font_picker_selection + step) % count;
+                    self.font_list_scroll.scroll_to_item(self.state.font_picker_selection, strategy);
                 }
             }
-            BACKSPACE_KEY => {
-                self.state.font_picker_query.pop();
-                self.state.font_picker_selection = 0;
-            }
-            _ if !key.modifiers.control && !key.modifiers.platform => {
-                if let Some(text) = key.key_char.as_deref() {
-                    self.state.font_picker_query.push_str(text);
-                    self.state.font_picker_selection = 0;
-                }
-            }
-            _ => {}
+            _ => return self.type_into_field(FieldTarget::FontQuery, key, cx),
         }
+        true
     }
 
     fn settings_button(&self, label: &'static str, action: SettingAction, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -228,13 +252,14 @@ impl Shell {
             }))
     }
 
-    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        let card = if self.state.theme_editor_visible { self.render_theme_editor(cx) }
-            else if self.state.theme_picker_visible { self.render_theme_picker(cx) }
-            else if self.state.font_picker_visible { self.render_font_picker(cx) }
-            else { self.render_settings_card(cx) };
+        let (card_id, card) = if self.state.theme_editor_visible { ("theme-editor-card", self.render_theme_editor(cx)) }
+            else if self.state.theme_picker_visible { ("theme-picker-card", self.render_theme_picker(cx)) }
+            else if self.state.font_picker_visible { ("font-picker-card", self.render_font_picker(cx)) }
+            else { ("settings-card", self.render_settings_card(cx)) };
+        let max_height = window.viewport_size().height - px(CARD_WINDOW_MARGIN_PX * 2.0);
         div().absolute().inset_0().flex().items_center().justify_center()
             .bg(theme.chrome.backdrop).occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
@@ -244,7 +269,8 @@ impl Shell {
                 shell.state.theme_editor_visible = false;
                 cx.notify();
             }))
-            .child(card.w(px(520.0 * scale)).p(px(22.0 * scale))
+            .child(card.id(card_id).max_h(max_height).overflow_y_scroll()
+                .w(px(520.0 * scale)).p(px(22.0 * scale))
                 .rounded(px(12.0 * scale)).bg(theme.surface.raised)
                 .border_1().border_color(theme.border.default).occlude()
                 .font_family(SharedString::from(theme.ui_font.family.clone()))
@@ -271,7 +297,7 @@ impl Shell {
             .child(row("Theme", settings.theme.label().into(), vec![
                 self.settings_button("Choose theme", SettingAction::ThemePicker, cx),
                 self.settings_button("Customize", SettingAction::Customize, cx)]))
-            .child(row("Terminal font", if settings.font_family == "ui-monospace" { "System monospace".into() }
+            .child(row("Terminal font", if settings.font_family == SYSTEM_MONOSPACE { SYSTEM_MONOSPACE_LABEL.into() }
                 else { settings.font_family.clone() }, vec![self.settings_button("Choose", SettingAction::FontPicker, cx)]))
             .child(row("Terminal text size", format!("{} px", settings.font_size as u32), vec![
                 self.settings_button("−", SettingAction::FontSmaller, cx),
@@ -290,7 +316,9 @@ impl Shell {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         let fonts = self.font_picker_matches(cx);
-        let range = crate::palette::visible_rows(fonts.len(), self.state.font_picker_selection, FONT_ROWS);
+        let font_count = fonts.len();
+        let list_height = px(FONT_ROW_PX * scale * font_count.min(FONT_ROWS) as f32);
+        let font_rows = cx.processor(move |shell, range: Range<usize>, _window, cx| shell.font_rows(&fonts, range, cx));
         div().child(div().flex().items_center().justify_between().mb(px(14.0 * scale))
                 .child(div().text_size(px(theme.ui_font.palette_input_px)).child("Choose terminal font"))
                 .child(div().id("font-back").cursor_pointer().child("Back")
@@ -299,28 +327,32 @@ impl Shell {
                     }))))
             .child(div().h(px(38.0 * scale)).px(px(10.0 * scale)).flex().items_center()
                 .rounded(px(6.0 * scale)).bg(theme.surface.sunken)
-                .text_color(theme.text.default)
-                .child(if self.state.font_picker_query.is_empty() {
-                    "Search installed fonts…".into()
-                } else { format!("{}│", self.state.font_picker_query) }))
-            .child(div().mt(px(10.0 * scale)).flex().flex_col()
-                .children(fonts[range.clone()].iter().enumerate().map(|(offset, name)| {
-                    let selected = range.start + offset == self.state.font_picker_selection;
-                    let family = name.clone();
-                    div().id(("font-option", range.start + offset))
-                        .h(px(34.0 * scale)).px(px(10.0 * scale)).flex().items_center()
-                        .rounded(px(5.0 * scale)).cursor_pointer()
-                        .bg(if selected { theme.accent.primary } else { theme.surface.raised })
-                        .text_color(if selected { theme.text.inverse } else { theme.text.default })
-                        .child(if name == "ui-monospace" { "System monospace".into() } else { name.clone() })
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
-                            cx.stop_propagation(); shell.select_font(family.clone(), cx);
-                        }))
-                })))
-            .when(fonts.is_empty(), |el| el.child(div().py(px(16.0 * scale))
+                .child(field_text(&self.state.font_picker_query, FONT_SEARCH_PLACEHOLDER, theme)))
+            .child(uniform_list("font-options", font_count, font_rows)
+                .track_scroll(self.font_list_scroll.clone())
+                .mt(px(10.0 * scale)).h(list_height))
+            .when(font_count == 0, |el| el.child(div().py(px(16.0 * scale))
                 .text_color(theme.text.muted).child("No matching fonts")))
             .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
-                .child(format!("{} matching fonts  ·  Type to search, ↑↓ to move, Enter to select", fonts.len())))
+                .child(format!("{font_count} matching fonts  ·  Type to search, ↑↓ to move, Enter to select")))
+    }
+
+    fn font_rows(&self, fonts: &[String], range: Range<usize>, cx: &mut Context<Self>) -> Vec<Stateful<Div>> {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        range.filter_map(|index| fonts.get(index).map(|name| (index, name.clone()))).map(|(index, name)| {
+            let selected = index == self.state.font_picker_selection;
+            let label = if name == SYSTEM_MONOSPACE { SYSTEM_MONOSPACE_LABEL.into() } else { name.clone() };
+            div().id(("font-option", index))
+                .h(px(FONT_ROW_PX * scale)).px(px(10.0 * scale)).flex().items_center()
+                .rounded(px(5.0 * scale)).cursor_pointer()
+                .bg(if selected { theme.accent.primary } else { theme.surface.raised })
+                .text_color(if selected { theme.text.inverse } else { theme.text.default })
+                .child(label)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
+                    cx.stop_propagation(); shell.select_font(name.clone(), cx);
+                }))
+        }).collect()
     }
 
     fn theme_preview(&self, kind: ThemeKind) -> Theme {
@@ -391,7 +423,8 @@ impl Shell {
                 let saved = self.state.settings.custom_colors.get(field);
                 let color = hex_to_hsla(saved, "custom swatch").expect("validated custom color");
                 let editing = self.state.theme_color_field == Some(field);
-                let label = if editing { format!("{}│", self.state.theme_color_input) } else { saved.into() };
+                let label = if editing { field_text(&self.state.theme_color_input, HEX_PLACEHOLDER, theme) }
+                    else { div().child(saved.to_string()) };
                 div().id(("custom-color", index)).h(px(42.0 * scale))
                     .flex().items_center().justify_between()
                     .border_b_1().border_color(theme.border.muted).cursor_pointer()
@@ -408,7 +441,7 @@ impl Shell {
             .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
                 .child(self.state.settings_error.clone().unwrap_or_else(||
                     if self.state.theme_color_field.is_some() {
-                        "Type six hex digits after #, then press Enter. Escape cancels.".into()
+                        "Type a color like #RRGGBB, then press Enter. Escape cancels.".into()
                     } else { "Click a color to edit it. Changes are saved automatically.".into() })))
     }
 

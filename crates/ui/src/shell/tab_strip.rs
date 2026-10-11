@@ -1,9 +1,10 @@
 use super::pane_drag::bounds_probe;
-use super::{edit_field, Shell, ENTER_KEY, ESCAPE_KEY};
+use super::{FieldTarget, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::command::CommandId;
 use crate::tabs::numbered_tab_label;
 use crate::theme::icons::Icon;
-use crate::theme::menu_chrome::caret_text;
+use crate::text_field::TextField;
+use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme};
 use crate::workspace_menu::workspace_button_label;
 use gpui::{
@@ -29,7 +30,7 @@ static LOGO: LazyLock<Arc<Image>> =
 
 enum TabLabel {
     Title(String),
-    Editing(SharedString),
+    Editing(TextField),
 }
 
 struct TabPill {
@@ -85,7 +86,7 @@ impl Shell {
             .enumerate()
             .map(|(index, title)| {
                 let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
-                    Some(field) => TabLabel::Editing(field.text.clone()),
+                    Some(field) => TabLabel::Editing(field.input.clone()),
                     None => TabLabel::Title(title),
                 };
                 TabPill { index, label, is_active: index == active }
@@ -100,7 +101,7 @@ impl Shell {
         let hover_fill = theme.chrome.control_fill;
         let is_raised = pill.is_active || matches!(pill.label, TabLabel::Editing(_));
         let content = match pill.label {
-            TabLabel::Editing(text) => caret_text(&text, &numbered_tab_label(index), theme),
+            TabLabel::Editing(input) => field_text(&input, &numbered_tab_label(index), theme),
             TabLabel::Title(title) => div().child(title),
         };
         let mut shadows = match is_raised {
@@ -207,21 +208,18 @@ impl Shell {
         let Some(tab) = self.model.tabs().iter().nth(index) else {
             return;
         };
-        let text = tab.name().map(str::to_string).unwrap_or_default().into();
-        self.tab_field = Some(TabField { index, text });
+        let input = TextField::new(tab.name().unwrap_or_default());
+        self.tab_field = Some(TabField { index, input });
     }
 
-    pub(super) fn handle_tab_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    pub(super) fn handle_tab_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         match keystroke.key.as_str() {
             ESCAPE_KEY => self.tab_field = None,
             ENTER_KEY => self.commit_tab_field(),
-            _ => {
-                if let Some(field) = self.tab_field.as_mut() {
-                    edit_field(&mut field.text, keystroke);
-                }
-            }
+            _ => return self.type_into_field(FieldTarget::TabName, keystroke, cx),
         }
         cx.notify();
+        true
     }
 
     pub(super) fn commit_tab_field(&mut self) {
@@ -231,7 +229,7 @@ impl Shell {
         let Some(tab) = self.model.tabs_mut().get_mut(field.index) else {
             return;
         };
-        tab.rename(Some(field.text.to_string()));
+        tab.rename(Some(field.input.text().to_string()));
         self.persist();
     }
 
@@ -286,5 +284,5 @@ fn drop_ring(theme: &Theme) -> BoxShadow {
 
 pub(super) struct TabField {
     pub(super) index: usize,
-    pub(super) text: SharedString,
+    pub(super) input: TextField,
 }

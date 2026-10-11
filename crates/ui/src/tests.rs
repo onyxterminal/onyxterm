@@ -312,7 +312,7 @@ fn palette_typing_filters_moves_and_selects() {
     palette_move(&mut state, -2);
     assert_eq!(palette_selected(&state), Some(matches[matches.len() - 1]));
     palette_backspace(&mut state);
-    assert_eq!(state.palette_query, "spli");
+    assert_eq!(state.palette_query.text(), "spli");
     assert_eq!(state.palette_selection, 0);
     palette_type(&mut state, "zzzz");
     palette_move(&mut state, 1);
@@ -966,17 +966,6 @@ fn palette_rows_carry_category_and_bound_shortcut() {
     let choices = palette_entries(&state);
     assert_eq!(choices, [PaletteRow { title: "Backend".into(), category: CHOICE_CATEGORY, shortcut: None }]);
     assert_eq!(CHOICE_CATEGORY, "Workspaces");
-}
-
-#[test]
-fn palette_window_keeps_the_selection_in_view() {
-    use crate::palette::visible_rows;
-    assert_eq!(visible_rows(4, 3, 9), 0..4);
-    assert_eq!(visible_rows(20, 0, 9), 0..9);
-    assert_eq!(visible_rows(20, 8, 9), 0..9);
-    assert_eq!(visible_rows(20, 9, 9), 1..10);
-    assert_eq!(visible_rows(20, 19, 9), 11..20);
-    assert_eq!(visible_rows(0, 0, 9), 0..0);
 }
 
 #[test]

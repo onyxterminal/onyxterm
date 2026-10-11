@@ -1,10 +1,10 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::text_field::TextField;
 use crate::theme::icons::Icon;
-pub use crate::theme::menu_chrome::CARET;
 use crate::theme::menu_chrome::{
-    caret_text, focused_field, menu_panel, menu_row, menu_section_label, menu_separator, menu_shortcut, MenuRowStyle,
+    field_text, focused_field, menu_panel, menu_row, menu_section_label, menu_separator, menu_shortcut, MenuRowStyle,
 };
 use crate::theme::Theme;
 use crate::workspaces::SCRATCH_NAME;
@@ -32,7 +32,7 @@ pub struct WorkspaceMenuItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuField {
     pub renaming: Option<SharedString>,
-    pub text: SharedString,
+    pub input: TextField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,13 +72,13 @@ pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: Workspa
         .map(|item| {
             let editing = field.as_ref().filter(|field| field.renaming.as_ref() == Some(&item.id));
             match editing {
-                Some(field) => name_field(&field.text, theme).into_any_element(),
+                Some(field) => name_field(&field.input, theme).into_any_element(),
                 None => workspace_row(item, theme, actions.clone()).into_any_element(),
             }
         })
         .collect();
     let footer = match field.filter(|_| is_creating) {
-        Some(field) => name_field(&field.text, theme).into_any_element(),
+        Some(field) => name_field(&field.input, theme).into_any_element(),
         None => new_workspace_row(new_workspace_shortcut, theme, actions.create.clone()).into_any_element(),
     };
     menu_panel(theme)
@@ -178,7 +178,7 @@ fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandl
         .children(shortcut)
 }
 
-fn name_field(text: &SharedString, theme: &Theme) -> impl IntoElement {
+fn name_field(input: &TextField, theme: &Theme) -> impl IntoElement {
     focused_field(theme)
         .h(px(theme.menu.row_height_px))
         .flex_none()
@@ -186,7 +186,7 @@ fn name_field(text: &SharedString, theme: &Theme) -> impl IntoElement {
         .rounded(px(theme.menu.row_radius_px))
         .flex()
         .items_center()
-        .child(caret_text(text, NAME_PLACEHOLDER, theme))
+        .child(field_text(input, NAME_PLACEHOLDER, theme))
 }
 
 #[cfg(test)]

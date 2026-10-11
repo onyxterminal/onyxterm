@@ -5,6 +5,7 @@ use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::settings::Settings;
+use crate::text_field::TextField;
 use crate::theme::custom::ColorField;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,19 +20,19 @@ pub struct AppState {
     pub settings: Settings,
     pub settings_visible: bool,
     pub font_picker_visible: bool,
-    pub font_picker_query: String,
+    pub font_picker_query: TextField,
     pub font_picker_selection: usize,
     pub theme_picker_visible: bool,
     pub theme_picker_selection: usize,
     pub theme_editor_visible: bool,
     pub theme_editor_terminal_colors: bool,
     pub theme_color_field: Option<ColorField>,
-    pub theme_color_input: String,
+    pub theme_color_input: TextField,
     pub settings_error: Option<String>,
     pub registry: CommandRegistry,
     pub keymap: Keymap,
     pub palette_visible: bool,
-    pub palette_query: String,
+    pub palette_query: TextField,
     pub palette_selection: usize,
     pub palette_choices: Option<Vec<PaletteChoice>>,
 }
@@ -47,19 +48,19 @@ impl AppState {
             settings,
             settings_visible: false,
             font_picker_visible: false,
-            font_picker_query: String::new(),
+            font_picker_query: TextField::default(),
             font_picker_selection: 0,
             theme_picker_visible: false,
             theme_picker_selection: 0,
             theme_editor_visible: false,
             theme_editor_terminal_colors: false,
             theme_color_field: None,
-            theme_color_input: String::new(),
+            theme_color_input: TextField::default(),
             settings_error: None,
             registry: CommandRegistry::with_defaults(),
             keymap: Keymap::default(),
             palette_visible: false,
-            palette_query: String::new(),
+            palette_query: TextField::default(),
             palette_selection: 0,
             palette_choices: None,
         }
@@ -67,7 +68,7 @@ impl AppState {
 
     pub fn filtered_commands(&self) -> Vec<crate::command::CommandId> {
         self.registry
-            .search(&self.palette_query)
+            .search(self.palette_query.text())
             .into_iter()
             .map(|c| c.id)
             .collect()

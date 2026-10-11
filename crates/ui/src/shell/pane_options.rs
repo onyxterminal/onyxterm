@@ -1,6 +1,7 @@
-use super::{edit_field, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
+use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::motion::fade_in;
 use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuItem};
+use crate::text_field::TextField;
 use crate::theme::menu_chrome::{menu_panel, menu_row, menu_separator, menu_shortcut, MenuRowStyle};
 use domain::PanelId;
 use super::pane_drag::{bounds_probe, BoundsMap};
@@ -15,7 +16,7 @@ pub(super) struct PaneMenu {
 
 pub(super) struct PaneField {
     pub(super) panel: PanelId,
-    pub(super) text: SharedString,
+    pub(super) input: TextField,
 }
 
 impl Shell {
@@ -79,28 +80,25 @@ impl Shell {
     }
 
     pub(super) fn start_rename_pane(&mut self, panel: PanelId) {
-        let text = self.pane_display_title(panel).into();
-        self.pane_field = Some(PaneField { panel, text });
+        let input = TextField::new(self.pane_display_title(panel));
+        self.pane_field = Some(PaneField { panel, input });
     }
 
-    pub(super) fn handle_pane_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    pub(super) fn handle_pane_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         match keystroke.key.as_str() {
             ESCAPE_KEY => self.pane_field = None,
             ENTER_KEY => self.commit_pane_field(),
-            _ => {
-                if let Some(field) = self.pane_field.as_mut() {
-                    edit_field(&mut field.text, keystroke);
-                }
-            }
+            _ => return self.type_into_field(FieldTarget::PaneName, keystroke, cx),
         }
         cx.notify();
+        true
     }
 
     pub(super) fn commit_pane_field(&mut self) {
         let Some(field) = self.pane_field.take() else {
             return;
         };
-        let name = Some(field.text.trim().to_string()).filter(|name| !name.is_empty());
+        let name = Some(field.input.text().trim().to_string()).filter(|name| !name.is_empty());
         if let Some(record) = self.model.panel_mut(field.panel) {
             record.name = name;
         }

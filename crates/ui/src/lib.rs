@@ -19,6 +19,7 @@ pub mod shell;
 pub mod settings;
 pub mod tabs;
 pub mod terminal_view;
+pub mod text_field;
 pub mod theme;
 pub mod workspace_menu;
 pub mod workspaces;
