@@ -1,14 +1,17 @@
 use super::Shell;
+use crate::island_look::{IslandLook, IslandLooks, IslandRole};
 use crate::pane_layout::{compute_layout, grid_changes, Gap, PaneLayout, Rect, Spacing};
 use crate::pane_motion::{duration_from_ms, transition_for, IslandFrame, PaneMotion, Scene};
 use crate::tabs::SplitSide;
-use crate::terminal_view::{island_grid, terminal_preview, ISLAND_BORDER_PX};
-use crate::theme::LayoutTokens;
+use crate::terminal_view::{island_grid, terminal_preview};
+use crate::theme::{box_shadows, LayoutTokens, Theme};
 use domain::{LayoutNode, PanelId, TabId};
 use gpui::{
-    canvas, div, point, prelude::*, px, size, AnyElement, Bounds, Context, Div, Pixels, Point, Size, Window,
+    canvas, div, point, prelude::*, px, size, AnyElement, Bounds, Context, Div, Pixels, Point, SharedString, Size,
+    Window,
 };
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -19,6 +22,7 @@ pub(super) struct Stage {
     scene: Option<Scene>,
     fresh_tab: Option<TabId>,
     layout: PaneLayout,
+    looks: IslandLooks,
     origin: Rc<Cell<Point<Pixels>>>,
 }
 
@@ -30,6 +34,7 @@ impl Stage {
             scene: None,
             fresh_tab: None,
             layout: PaneLayout::default(),
+            looks: IslandLooks::default(),
             origin: Rc::new(Cell::new(origin)),
         }
     }
@@ -74,6 +79,11 @@ impl Stage {
         self.layout = layout;
     }
 
+    fn remember_looks(&mut self, current: HashMap<PanelId, IslandLook>, now: Instant) {
+        let ghosts: Vec<PanelId> = self.motion.ghosts(now).into_iter().map(|(panel, _)| panel).collect();
+        self.looks.remember(current, &ghosts);
+    }
+
     fn origin_probe(&self) -> impl IntoElement {
         let origin = self.origin.clone();
         canvas(
@@ -101,6 +111,33 @@ fn placed(frame: IslandFrame) -> Div {
         .when(frame.opacity < OPAQUE, |el| el.opacity(frame.opacity))
 }
 
+pub(super) fn pane_group(panel: PanelId) -> SharedString {
+    SharedString::from(format!("pane-{panel}"))
+}
+
+pub(super) fn island_card(theme: &Theme) -> Div {
+    div()
+        .relative()
+        .size_full()
+        .overflow_hidden()
+        .rounded(px(theme.layout.island_radius_px))
+        .bg(theme.canvas())
+        .shadow(box_shadows(&theme.shadow.card))
+}
+
+pub(super) fn island_content(look: IslandLook, content: impl IntoElement) -> Div {
+    div().size_full().when(look.is_dimmed(), |el| el.opacity(look.content_opacity)).child(content)
+}
+
+pub(super) fn island_edge(theme: &Theme, look: IslandLook) -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded(px(theme.layout.island_radius_px))
+        .border(px(look.edge_px))
+        .border_color(look.edge_color)
+}
+
 impl Shell {
     pub(super) fn render_pane_area(
         &mut self,
@@ -112,6 +149,7 @@ impl Shell {
         let layout = self.target_layout(&scene.tree, window.viewport_size());
         self.sync_grids(&layout, window);
         self.stage.advance(scene, layout, now);
+        self.stage.remember_looks(self.current_looks(), now);
         self.prune_dropped_ghost(now);
         let area = div()
             .relative()
@@ -121,6 +159,19 @@ impl Shell {
             .children(self.render_islands(now, cx))
             .children(self.render_gaps(cx));
         Some(area.into_any_element())
+    }
+
+    pub(super) fn island_look(&self, panel: PanelId) -> IslandLook {
+        let tab = self.model.tabs().active();
+        let role = IslandRole {
+            is_focused: tab.is_some_and(|tab| tab.focused() == panel),
+            is_split: tab.is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. })),
+        };
+        IslandLook::for_role(&self.state.theme, role)
+    }
+
+    fn current_looks(&self) -> HashMap<PanelId, IslandLook> {
+        self.stage.layout.islands.iter().map(|island| (island.panel, self.island_look(island.panel))).collect()
     }
 
     pub(super) fn needs_motion_frame(&self, now: Instant) -> bool {
@@ -190,15 +241,9 @@ impl Shell {
 
     fn render_ghost_island(&self, panel: PanelId) -> impl IntoElement {
         let theme = &self.state.theme;
+        let look = self.stage.looks.get(panel).unwrap_or_else(|| self.island_look(panel));
         let preview =
             self.panes.get(&panel).map(|pane| terminal_preview(pane.terminal.handle.clone(), self.style.clone()));
-        div()
-            .size_full()
-            .overflow_hidden()
-            .rounded(px(theme.layout.island_radius_px))
-            .border(px(ISLAND_BORDER_PX))
-            .border_color(theme.border_default())
-            .bg(theme.canvas())
-            .children(preview)
+        island_card(theme).children(preview.map(|preview| island_content(look, preview))).child(island_edge(theme, look))
     }
 }

@@ -137,7 +137,6 @@ pub struct LayoutTokens {
     pub island_radius_px: f32,
     pub island_gap_px: f32,
     pub window_margin_px: f32,
-    pub island_padding_px: f32,
     pub min_pane_px: f32,
     pub animation_ms: f32,
     pub traffic_light_left_px: f32,
@@ -508,6 +507,7 @@ pub struct IslandTokens {
     pub unfocused_opacity: f32,
     pub pane_padding_x_px: f32,
     pub pane_padding_top_px: f32,
+    pub pane_padding_bottom_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

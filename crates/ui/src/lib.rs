@@ -5,6 +5,7 @@ pub mod app;
 pub mod command;
 pub mod confirm;
 pub mod input;
+pub mod island_look;
 pub mod keymap;
 pub mod menus;
 pub mod motion;

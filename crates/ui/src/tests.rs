@@ -434,26 +434,26 @@ fn maximize_toggles_view_without_touching_layout() {
 }
 
 #[test]
-fn island_padding_and_header_inset_content_and_grid_uses_inner_size() {
-    use crate::terminal_view::content_bounds;
+fn island_insets_place_content_under_header_and_grid_uses_inner_size() {
+    use crate::terminal_view::{content_bounds, island_grid, ContentInsets, TerminalStyle};
     let theme = Theme::load_default().unwrap();
-    let padding = px(theme.layout.island_padding_px);
-    let header = px(theme.layout.pane_header_height_px);
+    let insets = ContentInsets::from_theme(&theme);
     assert_eq!(theme.layout.pane_header_height_px, 26.0);
-    assert_eq!(theme.layout.island_padding_px, 8.0);
+    assert_eq!(theme.island.pane_padding_bottom_px, 12.0);
     assert_eq!(theme.layout.island_radius_px, 10.0);
     assert_eq!(theme.layout.island_gap_px, 6.0);
     assert_eq!(theme.layout.window_margin_px, 6.0);
+    assert_eq!(insets, ContentInsets { x: px(14.0), top: px(32.0), bottom: px(12.0) });
     let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(513.0)));
-    let inner = content_bounds(island, padding, header);
-    assert_eq!(inner.origin, gpui::point(px(108.0), px(84.0)));
-    assert_eq!(inner.size, gpui::size(px(800.0), px(471.0)));
+    let inner = content_bounds(island, insets);
+    assert_eq!(inner.origin, gpui::point(px(114.0), px(82.0)));
+    assert_eq!(inner.size, gpui::size(px(788.0), px(469.0)));
     let cell = gpui::size(px(8.0), px(18.0));
-    assert_eq!(grid_size_for(inner.size, cell), GridSize::new(100, 26));
+    let style = TerminalStyle::from_theme(&theme, "ui-monospace".into());
+    assert_eq!(island_grid(island.size, &style, cell), GridSize::new(98, 26));
     assert_eq!(grid_size_for(island.size, cell), GridSize::new(102, 28));
     let small = gpui::Bounds::new(gpui::point(px(0.0), px(0.0)), gpui::size(px(10.0), px(10.0)));
-    let tiny = content_bounds(small, padding, header);
-    assert_eq!(tiny.size, gpui::size(px(0.0), px(0.0)));
+    assert_eq!(content_bounds(small, insets).size, gpui::size(px(0.0), px(0.0)));
 }
 
 #[test]
@@ -988,4 +988,50 @@ fn workspace_button_falls_back_to_scratch_and_rows_count_tabs() {
     assert_eq!(tab_count_label(0), "0 tabs");
     assert_eq!(tab_count_label(1), "1 tab");
     assert_eq!(tab_count_label(3), "3 tabs");
+}
+
+fn look_for(is_focused: bool, is_split: bool) -> crate::island_look::IslandLook {
+    use crate::island_look::{IslandLook, IslandRole};
+    IslandLook::for_role(&Theme::load_default().unwrap(), IslandRole { is_focused, is_split })
+}
+
+#[test]
+fn focus_ring_shows_only_on_the_focused_island_of_a_split() {
+    let theme = Theme::load_default().unwrap();
+    let ring = look_for(true, true);
+    assert_eq!((ring.edge_px, ring.edge_color), (1.0, theme.accent.primary));
+    for (is_focused, is_split) in [(true, false), (false, true), (false, false)] {
+        let hairline = look_for(is_focused, is_split);
+        assert_eq!((hairline.edge_px, hairline.edge_color), (0.5, theme.border_default()));
+    }
+}
+
+#[test]
+fn unfocused_content_dims_only_in_a_split_with_dimming_enabled() {
+    let dimmed = look_for(false, true);
+    assert!(dimmed.is_dimmed());
+    assert_eq!(dimmed.content_opacity, 0.55);
+    assert!(!look_for(true, true).is_dimmed());
+    assert!(!look_for(false, false).is_dimmed());
+    assert!(!look_for(true, false).is_dimmed());
+
+    let mut theme = Theme::load_default().unwrap();
+    theme.island.dim_unfocused = false;
+    let role = crate::island_look::IslandRole { is_focused: false, is_split: true };
+    assert!(!crate::island_look::IslandLook::for_role(&theme, role).is_dimmed());
+}
+
+#[test]
+fn ghost_islands_keep_the_look_they_had_when_they_left_the_layout() {
+    use crate::island_look::IslandLooks;
+    use std::collections::HashMap;
+    let leaving = PanelId::new();
+    let staying = PanelId::new();
+    let mut looks = IslandLooks::default();
+    looks.remember(HashMap::from([(leaving, look_for(false, true)), (staying, look_for(true, true))]), &[]);
+    looks.remember(HashMap::from([(staying, look_for(true, false))]), &[leaving]);
+    assert_eq!(looks.get(leaving), Some(look_for(false, true)));
+    assert_eq!(looks.get(staying), Some(look_for(true, false)));
+    looks.remember(HashMap::from([(staying, look_for(true, false))]), &[]);
+    assert_eq!(looks.get(leaving), None);
 }

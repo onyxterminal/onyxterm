@@ -1,8 +1,9 @@
+use super::islands::pane_group;
 use super::Shell;
 use crate::command::CommandId;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::{caret_text, focused_field};
-use domain::{LayoutNode, PanelId};
+use domain::PanelId;
 use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 
 const GEAR_TOOLTIP: &str = "Pane Options";
@@ -16,7 +17,7 @@ impl Shell {
     pub(super) fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let header = theme.pane_header;
-        let group = SharedString::from(format!("pane-header-{panel}"));
+        let group = pane_group(panel);
         let drag_handle = div()
             .flex_1()
             .min_w(px(0.0))
@@ -48,7 +49,6 @@ impl Shell {
             .child(self.gear_button(panel, cx))
             .child(self.close_button(panel, cx));
         div()
-            .group(group)
             .absolute()
             .top_0()
             .left_0()
@@ -155,19 +155,6 @@ impl Shell {
                 shell.run_command(CommandId::CloseActive, window, cx);
             }),
         )
-    }
-
-    pub(super) fn pane_border(&self, is_focused: bool) -> Hsla {
-        let theme = &self.state.theme;
-        let is_split = self
-            .model
-            .tabs()
-            .active()
-            .is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. }));
-        match is_split && is_focused {
-            true => theme.accent.primary,
-            false => theme.border_default(),
-        }
     }
 }
 

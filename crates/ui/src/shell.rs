@@ -13,7 +13,7 @@ use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
 use crate::pane_title::OscTitle;
-use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle, ISLAND_BORDER_PX};
+use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
@@ -721,14 +721,10 @@ impl Shell {
         };
         let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
         let header = self.render_pane_header(panel, is_focused, cx);
-        div()
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .rounded(px(self.state.theme.layout.island_radius_px))
-            .border(px(ISLAND_BORDER_PX))
-            .border_color(self.pane_border(is_focused))
-            .bg(self.state.theme.canvas())
+        let look = self.island_look(panel);
+        let terminal = terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)));
+        islands::island_card(&self.state.theme)
+            .group(islands::pane_group(panel))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
@@ -738,8 +734,9 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .child(terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx))))
+            .child(islands::island_content(look, terminal))
             .child(header)
+            .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))
             .into_any_element()
     }

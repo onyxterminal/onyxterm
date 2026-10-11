@@ -4,7 +4,7 @@
 use crate::input::wheel_bytes;
 use crate::theme::Theme;
 use gpui::{
-    canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, DispatchPhase, Font,
+    canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, ContentMask, DispatchPhase, Font,
     FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent,
     SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
 };
@@ -17,7 +17,6 @@ const SELECTION_ALPHA: f32 = 0.25;
 const WORD_CLICK_COUNT: usize = 2;
 const LINE_CLICK_COUNT: usize = 3;
 const MIN_COLS: u16 = 2;
-pub const ISLAND_BORDER_PX: f32 = 1.0;
 const MIN_ROWS: u16 = 1;
 const ANSI_COLOR_COUNT: u8 = 16;
 const CUBE_START: u8 = 16;
@@ -90,16 +89,31 @@ pub fn grid_size_for(area: Size<Pixels>, cell: Size<Pixels>) -> GridSize {
 }
 
 pub fn island_grid(island: Size<Pixels>, style: &TerminalStyle, cell: Size<Pixels>) -> GridSize {
-    let borders = px(ISLAND_BORDER_PX * 2.0);
-    let canvas = Bounds::new(Point::default(), size(island.width - borders, island.height - borders));
-    grid_size_for(content_bounds(canvas, style.padding, style.header_height).size, cell)
+    grid_size_for(content_bounds(Bounds::new(Point::default(), island), style.insets).size, cell)
 }
 
-pub fn content_bounds(bounds: Bounds<Pixels>, padding: Pixels, header_height: Pixels) -> Bounds<Pixels> {
-    let top = header_height + padding;
-    let width = (bounds.size.width - padding * 2.0).max(px(0.0));
-    let height = (bounds.size.height - top - padding).max(px(0.0));
-    Bounds::new(bounds.origin + point(padding, top), size(width, height))
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContentInsets {
+    pub x: Pixels,
+    pub top: Pixels,
+    pub bottom: Pixels,
+}
+
+impl ContentInsets {
+    pub fn from_theme(theme: &Theme) -> Self {
+        let island = &theme.island;
+        Self {
+            x: px(island.pane_padding_x_px),
+            top: px(theme.layout.pane_header_height_px + island.pane_padding_top_px),
+            bottom: px(island.pane_padding_bottom_px),
+        }
+    }
+}
+
+pub fn content_bounds(bounds: Bounds<Pixels>, insets: ContentInsets) -> Bounds<Pixels> {
+    let width = (bounds.size.width - insets.x * 2.0).max(px(0.0));
+    let height = (bounds.size.height - insets.top - insets.bottom).max(px(0.0));
+    Bounds::new(bounds.origin + point(insets.x, insets.top), size(width, height))
 }
 
 pub fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<Pixels>, grid: GridSize) -> (GridPoint, Side) {
@@ -149,8 +163,7 @@ pub struct TerminalStyle {
     pub font_size: Pixels,
     pub line_height: Pixels,
     pub selection: Hsla,
-    pub padding: Pixels,
-    pub header_height: Pixels,
+    pub insets: ContentInsets,
 }
 
 impl TerminalStyle {
@@ -171,8 +184,7 @@ impl TerminalStyle {
             font_size: px(theme.font.size_px),
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
             selection: theme.accent.primary.opacity(SELECTION_ALPHA),
-            padding: px(theme.layout.island_padding_px),
-            header_height: px(theme.layout.pane_header_height_px),
+            insets: ContentInsets::from_theme(theme),
         }
     }
 
@@ -204,14 +216,16 @@ pub fn terminal_canvas(pane: TerminalPane, style: TerminalStyle, focus: Option<P
     canvas(
         move |_bounds, window, _cx| prepare_frame(&prepare_handle, &prepare_style, window),
         move |bounds, frame, window, cx| {
-            let bounds = content_bounds(bounds, style.padding, style.header_height);
+            let bounds = content_bounds(bounds, style.insets);
             let is_focused = focus.is_some();
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
-            painter.paint(window, cx);
-            if let Some(focus) = focus {
-                if let Some(text) = focus.marked_text.as_deref() {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                painter.paint(window, cx);
+                if let Some(text) = focus.as_ref().and_then(|focus| focus.marked_text.as_deref()) {
                     painter.paint_marked_text(text, window, cx);
                 }
+            });
+            if let Some(focus) = focus {
                 (focus.register_input)(bounds, window, cx);
             }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
@@ -226,8 +240,9 @@ pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<
     canvas(
         move |_bounds, window, _cx| prepare_frame(&handle, &prepare_style, window),
         move |bounds, frame, window, cx| {
-            let origin = content_bounds(bounds, style.padding, style.header_height).origin;
-            FramePainter { frame: &frame, origin, style: &style, is_focused: false }.paint(window, cx);
+            let bounds = content_bounds(bounds, style.insets);
+            let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused: false };
+            window.with_content_mask(Some(ContentMask { bounds }), |window| painter.paint(window, cx));
         },
     )
     .size_full()
