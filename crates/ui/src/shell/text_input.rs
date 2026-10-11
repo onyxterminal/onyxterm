@@ -1,8 +1,10 @@
 use super::{write_to, Shell};
 use crate::command::CommandId;
+use crate::document::DocumentPane;
 use crate::input::is_composed_text;
 use crate::terminal_view::cursor_bounds;
 use crate::text_field::{Clipboard, TextField};
+use editor_core::EditorAction;
 use gpui::{
     App, Bounds, ClipboardItem, Context, EntityInputHandler, Keystroke, Pixels, Point, ScrollStrategy, UTF16Selection,
     Window,
@@ -203,7 +205,14 @@ impl EntityInputHandler for Shell {
         if self.with_active_field(cx, |field, _clipboard| field.replace_utf16(range, text)).is_some() {
             return;
         }
-        self.marked_text = None;
+        if let Some(panel) = self.model.focused_document() {
+            self.marked_text = None;
+            if !text.is_empty() {
+                self.apply_editor_action(panel, EditorAction::InsertText(text.to_string()), cx);
+            }
+            cx.notify();
+            return;
+        }
         let is_typing_into_shell = !text.is_empty() && !self.is_copy_mode_active();
         if let Some(handle) = self.focused_handle().filter(|_| is_typing_into_shell) {
             write_to(handle, text.as_bytes());
@@ -225,6 +234,11 @@ impl EntityInputHandler for Shell {
         if self.with_active_field(cx, mark).is_some() {
             return;
         }
+        if self.model.focused_document().is_some() {
+            self.marked_text = Some(new_text.to_string()).filter(|text| !text.is_empty());
+            cx.notify();
+            return;
+        }
         self.marked_text = Some(new_text.to_string()).filter(|text| !text.is_empty());
         cx.notify();
     }
@@ -238,6 +252,13 @@ impl EntityInputHandler for Shell {
     ) -> Option<Bounds<Pixels>> {
         if let Some(field) = self.active_text_field() {
             return field.caret_bounds().get();
+        }
+        if let Some(panel) = self.model.focused_document() {
+            let pane = self.documents.get(&panel)?;
+            let DocumentPane::Editor(editor_pane) = pane else {
+                return None;
+            };
+            return editor_pane.view.borrow().layout.as_ref().and_then(|layout| layout.cursor_bounds);
         }
         let cursor = self.focused_handle()?.snapshot_grid().cursor?;
         Some(cursor_bounds(element_bounds, self.style.cell_size(window), cursor))

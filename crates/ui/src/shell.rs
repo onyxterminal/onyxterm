@@ -8,7 +8,7 @@ use crate::command::{
     CommandId,
 };
 use crate::document::{document_cwd, document_title, render_document, DocumentPane, EditorPane, EditorState};
-use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle, PointerHandler};
+use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
 use crate::confirm::{close_pane_copy, close_tab_copy, delete_workspace_copy, quit_copy, ConfirmCopy, Confirmation};
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
@@ -28,7 +28,6 @@ use gpui::{
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use terminal_core::broadcast::{error::RecvError, Receiver};
@@ -907,10 +906,6 @@ impl Shell {
         Box::new(move |bounds, window, cx| {
             window.handle_input(&focus_handle, ElementInputHandler::new(bounds, shell), cx)
         })
-    }
-
-    fn editor_pointer_handler(&self, _panel: PanelId, _cx: &mut Context<Self>) -> PointerHandler {
-        Rc::new(|_, _, _| {})
     }
 
     fn render_document_pane(

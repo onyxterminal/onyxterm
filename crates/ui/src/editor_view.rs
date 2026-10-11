@@ -5,8 +5,9 @@ use crate::terminal_view::{content_bounds, ContentInsets, PaneFocus};
 use crate::theme::{EditorTokens, Theme};
 use editor_core::{line_len, Rope, Selections, Selection, TAB_WIDTH};
 use gpui::{
-    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, Font, Hitbox, HitboxBehavior, Hsla, Pixels,
-    Point, SharedString, ShapedLine, Size, Styled, TextRun, UnderlineStyle, Window,
+    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font, Hitbox, HitboxBehavior,
+    Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString,
+    ShapedLine, Size, Styled, TextRun, UnderlineStyle, Window,
 };
 use std::cell::RefCell;
 use std::ops::Range;
@@ -23,6 +24,7 @@ pub struct EditorView {
     pub scroll_left: f32,
     pub layout: Option<FrameLayout>,
     pub is_selecting: bool,
+    pub last_click_mode: Option<editor_core::ClickMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +98,35 @@ pub fn scroll_to_reveal(scroll_top: f32, line: usize, line_height: f32, viewport
     let lowest = top + line_height + margin - viewport_height;
     let highest = top - margin;
     scroll_top.max(lowest).min(highest.max(0.0)).max(0.0)
+}
+
+pub fn line_at_y(origin_y: f32, line_height: f32, first_line: usize, line_count: usize, y: f32) -> usize {
+    let row = ((y - origin_y) / line_height).floor().max(0.0) as usize;
+    (first_line + row).min(line_count.saturating_sub(1))
+}
+
+pub fn offset_at(layout: &FrameLayout, rope: &Rope, position: Point<Pixels>) -> usize {
+    let line_count = rope.len_lines();
+    if line_count == 0 {
+        return 0;
+    }
+    let line_index = line_at_y(
+        f32::from(layout.text_origin.y),
+        f32::from(layout.line_height),
+        layout.first_line,
+        line_count,
+        f32::from(position.y),
+    );
+    let line_start = rope.line_to_char(line_index);
+    let line_chars = line_len(rope, line_index);
+    let line_end = line_start + line_chars;
+    let Some(laid) = layout.lines.iter().find(|laid| laid.line == line_index) else {
+        return line_end;
+    };
+    let local_x = f32::from(position.x) - f32::from(layout.text_origin.x);
+    let byte = laid.shaped.closest_index_for_x(px(local_x));
+    let char = laid.display.char_at_byte(byte);
+    (line_start + char).min(line_end)
 }
 
 pub fn gutter_columns(line_count: usize) -> usize {
@@ -174,6 +205,7 @@ pub fn editor_canvas(
     let prepare_style = style.clone();
     let prepare_frame = frame.clone();
     let prepare_view = view.clone();
+    let paint_on_pointer = on_pointer.clone();
     let canvas = canvas(
         move |bounds, window, _cx| {
             let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
@@ -203,6 +235,9 @@ pub fn editor_canvas(
                 }
             });
             paint_gutter(&state.layout, &state.gutter_rect, &style, tokens, window, cx);
+            if focused {
+                register_editor_mouse_handlers(&state, &frame, &view, &paint_on_pointer, window);
+            }
             if let Some(focus) = focus {
                 let rect = content_bounds(bounds, style.insets);
                 (focus.register_input)(rect, window, cx);
@@ -211,6 +246,94 @@ pub fn editor_canvas(
     )
     .size_full();
     canvas
+}
+
+fn register_editor_mouse_handlers(
+    state: &CanvasState,
+    frame: &EditorFrame,
+    view: &Rc<RefCell<EditorView>>,
+    on_pointer: &PointerHandler,
+    window: &mut Window,
+) {
+    let bounds = state.text_rect;
+    let line_height = state.layout.line_height;
+    let down_handler = on_pointer.clone();
+    let down_view = view.clone();
+    let down_layout = state.layout.clone();
+    let down_rope = frame.rope.clone();
+    let down_bounds = bounds;
+    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+        let is_inside = down_bounds.contains(&event.position) && event.button == MouseButton::Left;
+        if phase != DispatchPhase::Bubble || !is_inside {
+            return;
+        }
+        let offset = offset_at(&down_layout, &down_rope, event.position);
+        down_view.borrow_mut().is_selecting = true;
+        down_handler(
+            PointerEvent::Down {
+                offset,
+                click_count: event.click_count,
+                shift: event.modifiers.shift,
+                alt: event.modifiers.alt,
+            },
+            window,
+            cx,
+        );
+        window.refresh();
+    });
+    let drag_handler = on_pointer.clone();
+    let drag_view = view.clone();
+    let drag_layout = state.layout.clone();
+    let drag_rope = frame.rope.clone();
+    let drag_bounds = bounds;
+    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        let is_dragging = drag_view.borrow().is_selecting && event.pressed_button == Some(MouseButton::Left);
+        if phase != DispatchPhase::Bubble || !is_dragging {
+            return;
+        }
+        if !drag_bounds.contains(&event.position) {
+            return;
+        }
+        let offset = offset_at(&drag_layout, &drag_rope, event.position);
+        drag_handler(PointerEvent::Drag { offset }, window, cx);
+        window.refresh();
+    });
+    let up_handler = on_pointer.clone();
+    let up_view = view.clone();
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            return;
+        }
+        up_view.borrow_mut().is_selecting = false;
+        up_handler(PointerEvent::Up, window, cx);
+    });
+    let scroll_handler = on_pointer.clone();
+    let scroll_view = view.clone();
+    let scroll_bounds = bounds;
+    let scroll_rope = frame.rope.clone();
+    let scroll_line_height = line_height;
+    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+        if phase != DispatchPhase::Bubble || !scroll_bounds.contains(&event.position) {
+            return;
+        }
+        let delta = event.delta.pixel_delta(scroll_line_height);
+        let dx = f32::from(delta.x);
+        let dy = f32::from(delta.y);
+        let line_count = scroll_rope.len_lines();
+        let layout_snapshot = scroll_view.borrow().layout.clone();
+        if let Some(layout) = layout_snapshot {
+            let max_scroll = max_scroll_top(
+                line_count,
+                f32::from(scroll_line_height),
+                f32::from(layout.viewport.height),
+            );
+            let mut view_mut = scroll_view.borrow_mut();
+            view_mut.scroll_top = (view_mut.scroll_top - dy).clamp(0.0, max_scroll);
+            view_mut.scroll_left = (view_mut.scroll_left - dx).max(0.0);
+        }
+        scroll_handler(PointerEvent::Scroll { dx, dy }, window, cx);
+        window.refresh();
+    });
 }
 
 fn prepare_state(
@@ -549,5 +672,13 @@ mod tests {
     fn gutter_fits_the_widest_line_number() {
         assert_eq!(gutter_columns(9), 2);
         assert_eq!(gutter_columns(12345), 5);
+    }
+
+    #[test]
+    fn y_positions_map_to_lines_and_clamp_to_the_buffer() {
+        assert_eq!(line_at_y(100.0, 20.0, 5, 50, 105.0), 5);
+        assert_eq!(line_at_y(100.0, 20.0, 5, 50, 141.0), 7);
+        assert_eq!(line_at_y(100.0, 20.0, 5, 50, 10.0), 5);
+        assert_eq!(line_at_y(100.0, 20.0, 5, 8, 400.0), 7);
     }
 }
