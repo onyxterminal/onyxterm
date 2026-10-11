@@ -122,9 +122,7 @@ impl Shell {
         let mut new_scroll_left = scroll_left;
         let margin = f32::from(layout.line_height);
         if let Some(laid) = layout.lines.iter().find(|laid| laid.line == line_index) {
-            let x_index = rel.min(laid.display.byte_of_char.len().saturating_sub(1));
-            let byte_col = laid.display.byte_of_char[x_index];
-            let x = f32::from(laid.shaped.x_for_index(byte_col));
+            let x = f32::from(laid.x_at_char(rel));
             let left = scroll_left;
             let right = left + text_width;
             if x < left + margin {

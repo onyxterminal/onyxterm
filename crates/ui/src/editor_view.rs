@@ -61,6 +61,28 @@ impl DisplayLine {
     pub fn char_at_byte(&self, byte: usize) -> usize {
         self.byte_of_char.iter().rposition(|start| *start <= byte).unwrap_or(0)
     }
+
+    pub fn byte_at_char(&self, char: usize) -> usize {
+        let last = self.byte_of_char.len().saturating_sub(1);
+        self.byte_of_char.get(char.min(last)).copied().unwrap_or(0)
+    }
+}
+
+impl LaidLine {
+    pub fn x_at_char(&self, char: usize) -> Pixels {
+        self.shaped.x_for_index(self.display.byte_at_char(char))
+    }
+}
+
+pub fn selection_span_on_line(sel: Range<usize>, line_start: usize, line_len: usize) -> Option<(usize, usize, bool)> {
+    let line_end = line_start + line_len;
+    let start = sel.start.max(line_start);
+    let end = sel.end.min(line_end);
+    let covers_newline = sel.start <= line_end && sel.end > line_end;
+    if start > end || (start == end && !covers_newline) {
+        return None;
+    }
+    Some((start - line_start, end - line_start, covers_newline))
 }
 
 pub fn display_line(line: &str) -> DisplayLine {
@@ -460,18 +482,13 @@ impl<'a> FramePainter<'a> {
         let Some(laid) = self.layout.lines.iter().find(|laid| laid.line == line_index) else {
             return;
         };
-        let rel = offset - laid.start_char;
-        let byte_col = laid.display.byte_of_char[rel.min(laid.display.byte_of_char.len().saturating_sub(1))];
-        let x = laid.shaped.x_for_index(byte_col);
+        let x = laid.x_at_char(offset - laid.start_char);
         let y = self.row_y(laid);
-        let cell_width = self.cell.width;
         let width_in_cells = text.chars().count().max(1);
-        let bounds = Bounds::new(point(self.text_rect.origin.x + x, y), size(cell_width * width_in_cells as f32, self.line_height));
-        if bounds.origin.x < self.text_rect.origin.x
-            || bounds.origin.x + bounds.size.width > self.text_rect.origin.x + self.text_rect.size.width
-        {
-            return;
-        }
+        let bounds = Bounds::new(
+            point(self.text_origin.x + x, y),
+            size(self.cell.width * width_in_cells as f32, self.line_height),
+        );
         window.paint_quad(fill(bounds, self.tokens.selection));
         let underline = UnderlineStyle { thickness: px(1.0), color: None, wavy: false };
         let run = TextRun {
@@ -500,35 +517,20 @@ impl<'a> FramePainter<'a> {
     }
 
     fn paint_selections(&self, laid: &LaidLine, y: Pixels, window: &mut Window) {
-        let cell_width = self.cell.width;
+        let line_chars = line_len(&self.frame.rope, laid.line);
         for selection in self.frame.selections.as_slice() {
             if selection.is_empty() {
                 continue;
             }
-            let (Some(start_col), Some(end_col)) = (
-                line_byte_at(laid, &self.frame.rope, selection.range().start),
-                line_byte_at(laid, &self.frame.rope, selection.range().end),
-            ) else {
+            let Some((start_col, end_col, covers_newline)) =
+                selection_span_on_line(selection.range(), laid.start_char, line_chars)
+            else {
                 continue;
             };
-            let x_start = laid.shaped.x_for_index(start_col);
-            let x_end = if selection.range().end > laid.start_char + line_len(&self.frame.rope, laid.line) {
-                laid.shaped.width + cell_width * NEWLINE_EXTRA_CELLS
-            } else {
-                laid.shaped.x_for_index(end_col)
-            };
-            if x_end <= x_start {
-                continue;
-            }
-            let bounds = Bounds::new(
-                point(self.text_rect.origin.x + x_start, y),
-                size(x_end - x_start, self.line_height),
-            );
-            if bounds.origin.x < self.text_rect.origin.x
-                || bounds.origin.x + bounds.size.width > self.text_rect.origin.x + self.text_rect.size.width
-            {
-                continue;
-            }
+            let x_start = laid.x_at_char(start_col);
+            let newline_width = if covers_newline { self.cell.width * NEWLINE_EXTRA_CELLS } else { px(0.0) };
+            let x_end = laid.x_at_char(end_col) + newline_width;
+            let bounds = Bounds::new(point(self.text_origin.x + x_start, y), size(x_end - x_start, self.line_height));
             window.paint_quad(fill(bounds, self.tokens.selection));
         }
     }
@@ -551,17 +553,9 @@ impl<'a> FramePainter<'a> {
             if head < laid.start_char || head > line_end {
                 continue;
             }
-            let rel = head - laid.start_char;
-            let col = rel.min(laid.display.byte_of_char.len().saturating_sub(1));
-            let byte = laid.display.byte_of_char[col];
-            let x = laid.shaped.x_for_index(byte);
+            let x = laid.x_at_char(head - laid.start_char);
             let cursor_width = px(self.tokens.cursor_width_px);
-            let bounds = Bounds::new(point(self.text_rect.origin.x + x, y), size(cursor_width, self.line_height));
-            if bounds.origin.x < self.text_rect.origin.x
-                || bounds.origin.x + bounds.size.width > self.text_rect.origin.x + self.text_rect.size.width
-            {
-                continue;
-            }
+            let bounds = Bounds::new(point(self.text_origin.x + x, y), size(cursor_width, self.line_height));
             window.paint_quad(fill(bounds, self.tokens.cursor));
         }
     }
@@ -569,17 +563,6 @@ impl<'a> FramePainter<'a> {
     fn row_y(&self, laid: &LaidLine) -> Pixels {
         self.text_origin.y + px((laid.line - self.layout.first_line) as f32 * f32::from(self.line_height))
     }
-}
-
-fn line_byte_at(laid: &LaidLine, rope: &Rope, absolute_offset: usize) -> Option<usize> {
-    let line_chars = line_len(rope, laid.line);
-    let line_end = laid.start_char + line_chars;
-    if absolute_offset < laid.start_char || absolute_offset > line_end {
-        return None;
-    }
-    let rel = absolute_offset - laid.start_char;
-    let col = rel.min(laid.display.byte_of_char.len().saturating_sub(1));
-    Some(laid.display.byte_of_char[col])
 }
 
 fn empty_selection_on_line(selection: &Selection, laid: &LaidLine, rope: &Rope) -> bool {
@@ -648,6 +631,39 @@ mod tests {
         assert_eq!(line.byte_of_char, vec![0, 4, 5, 9, 10]);
         assert_eq!(line.char_at_byte(9), 3);
         assert_eq!(line.char_at_byte(2), 0);
+    }
+
+    #[test]
+    fn char_columns_map_to_display_bytes_and_clamp_past_the_end() {
+        let line = display_line("\tab");
+        assert_eq!(line.byte_at_char(0), 0);
+        assert_eq!(line.byte_at_char(1), 4);
+        assert_eq!(line.byte_at_char(3), 6);
+        assert_eq!(line.byte_at_char(9), 6);
+    }
+
+    #[test]
+    fn two_line_selection_spans_both_rows_and_the_first_newline() {
+        assert_eq!(selection_span_on_line(3..12, 0, 9), Some((3, 9, true)));
+        assert_eq!(selection_span_on_line(3..12, 10, 5), Some((0, 2, false)));
+    }
+
+    #[test]
+    fn selection_inside_one_line_spans_only_its_columns() {
+        assert_eq!(selection_span_on_line(12..14, 10, 5), Some((2, 4, false)));
+        assert_eq!(selection_span_on_line(12..14, 0, 9), None);
+    }
+
+    #[test]
+    fn line_strictly_inside_a_selection_is_fully_covered() {
+        assert_eq!(selection_span_on_line(3..20, 10, 5), Some((0, 5, true)));
+        assert_eq!(selection_span_on_line(3..20, 10, 0), Some((0, 0, true)));
+    }
+
+    #[test]
+    fn selection_ending_at_a_line_start_leaves_that_line_unselected() {
+        assert_eq!(selection_span_on_line(3..10, 10, 5), None);
+        assert_eq!(selection_span_on_line(3..10, 0, 9), Some((3, 9, true)));
     }
 
     #[test]
