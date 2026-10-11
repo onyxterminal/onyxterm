@@ -12,6 +12,7 @@ use crate::menus::RunCommand;
 use crate::motion::fade_in;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
+use crate::pane_title::OscTitle;
 use crate::terminal_view::{terminal_canvas, PaneFocus, TerminalPane, TerminalStyle};
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
@@ -33,6 +34,7 @@ mod dialogs;
 mod pane_header;
 mod pane_drag;
 mod pane_options;
+mod pane_status;
 mod splits;
 mod tab_strip;
 mod text_input;
@@ -47,16 +49,15 @@ const ENTER_KEY: &str = "enter";
 const BACKSPACE_KEY: &str = "backspace";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
-const CWD_TAIL_SEGMENTS: usize = 2;
-const HOME_MARK: &str = "~";
 const ABOUT_TITLE: &str = "Onyxterm";
 const ABOUT_OK: &str = "OK";
-const ELLIPSIS: &str = "\u{2026}";
 
 struct Pane {
     session: TerminalSessionId,
     terminal: TerminalPane,
-    title: String,
+    osc: Option<OscTitle>,
+    status: pane_status::PaneStatus,
+    is_refreshing: bool,
     _events: Task<()>,
 }
 
@@ -107,6 +108,7 @@ pub struct Shell {
     gear_bounds: pane_options::GearBounds,
     split_bounds: splits::SplitBounds,
     _quit_hook: Subscription,
+    _status_poll: Task<()>,
 }
 
 impl Shell {
@@ -141,6 +143,7 @@ impl Shell {
                 shell.flush();
                 async {}
             }),
+            _status_poll: pane_status::poll_pane_statuses(cx),
         };
         shell.show_active_workspace(cx);
         shell
@@ -183,7 +186,7 @@ impl Shell {
             return;
         };
         let command = login_shell_command(record.cwd.clone());
-        if let Some(session) = self.spawn_session(panel, command, record.panel.title.clone(), cx) {
+        if let Some(session) = self.spawn_session(panel, command, cx) {
             self.set_panel_session(panel, session);
         }
     }
@@ -646,7 +649,7 @@ impl Shell {
         let command = login_shell_command(cwd.clone());
         let title = shell_title(&command);
         let panel = PanelId::new();
-        let session = self.spawn_session(panel, command, title.clone(), cx)?;
+        let session = self.spawn_session(panel, command, cx)?;
         self.model.add_panel(PanelSnapshot { panel: Panel::new_terminal(panel, title, session), cwd, name: None });
         Some(panel)
     }
@@ -655,7 +658,6 @@ impl Shell {
         &mut self,
         panel: PanelId,
         command: ShellCommand,
-        title: String,
         cx: &mut Context<Self>,
     ) -> Option<TerminalSessionId> {
         let session = self
@@ -665,14 +667,22 @@ impl Shell {
             .ok()?;
         let handle = self.terminals.handle_for(session)?;
         let events = watch_session(panel, handle.subscribe(), cx);
-        self.panes.insert(panel, Pane { session, terminal: TerminalPane::new(handle), title, _events: events });
+        self.panes.insert(panel, Pane {
+            session,
+            terminal: TerminalPane::new(handle),
+            osc: None,
+            status: pane_status::PaneStatus::default(),
+            is_refreshing: false,
+            _events: events,
+        });
         Some(session)
     }
 
     fn apply_batch(&mut self, panel: PanelId, batch: EventBatch, cx: &mut Context<Self>) {
         if let Some(title) = batch.title {
             if let Some(pane) = self.panes.get_mut(&panel) {
-                pane.title = title.clone();
+                let owner = pane.terminal.handle.foreground_process_group();
+                pane.osc = Some(OscTitle { text: title.clone(), owner });
             }
             if let Some(record) = self.model.panel_mut(panel) {
                 record.panel.title = title;
@@ -681,6 +691,7 @@ impl Shell {
         if batch.exited {
             self.close_pane(panel, cx);
         }
+        self.refresh_status(panel, cx);
         cx.notify();
     }
 
@@ -812,24 +823,6 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
-}
-
-pub fn short_cwd(path: &Path, home: &Path) -> String {
-    let (prefix, relative) = match path.strip_prefix(home) {
-        Ok(relative) => (HOME_MARK.to_string(), relative),
-        Err(_) => (String::new(), path.strip_prefix("/").unwrap_or(path)),
-    };
-    let segments: Vec<String> =
-        relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
-    let tail_start = segments.len().saturating_sub(CWD_TAIL_SEGMENTS);
-    let shown = segments[tail_start..].join("/");
-    match (prefix.is_empty(), tail_start > 0, shown.is_empty()) {
-        (false, _, true) => prefix,
-        (false, false, false) => format!("{prefix}/{shown}"),
-        (false, true, false) => format!("{prefix}/{ELLIPSIS}/{shown}"),
-        (true, false, _) => format!("/{shown}"),
-        (true, true, _) => format!("/{ELLIPSIS}/{shown}"),
-    }
 }
 
 fn edit_field(text: &mut SharedString, keystroke: &Keystroke) {

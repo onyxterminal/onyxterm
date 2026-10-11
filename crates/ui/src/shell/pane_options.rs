@@ -21,12 +21,6 @@ pub(super) struct PaneField {
 }
 
 impl Shell {
-    pub(super) fn pane_display_title(&self, panel: PanelId) -> String {
-        let name = self.model.panel(panel).and_then(|record| record.name.clone());
-        let live = self.panes.get(&panel).map(|pane| pane.title.clone()).filter(|title| !title.is_empty());
-        name.or(live).unwrap_or_else(|| workspace_service::DEFAULT_PANEL_TITLE.to_string())
-    }
-
     pub(super) fn gear_bounds_probe(&self, panel: PanelId) -> impl IntoElement {
         bounds_probe(&self.gear_bounds, panel)
     }

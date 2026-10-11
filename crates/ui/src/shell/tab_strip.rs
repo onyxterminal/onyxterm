@@ -24,7 +24,7 @@ impl Shell {
                 let title = self.pane_display_title(tab.focused());
                 let label = match self.tab_field.as_ref().filter(|field| field.index == index) {
                     Some(field) => format!("{}{CARET}", field.text),
-                    None => format!("{}  {}", index + 1, tab.name().unwrap_or(&title)),
+                    None => tab.name().unwrap_or(&title).to_string(),
                 };
                 (label, index == active)
             })
@@ -101,8 +101,7 @@ impl Shell {
         let Some(tab) = self.model.tabs().iter().nth(index) else {
             return;
         };
-        let title = self.panes.get(&tab.focused()).map(|pane| pane.title.as_str()).unwrap_or_default();
-        let text = tab.name().unwrap_or(title).to_string().into();
+        let text = tab.name().map(str::to_string).unwrap_or_else(|| self.pane_display_title(tab.focused())).into();
         self.tab_field = Some(TabField { index, text });
     }
 

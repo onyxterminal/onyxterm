@@ -1,8 +1,8 @@
-use super::{short_cwd, Shell};
+use super::Shell;
 use crate::command::CommandId;
 use crate::workspace_menu::CARET;
 use domain::{LayoutNode, PanelId};
-use gpui::{div, prelude::*, px, Context, Hsla, MouseButton, SharedString, Window};
+use gpui::{div, prelude::*, px, AnyView, App, Context, Hsla, MouseButton, SharedString, Window};
 
 const CLOSE_GLYPH: &str = "\u{00d7}";
 const GEAR_GLYPH: &str = "\u{2699}\u{fe0e}";
@@ -13,11 +13,11 @@ impl Shell {
     pub(super) fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let title = self.pane_display_title(panel);
-        let cwd = short_cwd(&self.panel_cwd(panel), self.model.home());
         let title_color = if is_focused { theme.text_default() } else { theme.text.muted };
         let editing = self.pane_field.as_ref().filter(|field| field.panel == panel);
         let title_element = match editing {
             Some(field) => div()
+                .id(SharedString::from(format!("pane-title-{panel}")))
                 .flex_shrink()
                 .min_w(px(0.0))
                 .px_1()
@@ -25,7 +25,14 @@ impl Shell {
                 .border_1()
                 .border_color(theme.border_focus())
                 .child(format!("{}{CARET}", field.text)),
-            None => div().flex_shrink().min_w(px(0.0)).truncate().text_color(title_color).child(title),
+            None => div()
+                .id(SharedString::from(format!("pane-title-{panel}")))
+                .flex_1()
+                .min_w(px(0.0))
+                .truncate()
+                .text_color(title_color)
+                .tooltip(self.tooltip_builder(self.pane_title_tooltip(panel).into()))
+                .child(title),
         };
         let drag_handle = div()
             .flex_1()
@@ -46,8 +53,7 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .child(title_element)
-            .child(div().flex_1().min_w(px(0.0)).truncate().text_color(theme.text.muted).child(cwd));
+            .child(title_element);
         div()
             .absolute()
             .top_0()
@@ -78,8 +84,6 @@ impl Shell {
     fn header_button(&self, id: String, tooltip: &'static str, glyph: &'static str) -> gpui::Stateful<gpui::Div> {
         let theme = &self.state.theme;
         let hover_bg = theme.surface.subtle;
-        let tooltip = SharedString::from(tooltip);
-        let colors = (theme.canvas(), theme.border_default(), theme.text_default());
         div()
             .id(SharedString::from(id))
             .relative()
@@ -90,8 +94,14 @@ impl Shell {
             .cursor_pointer()
             .text_color(theme.text.muted)
             .hover(move |style| style.bg(hover_bg))
-            .tooltip(move |_window, cx| cx.new(|_| Tooltip { text: tooltip.clone(), colors }).into())
+            .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
             .child(glyph)
+    }
+
+    fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+        let theme = &self.state.theme;
+        let colors = (theme.canvas(), theme.border_default(), theme.text_default());
+        move |_window, cx| cx.new(|_| Tooltip { text: text.clone(), colors }).into()
     }
 
     fn gear_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
