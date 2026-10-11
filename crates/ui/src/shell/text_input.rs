@@ -204,7 +204,8 @@ impl EntityInputHandler for Shell {
             return;
         }
         self.marked_text = None;
-        if let Some(handle) = self.focused_handle().filter(|_| !text.is_empty()) {
+        let is_typing_into_shell = !text.is_empty() && !self.is_copy_mode_active();
+        if let Some(handle) = self.focused_handle().filter(|_| is_typing_into_shell) {
             write_to(handle, text.as_bytes());
         }
         cx.notify();

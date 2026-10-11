@@ -7,6 +7,7 @@ use domain::PanelId;
 use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 
 const GEAR_TOOLTIP: &str = "Pane Options";
+const COPY_MODE_LABEL: &str = "COPY";
 const CLOSE_TOOLTIP: &str = "Close Pane";
 const HEADER_GAP_PX: f32 = 7.0;
 const BUTTON_GAP_PX: f32 = 2.0;
@@ -64,7 +65,16 @@ impl Shell {
             .bg(theme.surface.canvas)
             .rounded_t(px(theme.layout.island_radius_px))
             .child(drag_handle)
+            .when(self.is_pane_in_copy_mode(panel), |header| header.child(self.copy_mode_badge()))
             .child(buttons)
+    }
+
+    fn copy_mode_badge(&self) -> impl IntoElement {
+        div()
+            .flex_none()
+            .text_color(self.state.theme.accent.primary)
+            .font_weight(FontWeight::BOLD)
+            .child(COPY_MODE_LABEL)
     }
 
     fn status_dot(&self, panel: PanelId) -> impl IntoElement {

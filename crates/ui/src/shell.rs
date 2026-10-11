@@ -41,6 +41,7 @@ mod pane_status;
 mod splits;
 mod settings_view;
 mod color_picker_view;
+mod copy_mode;
 mod theme_editor;
 mod tab_strip;
 mod text_input;
@@ -112,6 +113,7 @@ pub struct Shell {
     tab_bounds: pane_drag::BoundsMap<usize>,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
+    is_copy_top_pending: bool,
     gear_bounds: pane_options::GearBounds,
     picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
     palette_scroll: UniformListScrollHandle,
@@ -147,6 +149,7 @@ impl Shell {
             tab_bounds: pane_drag::BoundsMap::default(),
             pane_menu: None,
             pane_field: None,
+            is_copy_top_pending: false,
             gear_bounds: pane_options::GearBounds::default(),
             picker_bounds: pane_drag::BoundsMap::default(),
             palette_scroll: UniformListScrollHandle::new(),
@@ -265,6 +268,7 @@ impl Shell {
                 }
             }
             CommandId::MoveToNewTab => self.move_focused_to_new_tab(),
+            CommandId::ToggleCopyMode => self.toggle_copy_mode(),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         if id.is_structural() {
@@ -315,6 +319,9 @@ impl Shell {
         }
         if self.state.palette_visible {
             return !is_composed_text(keystroke, false);
+        }
+        if self.is_copy_mode_active() {
+            return self.handle_copy_mode_key(keystroke, cx);
         }
         self.send_key_to_terminal(event, cx)
     }

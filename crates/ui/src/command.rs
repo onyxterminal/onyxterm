@@ -45,6 +45,7 @@ pub enum CommandId {
     NextWorkspace,
     PrevWorkspace,
     OpenWorkspaceMenu,
+    ToggleCopyMode,
 }
 
 impl CommandId {
@@ -240,6 +241,7 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
         Command::builder(SelectAll, "Select All", "Edit", no_op).build(),
+        Command::builder(ToggleCopyMode, "Toggle Copy Mode", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
         Command::builder(Quit, "Quit Onyxterm", "Application", no_op)

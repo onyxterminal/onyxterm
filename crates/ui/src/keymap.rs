@@ -183,6 +183,7 @@ fn bind_application(map: &mut Keymap) {
     map.bind(Combo::new(cmd, ","), OpenSettings);
     map.bind(Combo::new(cmd, "c"), Copy);
     map.bind(Combo::new(cmd, "v"), Paste);
+    map.bind(Combo::new(Modifiers::command_shift(), "c"), ToggleCopyMode);
     map.bind(Combo::new(cmd | Modifiers::control(), "f"), ToggleFullScreen);
     map.bind(Combo::new(cmd, "m"), Minimize);
 }

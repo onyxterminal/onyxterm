@@ -5,6 +5,7 @@ pub mod app;
 pub mod color_picker;
 pub mod command;
 pub mod confirm;
+pub mod copy_mode;
 pub mod input;
 pub mod island_look;
 pub mod keymap;

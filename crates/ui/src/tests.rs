@@ -1142,3 +1142,35 @@ fn tab_grid_keeps_panes_and_focus_and_clears_maximize() {
     tab.equalize();
     tab.layout().validate().unwrap();
 }
+
+#[test]
+fn copy_mode_maps_vim_keys_to_actions() {
+    use crate::copy_mode::{copy_mode_action, CopyModeAction};
+    use terminal_core::ViMotion;
+    let none = Modifiers::none();
+    let typed = |key: &str, text: &str| keystroke(none, key, Some(text));
+    assert_eq!(copy_mode_action(&typed("h", "h"), false), CopyModeAction::Motion(ViMotion::Left));
+    assert_eq!(copy_mode_action(&typed("j", "j"), false), CopyModeAction::Motion(ViMotion::Down));
+    assert_eq!(copy_mode_action(&typed("w", "w"), false), CopyModeAction::Motion(ViMotion::SemanticRight));
+    assert_eq!(copy_mode_action(&typed("b", "b"), false), CopyModeAction::Motion(ViMotion::SemanticLeft));
+    assert_eq!(copy_mode_action(&typed("e", "e"), false), CopyModeAction::Motion(ViMotion::SemanticRightEnd));
+    assert_eq!(copy_mode_action(&typed("0", "0"), false), CopyModeAction::Motion(ViMotion::First));
+    assert_eq!(copy_mode_action(&typed("4", "$"), false), CopyModeAction::Motion(ViMotion::Last));
+    assert_eq!(copy_mode_action(&typed("g", "g"), false), CopyModeAction::AwaitTop);
+    assert_eq!(copy_mode_action(&typed("g", "g"), true), CopyModeAction::Top);
+    assert_eq!(copy_mode_action(&keystroke(Modifiers::shift(), "g", Some("G")), false), CopyModeAction::Bottom);
+    assert_eq!(copy_mode_action(&keystroke(Modifiers::shift(), "g", None), false), CopyModeAction::Bottom);
+    assert_eq!(copy_mode_action(&typed("v", "v"), false), CopyModeAction::ToggleSelection(SelectionKind::Simple));
+    assert_eq!(
+        copy_mode_action(&keystroke(Modifiers::shift(), "v", Some("V")), false),
+        CopyModeAction::ToggleSelection(SelectionKind::Line)
+    );
+    assert_eq!(copy_mode_action(&typed("y", "y"), false), CopyModeAction::Yank);
+    assert_eq!(copy_mode_action(&typed("q", "q"), false), CopyModeAction::Exit);
+    assert_eq!(copy_mode_action(&keystroke(none, "escape", None), false), CopyModeAction::Exit);
+    assert_eq!(copy_mode_action(&keystroke(Modifiers::control(), "u", None), false), CopyModeAction::HalfPageUp);
+    assert_eq!(copy_mode_action(&keystroke(Modifiers::control(), "d", None), false), CopyModeAction::HalfPageDown);
+    assert_eq!(copy_mode_action(&typed("x", "x"), false), CopyModeAction::Ignore);
+    let map = Keymap::default();
+    assert_eq!(map.resolve(&Combo::new(Modifiers::command_shift(), "c")), Some(CommandId::ToggleCopyMode));
+}
