@@ -16,6 +16,7 @@ pub struct ConfirmCopy {
     pub title: String,
     pub body: String,
     pub action: &'static str,
+    pub is_destructive: bool,
 }
 
 pub fn close_pane_copy() -> ConfirmCopy {
@@ -23,6 +24,7 @@ pub fn close_pane_copy() -> ConfirmCopy {
         title: "Terminate running process?".into(),
         body: "A command is still running in this pane. Closing it will end the process.".into(),
         action: "Close and terminate",
+        is_destructive: true,
     }
 }
 
@@ -31,6 +33,7 @@ pub fn close_tab_copy() -> ConfirmCopy {
         title: "Terminate running processes?".into(),
         body: "A command is still running in this tab. Closing it will end every process in it.".into(),
         action: "Close tab",
+        is_destructive: true,
     }
 }
 
@@ -39,11 +42,12 @@ pub fn delete_workspace_copy(name: &str, sessions: usize) -> ConfirmCopy {
         title: format!("Delete workspace \u{201c}{name}\u{201d}?"),
         body: format!("Its tabs and layout are removed. {}", sessions_ending(sessions)),
         action: "Delete",
+        is_destructive: true,
     }
 }
 
 pub fn quit_copy(sessions: usize) -> ConfirmCopy {
-    ConfirmCopy { title: "Quit Onyxterm?".into(), body: sessions_ending(sessions), action: "Quit" }
+    ConfirmCopy { title: "Quit Onyxterm?".into(), body: sessions_ending(sessions), action: "Quit", is_destructive: false }
 }
 
 pub fn sessions_ending(count: usize) -> String {

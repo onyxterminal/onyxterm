@@ -390,6 +390,7 @@ fn delete_workspace_copy_names_workspace_and_session_count() {
     let copy = delete_workspace_copy("Backend", 3);
     assert!(copy.title.contains("Backend"));
     assert!(copy.body.ends_with("3 sessions will end."));
+    assert!(copy.is_destructive);
     assert_eq!(sessions_ending(1), "1 session will end.");
 }
 
@@ -400,6 +401,9 @@ fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
     assert_eq!(copy.title, "Quit Onyxterm?");
     assert_eq!(copy.body, "4 sessions will end.");
     assert_eq!(copy.action, "Quit");
+    assert!(!copy.is_destructive);
+    assert!(crate::confirm::close_pane_copy().is_destructive);
+    assert!(crate::confirm::close_tab_copy().is_destructive);
     let map = Keymap::default();
     assert_eq!(map.resolve(&Combo::new(Modifiers::command(), "q")), Some(CommandId::Quit));
 }
@@ -973,4 +977,15 @@ fn palette_window_keeps_the_selection_in_view() {
     assert_eq!(visible_rows(20, 9, 9), 1..10);
     assert_eq!(visible_rows(20, 19, 9), 11..20);
     assert_eq!(visible_rows(0, 0, 9), 0..0);
+}
+
+#[test]
+fn workspace_button_falls_back_to_scratch_and_rows_count_tabs() {
+    use crate::workspace_menu::{tab_count_label, workspace_button_label};
+    assert_eq!(workspace_button_label(Some("Backend")), "Backend");
+    assert_eq!(workspace_button_label(Some("  ")), "Scratch");
+    assert_eq!(workspace_button_label(None), "Scratch");
+    assert_eq!(tab_count_label(0), "0 tabs");
+    assert_eq!(tab_count_label(1), "1 tab");
+    assert_eq!(tab_count_label(3), "3 tabs");
 }

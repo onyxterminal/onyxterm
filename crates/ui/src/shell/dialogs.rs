@@ -1,27 +1,37 @@
 use super::Shell;
+use crate::command::CommandId;
 use crate::confirm::ConfirmCopy;
-use crate::workspace_menu::{workspace_menu, WorkspaceMenuActions, WorkspaceMenuItem};
-use gpui::{div, prelude::*, px, Context, Div, Hsla, MouseButton, SharedString, Window};
+use crate::theme::box_shadows;
+use crate::workspace_menu::{workspace_menu, WorkspaceMenuActions, WorkspaceMenuItem, WorkspaceMenuModel};
+use gpui::{div, prelude::*, px, Context, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 use std::rc::Rc;
 
-const CLOSE_PROMPT_WIDTH_PX: f32 = 360.0;
-const BACKDROP_ALPHA: f32 = 0.35;
+const HALF: f32 = 0.5;
+const DIALOG_PADDING_PX: f32 = 18.0;
+const DIALOG_TEXT_GAP_PX: f32 = 6.0;
+const DIALOG_BUTTONS_TOP_PX: f32 = 16.0;
+const DIALOG_BUTTON_GAP_PX: f32 = 8.0;
+const DIALOG_BUTTON_PADDING_X_PX: f32 = 14.0;
+const NOTICE_PADDING_X_PX: f32 = 12.0;
+const NOTICE_PADDING_Y_PX: f32 = 6.0;
+const NOTICE_GAP_PX: f32 = 12.0;
+const DISMISS_LABEL: &str = "Dismiss";
+const CANCEL_LABEL: &str = "Cancel";
+
+struct ButtonPaint {
+    fill: Hsla,
+    text: Hsla,
+    border: Hsla,
+}
 
 impl Shell {
     pub(super) fn render_workspace_menu(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
-        let active = self.model.active_id();
-        let items = self
-            .model
-            .entries()
-            .iter()
-            .map(|entry| WorkspaceMenuItem {
-                id: entry.workspace.id.to_string().into(),
-                name: entry.workspace.name.clone().into(),
-                is_active: entry.workspace.id == active,
-                is_editable: !entry.is_scratch,
-            })
-            .collect();
+        let model = WorkspaceMenuModel {
+            items: self.workspace_menu_items(),
+            field: self.menu_field.clone(),
+            new_workspace_shortcut: self.state.keymap.combo_for(CommandId::NewWorkspace).map(|combo| combo.glyphs()),
+        };
         let actions = WorkspaceMenuActions {
             select: self.menu_handler(cx, |shell, key, cx| shell.select_workspace_by_key(key, cx)),
             rename: self.menu_handler(cx, |shell, key, cx| shell.start_rename_workspace(key, cx)),
@@ -35,6 +45,9 @@ impl Shell {
                 })
             },
         };
+        let layout = theme.layout;
+        let top = (layout.tab_strip_height_px + theme.top_bar.control_height_px) * HALF + theme.menu.offset_px;
+        let left = layout.traffic_lights_width_px + theme.top_bar.leading_gap_px;
         div()
             .absolute()
             .inset_0()
@@ -43,11 +56,26 @@ impl Shell {
             .child(
                 div()
                     .absolute()
-                    .top(px(theme.layout.tab_strip_height_px))
-                    .left(px(theme.layout.gap_px))
+                    .top(px(top))
+                    .left(px(left))
                     .occlude()
-                    .child(workspace_menu(items, self.menu_field.clone(), theme, actions)),
+                    .child(workspace_menu(model, theme, actions)),
             )
+    }
+
+    fn workspace_menu_items(&self) -> Vec<WorkspaceMenuItem> {
+        let active = self.model.active_id();
+        self.model
+            .entries()
+            .iter()
+            .map(|entry| WorkspaceMenuItem {
+                id: entry.workspace.id.to_string().into(),
+                name: entry.workspace.name.clone().into(),
+                tab_count: entry.tabs.len(),
+                is_active: entry.workspace.id == active,
+                is_editable: !entry.is_scratch,
+            })
+            .collect()
     }
 
     fn menu_handler(
@@ -69,94 +97,108 @@ impl Shell {
         let theme = &self.state.theme;
         div()
             .flex_none()
-            .px_3()
-            .py_1()
+            .px(px(NOTICE_PADDING_X_PX))
+            .py(px(NOTICE_PADDING_Y_PX))
             .flex()
             .flex_row()
+            .items_center()
             .justify_between()
-            .gap_3()
+            .gap(px(NOTICE_GAP_PX))
             .mx(px(theme.layout.window_margin_px))
             .mb(px(theme.layout.island_gap_px))
             .rounded(px(theme.layout.island_radius_px))
-            .bg(theme.canvas())
+            .bg(theme.surface.canvas)
             .border_1()
-            .border_color(theme.border_default())
+            .border_color(theme.border.default)
+            .shadow(box_shadows(&theme.shadow.card))
+            .font_family(SharedString::from(theme.ui_font.family.clone()))
+            .text_size(px(theme.ui_font.dialog_body_px))
             .text_color(theme.text.muted)
             .child(notice.to_string())
             .child(
                 div()
                     .id("notice-dismiss")
+                    .flex_none()
                     .cursor_pointer()
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.accent.primary)
                     .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.dismiss_notice(cx)))
-                    .child("Dismiss"),
+                    .child(DISMISS_LABEL),
             )
     }
 
     pub(super) fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
-        let backdrop = Hsla { a: BACKDROP_ALPHA, ..gpui::black() };
+        let confirm_fill = match copy.is_destructive {
+            true => theme.chrome.destructive,
+            false => theme.accent.primary,
+        };
+        let cancel = ButtonPaint { fill: theme.surface.canvas, text: theme.text.default, border: theme.border.default };
+        let confirm = ButtonPaint { fill: confirm_fill, text: theme.text.inverse, border: confirm_fill };
         div()
             .absolute()
             .inset_0()
             .occlude()
-            .bg(backdrop)
+            .bg(theme.chrome.backdrop)
             .flex()
             .items_center()
             .justify_center()
             .child(
                 div()
-                    .w(px(CLOSE_PROMPT_WIDTH_PX))
-                    .p_4()
-                    .bg(theme.surface.raised)
-                    .border_1()
-                    .border_color(theme.border_default())
-                    .rounded(px(theme.layout.island_radius_px))
-                    .shadow_md()
+                    .w(px(theme.dialog.width_px))
+                    .p(px(DIALOG_PADDING_PX))
+                    .font_family(SharedString::from(theme.ui_font.family.clone()))
+                    .bg(theme.chrome.palette_fill)
+                    .border(px(theme.palette.border_px))
+                    .border_color(theme.chrome.menu_border)
+                    .rounded(px(theme.dialog.radius_px))
+                    .shadow(box_shadows(&theme.shadow.palette))
                     .flex()
                     .flex_col()
-                    .gap_3()
-                    .child(copy.title)
-                    .child(div().text_color(theme.text.muted).child(copy.body))
+                    .gap(px(DIALOG_TEXT_GAP_PX))
                     .child(
                         div()
+                            .text_size(px(theme.ui_font.dialog_title_px))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text.default)
+                            .child(copy.title),
+                    )
+                    .child(div().text_size(px(theme.ui_font.dialog_body_px)).text_color(theme.text.muted).child(copy.body))
+                    .child(
+                        div()
+                            .pt(px(DIALOG_BUTTONS_TOP_PX))
                             .flex()
                             .flex_row()
                             .justify_end()
-                            .gap_2()
-                            .child(
-                                self.prompt_button("close-cancel", "Cancel", (theme.surface.subtle, theme.text_default()))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|shell, _event, _window, cx| shell.cancel_confirmation(cx)),
-                                    ),
-                            )
-                            .child(
-                                self.prompt_button(
-                                    "close-confirm",
-                                    copy.action,
-                                    (theme.status.failed, theme.text.inverse),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|shell, _event, _window, cx| shell.accept_confirmation(cx)),
-                                ),
-                            ),
+                            .gap(px(DIALOG_BUTTON_GAP_PX))
+                            .child(self.prompt_button("close-cancel", CANCEL_LABEL, cancel).on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|shell, _event, _window, cx| shell.cancel_confirmation(cx)),
+                            ))
+                            .child(self.prompt_button("close-confirm", copy.action, confirm).on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|shell, _event, _window, cx| shell.accept_confirmation(cx)),
+                            )),
                     ),
             )
     }
 
-    fn prompt_button(&self, id: &'static str, label: &'static str, (bg, fg): (Hsla, Hsla)) -> gpui::Stateful<gpui::Div> {
+    fn prompt_button(&self, id: &'static str, label: &'static str, paint: ButtonPaint) -> Stateful<Div> {
+        let theme = &self.state.theme;
         div()
             .id(id)
-            .px_3()
-            .py_1()
-            .rounded_md()
+            .h(px(theme.dialog.button_height_px))
+            .px(px(DIALOG_BUTTON_PADDING_X_PX))
+            .flex()
+            .items_center()
+            .rounded(px(theme.dialog.button_radius_px))
             .cursor_pointer()
-            .bg(bg)
-            .text_color(fg)
-            .border_1()
-            .border_color(self.state.theme.border_default())
+            .text_size(px(theme.ui_font.button_px))
+            .font_weight(FontWeight::MEDIUM)
+            .bg(paint.fill)
+            .text_color(paint.text)
+            .border(px(theme.palette.border_px))
+            .border_color(paint.border)
             .child(label)
     }
 }

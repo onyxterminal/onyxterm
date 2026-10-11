@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod icons;
+pub mod menu_chrome;
 
 use gpui::{point, px, BoxShadow, Hsla, Rgba, WindowBackgroundAppearance};
 use serde::{Deserialize, Deserializer};

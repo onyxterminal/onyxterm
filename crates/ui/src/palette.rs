@@ -4,8 +4,8 @@
 use crate::app::AppState;
 use crate::command::filtered_choices;
 use crate::theme::icons::Icon;
+use crate::theme::menu_chrome::caret_text;
 use crate::theme::{box_shadows, Theme};
-use crate::workspace_menu::CARET;
 use gpui::{div, prelude::*, px, Div, Hsla, SharedString};
 use std::ops::Range;
 
@@ -79,10 +79,6 @@ pub fn build_overlay(state: &AppState, theme: &Theme) -> Div {
 
 fn search_row(query: &str, theme: &Theme) -> Div {
     let palette = theme.palette;
-    let typed = match query.is_empty() {
-        true => div().text_color(theme.text.subtle).child(QUERY_PLACEHOLDER),
-        false => div().text_color(theme.text.default).child(query.to_string()),
-    };
     div()
         .h(px(palette.search_height_px))
         .flex_none()
@@ -95,19 +91,7 @@ fn search_row(query: &str, theme: &Theme) -> Div {
         .border_color(theme.border.muted)
         .text_size(px(theme.ui_font.palette_input_px))
         .child(Icon::Magnifier.sized(palette.search_icon_px))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .when(query.is_empty(), |field| field.child(caret(theme)))
-                .child(typed)
-                .when(!query.is_empty(), |field| field.child(caret(theme))),
-        )
-}
-
-fn caret(theme: &Theme) -> Div {
-    div().text_color(theme.accent.primary).child(CARET)
+        .child(caret_text(query, QUERY_PLACEHOLDER, theme))
 }
 
 fn results(rows: &[PaletteRow], selected: usize, theme: &Theme) -> Div {
