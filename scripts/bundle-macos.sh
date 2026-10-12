@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-app_name="Onyxterm"
-executable_name="onyxterm"
+app_name="Onyx"
+executable_name="Onyx"
 cargo_package="app"
 cargo_binary="app"
 bundle="$repo_root/target/release/$app_name.app"

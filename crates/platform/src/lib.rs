@@ -17,8 +17,8 @@ pub enum PlatformError {
     MissingEnv(&'static str),
 }
 
-pub const PROFILE_DIR_ENV: &str = "ONYXTERM_PROFILE_DIR";
-pub const DATABASE_FILE_NAME: &str = "onyxterm.db";
+pub const PROFILE_DIR_ENV: &str = "ONYX_PROFILE_DIR";
+pub const DATABASE_FILE_NAME: &str = "Onyx.db";
 
 pub fn home_dir() -> Result<PathBuf, PlatformError> {
     non_empty_env("HOME").ok_or(PlatformError::MissingEnv("HOME"))
@@ -43,7 +43,7 @@ fn non_empty_env(key: &str) -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn data_root() -> Result<PathBuf, PlatformError> {
-    Ok(home_dir()?.join("Library/Application Support/Onyxterm"))
+    Ok(home_dir()?.join("Library/Application Support/Onyx"))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -52,7 +52,7 @@ fn data_root() -> Result<PathBuf, PlatformError> {
         Some(dir) => dir,
         None => home_dir()?.join(".local/share"),
     };
-    Ok(base.join("onyxterm"))
+    Ok(base.join("Onyx"))
 }
 
 pub trait SingleInstanceLock: Send + Sync {

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[test]
 fn profile_dir_honours_env_override_and_defaults_per_platform() {
-    let override_dir = std::env::temp_dir().join("onyxterm-profile-override");
+    let override_dir = std::env::temp_dir().join("onyx-profile-override");
     std::env::set_var(PROFILE_DIR_ENV, &override_dir);
     assert_eq!(profile_dir("default").expect("override"), override_dir);
     assert_eq!(
@@ -14,9 +14,9 @@ fn profile_dir_honours_env_override_and_defaults_per_platform() {
     std::env::remove_var(PROFILE_DIR_ENV);
     let resolved = profile_dir("work").expect("default dir");
     let expected_suffix = if cfg!(target_os = "macos") {
-        PathBuf::from("Library/Application Support/Onyxterm/work")
+        PathBuf::from("Library/Application Support/Onyx/work")
     } else {
-        PathBuf::from("onyxterm/work")
+        PathBuf::from("Onyx/work")
     };
     assert!(resolved.ends_with(&expected_suffix), "{}", resolved.display());
 }

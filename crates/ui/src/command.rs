@@ -254,7 +254,7 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(ToggleCopyMode, "Toggle Copy Mode", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
-        Command::builder(Quit, "Quit Onyxterm", "Application", no_op)
+        Command::builder(Quit, "Quit Onyx", "Application", no_op)
             .enabled_when(always_enabled)
             .build(),
     ]

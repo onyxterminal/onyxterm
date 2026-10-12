@@ -421,7 +421,7 @@ fn delete_workspace_copy_names_workspace_and_session_count() {
 fn quit_prompt_counts_sessions_and_cmd_q_routes_to_quit() {
     use crate::confirm::quit_copy;
     let copy = quit_copy(4, 0);
-    assert_eq!(copy.title, "Quit Onyxterm?");
+    assert_eq!(copy.title, "Quit Onyx?");
     assert_eq!(copy.body, "4 sessions will end.");
     assert_eq!(copy.action, "Quit");
     assert!(!copy.is_destructive);
@@ -594,7 +594,7 @@ fn every_keymap_binding_round_trips_into_a_gpui_menu_shortcut() {
 #[test]
 fn menu_bar_lists_native_sections_and_window_shortcuts() {
     let names: Vec<String> = crate::menus::app_menus().iter().map(|menu| menu.name.to_string()).collect();
-    assert_eq!(names, ["Onyxterm", "File", "Edit", "View", "Window"]);
+    assert_eq!(names, ["Onyx", "File", "Edit", "View", "Window"]);
     let map = Keymap::default();
     let cmd = Modifiers::command();
     assert_eq!(map.resolve(&Combo::new(cmd, "m")), Some(CommandId::Minimize));

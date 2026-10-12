@@ -65,7 +65,7 @@ const ESCAPE_KEY: &str = "escape";
 const ENTER_KEY: &str = "enter";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
-const ABOUT_TITLE: &str = "Onyxterm";
+const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 
 struct Pane {

@@ -71,7 +71,7 @@ pub fn run_app(startup: Startup) -> Result<(), UiError> {
         menus::install_menus(cx);
         let options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
-                title: Some("Onyxterm".into()),
+                title: Some("Onyx".into()),
                 ..Default::default()
             }),
             window_bounds: Some(gpui::WindowBounds::Windowed(Bounds::centered(

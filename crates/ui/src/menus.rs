@@ -26,8 +26,8 @@ pub fn menu_shortcuts(keymap: &Keymap) -> Vec<KeyBinding> {
 pub fn app_menus() -> Vec<Menu> {
     use CommandId::*;
     vec![
-        menu("Onyxterm", &[Some((About, "About Onyxterm")), Some((OpenSettings, "Settings\u{2026}")), None, Some((Hide, "Hide Onyxterm")),
-            Some((HideOthers, "Hide Others")), Some((ShowAll, "Show All")), None, Some((Quit, "Quit Onyxterm"))]),
+        menu("Onyx", &[Some((About, "About Onyx")), Some((OpenSettings, "Settings\u{2026}")), None, Some((Hide, "Hide Onyx")),
+            Some((HideOthers, "Hide Others")), Some((ShowAll, "Show All")), None, Some((Quit, "Quit Onyx"))]),
         menu("File", &[Some((NewTab, "New Tab")), Some((NewWorkspace, "New Workspace\u{2026}")), None,
             Some((OpenFile, "Open File\u{2026}")), Some((OpenFolder, "Open Folder\u{2026}")),
             Some((OpenEditorHere, "Open Editor Here")), Some((ToggleFileTree, "Toggle File Tree")),

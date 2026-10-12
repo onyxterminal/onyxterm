@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleName</key>
-	<string>Onyxterm</string>
+	<string>Onyx</string>
 	<key>CFBundleDisplayName</key>
-	<string>Onyxterm</string>
+	<string>Onyx</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.onyxterm.app</string>
+	<string>dev.onyx.app</string>
 	<key>CFBundleExecutable</key>
-	<string>onyxterm</string>
+	<string>Onyx</string>
 	<key>CFBundleIconFile</key>
-	<string>Onyxterm</string>
+	<string>Onyx</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleSignature</key>

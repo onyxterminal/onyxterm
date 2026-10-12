@@ -82,7 +82,7 @@ pub fn quit_copy(sessions: usize, unsaved: usize) -> ConfirmCopy {
         false => format!("{}.", consequences),
     };
     ConfirmCopy {
-        title: "Quit Onyxterm?".into(),
+        title: "Quit Onyx?".into(),
         body,
         action: "Quit",
         is_destructive: unsaved > 0,
