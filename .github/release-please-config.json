@@ -1,0 +1,7 @@
+{
+  "packages": {
+    "crates/app": {
+      "package-name": "app"
+    }
+  }
+}

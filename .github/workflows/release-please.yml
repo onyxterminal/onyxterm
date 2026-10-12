@@ -17,5 +17,4 @@ jobs:
       - uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          release-type: rust
-          manifest-file: crates/app/Cargo.toml
+          config-file: .github/release-please-config.json
