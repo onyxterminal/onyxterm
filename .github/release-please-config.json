@@ -2,7 +2,8 @@
   "packages": {
     "crates/app": {
       "package-name": "app",
-      "release-type": "rust"
+      "release-type": "rust",
+      "include-component-in-tag": false
     }
   }
 }
