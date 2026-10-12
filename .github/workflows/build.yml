@@ -11,32 +11,13 @@ permissions:
   contents: write
 
 env:
-  BIN_NAME: onyxterm
+  BIN_NAME: Onyx
+  APP_NAME: Onyx
 
 jobs:
   build:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            platform: macos
-            artifact_id: app-macos-arm64
-          - os: ubuntu-latest
-            platform: linux
-            arch: x86_64
-            deb_arch: amd64
-            artifact_id: app-linux-x86_64
-          - os: ubuntu-24.04-arm
-            platform: linux
-            arch: aarch64
-            deb_arch: arm64
-            artifact_id: app-linux-aarch64
-          - os: windows-latest
-            platform: windows
-            artifact_id: app-windows-x86_64
+    name: macos
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
@@ -56,121 +37,26 @@ jobs:
       - name: Build
         run: cargo build --release --bin app -p app
 
-      - name: Stage binary as ${{ env.BIN_NAME }}
-        if: matrix.platform == 'linux'
-        run: mv "target/release/app" "target/release/${{ env.BIN_NAME }}"
-        shell: bash
-
-      - name: Install cargo-deb
-        if: matrix.platform == 'linux'
-        run: cargo install cargo-deb --locked
-
-      - name: Install cargo-wix
-        if: matrix.platform == 'windows'
-        run: cargo install cargo-wix --locked
-
-      - name: Generate Linux icon
-        if: matrix.platform == 'linux'
-        run: |
-          mkdir -p packaging/linux
-          magick assets/logo.png -resize 256x256 packaging/linux/onyxterm.png
-        shell: bash
-
       - name: Regenerate .icns
-        if: matrix.platform == 'macos'
         run: scripts/make-icon.sh
 
       - name: Bundle .app
-        if: matrix.platform == 'macos'
         run: scripts/bundle-macos.sh
 
-      - name: Zip .app
-        if: matrix.platform == 'macos'
+      - name: Build .dmg
         run: |
           cd target/release
-          zip -r "Onyxterm-${{ steps.version.outputs.VERSION }}-macos-arm64.zip" Onyxterm.app
+          hdiutil create -volname "${{ env.APP_NAME }}" \
+            -srcfolder "${{ env.APP_NAME }}.app" \
+            -ov -format UDZO \
+            "${{ env.APP_NAME }}-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg"
         shell: bash
 
       - name: Upload macOS artifact
-        if: matrix.platform == 'macos'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_id }}
-          path: target/release/Onyxterm-${{ steps.version.outputs.VERSION }}-macos-arm64.zip
-
-      - name: Build .deb
-        if: matrix.platform == 'linux'
-        run: cargo deb --no-build
-        shell: bash
-
-      - name: Stage AppImage AppDir
-        if: matrix.platform == 'linux'
-        run: |
-          APPDIR=stage/Onyxterm.AppDir
-          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-          cp "target/release/${{ env.BIN_NAME }}" "$APPDIR/usr/bin/onyxterm"
-          cp packaging/linux/onyxterm.desktop "$APPDIR/onyxterm.desktop"
-          cp packaging/linux/onyxterm.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/onyxterm.png"
-          cp packaging/linux/AppRun "$APPDIR/AppRun"
-          chmod +x "$APPDIR/AppRun" "$APPDIR/usr/bin/onyxterm"
-        shell: bash
-
-      - name: Download appimagetool
-        if: matrix.platform == 'linux'
-        run: |
-          curl -fsSL -o appimagetool.AppImage \
-            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${{ matrix.arch }}.AppImage"
-          chmod +x appimagetool.AppImage
-          ./appimagetool.AppImage --appimage-extract
-          ls squashfs-root/AppRun
-        shell: bash
-
-      - name: Build AppImage
-        if: matrix.platform == 'linux'
-        run: |
-          ARCH="${{ matrix.arch }}" ./squashfs-root/AppRun stage/Onyxterm.AppDir \
-            "Onyxterm-${{ steps.version.outputs.VERSION }}-${{ matrix.arch }}.AppImage"
-        shell: bash
-
-      - name: Rename .deb for release naming
-        if: matrix.platform == 'linux'
-        run: |
-          DEB=$(ls target/debian/*.deb | head -n1)
-          NEW="target/debian/onyxterm_${{ steps.version.outputs.VERSION }}_${{ matrix.deb_arch }}.deb"
-          mv "$DEB" "$NEW"
-        shell: bash
-
-      - name: Upload Linux artifacts
-        if: matrix.platform == 'linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_id }}
-          path: |
-            target/debian/*.deb
-            Onyxterm-*.AppImage
-
-      - name: Generate Windows .ico
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path packaging/windows | Out-Null
-          magick assets/logo.png -define icon:auto-resize=256,128,96,64,48,32,16 packaging/windows/onyxterm.ico
-
-      - name: Install WiX
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: choco install wixtoolset -y --accept-license --no-progress
-
-      - name: Build MSI
-        if: matrix.platform == 'windows'
-        run: cargo wix --no-build
-
-      - name: Upload Windows artifact
-        if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_id }}
-          path: target/wix/*.msi
+          name: onyx-macos-arm64
+          path: target/release/Onyx-*.dmg
 
   release:
     needs: build
@@ -188,10 +74,4 @@ jobs:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: |
-            artifacts/app-macos-arm64/*.zip
-            artifacts/app-linux-x86_64/*.deb
-            artifacts/app-linux-x86_64/*.AppImage
-            artifacts/app-linux-aarch64/*.deb
-            artifacts/app-linux-aarch64/*.AppImage
-            artifacts/app-windows-x86_64/*.msi
+          files: artifacts/onyx-macos-arm64/*.dmg
