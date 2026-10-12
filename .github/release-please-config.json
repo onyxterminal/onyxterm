@@ -1,7 +1,8 @@
 {
   "packages": {
     "crates/app": {
-      "package-name": "app"
+      "package-name": "app",
+      "release-type": "rust"
     }
   }
 }
