@@ -44,7 +44,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/app/Cargo.toml | head -n1)
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@stable
