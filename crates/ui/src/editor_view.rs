@@ -1,6 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::pixel_grid::{baseline_offset, glyph_aligned_origin, snap_bounds, snap_point};
 use crate::terminal_view::{content_bounds, ContentInsets, PaneFocus};
 use crate::theme::{EditorTokens, Theme};
 use editor_core::{line_len, Rope, Selections, Selection, TAB_WIDTH};
@@ -12,6 +13,7 @@ use gpui::{
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::Arc;
 
 const REVEAL_MARGIN_LINES: f32 = 3.0;
 const MIN_GUTTER_COLUMNS: usize = 2;
@@ -43,7 +45,7 @@ pub struct FrameLayout {
     pub viewport: Size<Pixels>,
     pub cursor_bounds: Option<Bounds<Pixels>>,
     pub cursor_line: Option<usize>,
-    pub rope: Rope,
+    pub rope: Arc<Rope>,
     pub cell_width: Pixels,
 }
 
@@ -491,8 +493,8 @@ impl EditorStyle {
 
 #[derive(Clone)]
 pub struct EditorFrame {
-    pub rope: Rope,
-    pub selections: Selections,
+    pub rope: Arc<Rope>,
+    pub selections: Arc<Selections>,
     pub is_focused: bool,
     pub marked_text: Option<String>,
 }
@@ -571,7 +573,7 @@ pub fn editor_canvas(
 #[derive(Clone)]
 struct PointerArea {
     layout: Rc<FrameLayout>,
-    rope: Rope,
+    rope: Arc<Rope>,
     text_rect: Bounds<Pixels>,
     hitbox: Hitbox,
 }
@@ -690,7 +692,8 @@ fn prepare_state(
     }
     let text_offset_x = -view_ref.scroll_left;
     let text_offset_y = -view_ref.scroll_top % line_height_f;
-    let text_origin = point(text_rect.origin.x + px(text_offset_x), text_rect.origin.y + px(text_offset_y));
+    let unaligned_origin = point(text_rect.origin.x + px(text_offset_x), text_rect.origin.y + px(text_offset_y));
+    let text_origin = snap_point(unaligned_origin, window.scale_factor());
     let head = frame.selections.newest().head;
     let mut layout = FrameLayout {
         text_origin,
@@ -725,7 +728,7 @@ pub fn visible_columns(scroll_left: f32, text_width: f32, cell_width: f32) -> Vi
 }
 
 struct LineShaper<'a> {
-    rope: &'a Rope,
+    rope: &'a Arc<Rope>,
     style: &'a EditorStyle,
     cell_width: Pixels,
     window: &'a Window,
@@ -810,7 +813,7 @@ impl<'a> FramePainter<'a> {
             point(self.text_origin.x + x, y),
             size(self.cell.width * width_in_cells as f32, self.line_height),
         );
-        window.paint_quad(fill(bounds, self.tokens.selection));
+        fill_on_device_grid(bounds, self.tokens.selection, window);
         let underline = UnderlineStyle { thickness: px(1.0), color: None, wavy: false };
         let run = TextRun {
             len: text.len(),
@@ -821,7 +824,8 @@ impl<'a> FramePainter<'a> {
             strikethrough: None,
         };
         let line = window.text_system().shape_line(text.to_string().into(), style.font_size, &[run], None);
-        if let Err(err) = line.paint(bounds.origin, self.line_height, window, cx) {
+        let origin = self.glyph_origin(&line, bounds.origin, window);
+        if let Err(err) = line.paint(origin, self.line_height, window, cx) {
             tracing::warn!(?err, "marked text paint failed");
         }
     }
@@ -832,7 +836,7 @@ impl<'a> FramePainter<'a> {
                 continue;
             }
             let bounds = Bounds::new(point(self.text_rect.origin.x, y), size(self.text_rect.size.width, self.line_height));
-            window.paint_quad(fill(bounds, self.tokens.current_line));
+            fill_on_device_grid(bounds, self.tokens.current_line, window);
             break;
         }
     }
@@ -855,7 +859,7 @@ impl<'a> FramePainter<'a> {
             let newline_width = if is_newline_painted { self.cell.width * NEWLINE_EXTRA_CELLS } else { px(0.0) };
             let x_end = laid.x_at_char(span.end) + newline_width;
             let bounds = Bounds::new(point(self.text_origin.x + x_start, y), size(x_end - x_start, self.line_height));
-            window.paint_quad(fill(bounds, self.tokens.selection));
+            fill_on_device_grid(bounds, self.tokens.selection, window);
         }
     }
 
@@ -863,7 +867,7 @@ impl<'a> FramePainter<'a> {
         if laid.display.text.is_empty() {
             return;
         }
-        let origin = point(self.text_origin.x + laid.text_x(), y);
+        let origin = self.glyph_origin(&laid.shaped, point(self.text_origin.x + laid.text_x(), y), window);
         if let Err(err) = laid.shaped.paint(origin, self.line_height, window, cx) {
             tracing::warn!(?err, "editor line paint failed");
         }
@@ -878,13 +882,21 @@ impl<'a> FramePainter<'a> {
             let x = laid.x_at_char(head - laid.start_char);
             let cursor_width = px(self.tokens.cursor_width_px);
             let bounds = Bounds::new(point(self.text_origin.x + x, y), size(cursor_width, self.line_height));
-            window.paint_quad(fill(bounds, self.tokens.cursor));
+            fill_on_device_grid(bounds, self.tokens.cursor, window);
         }
     }
 
     fn row_y(&self, laid: &LaidLine) -> Pixels {
         self.layout.row_y(laid)
     }
+
+    fn glyph_origin(&self, line: &ShapedLine, origin: Point<Pixels>, window: &Window) -> Point<Pixels> {
+        glyph_aligned_origin(origin, baseline_offset(line, self.line_height), window.scale_factor())
+    }
+}
+
+fn fill_on_device_grid(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
+    window.paint_quad(fill(snap_bounds(bounds, window.scale_factor()), color));
 }
 
 fn empty_selection_on_line(selection: &Selection, laid: &LaidLine) -> bool {
@@ -912,7 +924,8 @@ fn paint_gutter(layout: &FrameLayout, gutter_rect: Bounds<Pixels>, style: &Edito
                 strikethrough: None,
             };
             let shape = window.text_system().shape_line(number.into(), style.font_size, &[run], None);
-            let origin = point(right - shape.width, layout.row_y(laid));
+            let baseline = baseline_offset(&shape, layout.line_height);
+            let origin = glyph_aligned_origin(point(right - shape.width, layout.row_y(laid)), baseline, window.scale_factor());
             if let Err(err) = shape.paint(origin, layout.line_height, window, cx) {
                 tracing::warn!(?err, "gutter paint failed");
             }
@@ -1118,7 +1131,7 @@ mod tests {
             viewport: size(px(800.0), px(600.0)),
             cursor_bounds: None,
             cursor_line: None,
-            rope: rope.clone(),
+            rope: Arc::new(rope.clone()),
             cell_width: px(TEST_CELL),
         }
     }

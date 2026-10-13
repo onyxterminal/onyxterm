@@ -1159,8 +1159,8 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let frame = EditorFrame {
-            rope: editor.buffer().rope().clone(),
-            selections: editor.selections().clone(),
+            rope: Arc::new(editor.buffer().rope().clone()),
+            selections: Arc::new(editor.selections().clone()),
             is_focused,
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
         };
