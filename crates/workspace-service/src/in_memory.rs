@@ -1,10 +1,8 @@
-use crate::{collect_workspace, handle_reducer_event, LayoutService, TabService, WorkspaceService};
-use domain::{
-    Axis, DomainError, LayoutNode, PanelId, Tab, TabId, Workspace, WorkspaceId, WorkspaceReducer,
-};
+use crate::{collect_workspace, handle_reducer_event, LayoutService, SshService, TabService, WorkspaceService};
+use domain::{read_ssh_hosts, Axis, DomainError, LayoutNode, PanelId, SshHost, Tab, TabId, Workspace, WorkspaceId, WorkspaceReducer};
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -265,4 +263,36 @@ impl LayoutService for InMemoryLayoutService {
             .cloned()
             .ok_or_else(|| DomainError::TabNotFound(tab.to_string()))
     }
+}
+
+pub struct InMemorySshService {
+    hosts: RwLock<Vec<SshHost>>,
+    config_path: PathBuf,
+}
+
+impl InMemorySshService {
+    pub fn new(home: &Path) -> Self {
+        let config_path = ssh_config_path(home);
+        let hosts = read_ssh_hosts(&config_path);
+        Self { hosts: RwLock::new(hosts), config_path }
+    }
+
+    pub fn reload(&self) {
+        let hosts = read_ssh_hosts(&self.config_path);
+        *self.hosts.write() = hosts;
+    }
+}
+
+impl SshService for InMemorySshService {
+    fn list_hosts(&self) -> Vec<SshHost> {
+        self.hosts.read().clone()
+    }
+
+    fn host_count(&self) -> usize {
+        self.hosts.read().len()
+    }
+}
+
+fn ssh_config_path(home: &Path) -> PathBuf {
+    home.join(".ssh").join("config")
 }

@@ -1327,7 +1327,58 @@ fn cmd_e_opens_editor_here() {
 }
 
 #[test]
+fn cmd_shift_y_toggles_editor_bundle() {
+    let keymap = Keymap::default();
+    let combo = Combo::new(Modifiers::command_shift(), "y");
+    assert_eq!(keymap.resolve(&combo), Some(CommandId::ToggleEditorBundle));
+}
+
+#[test]
 fn cmd_s_saves() {
     let keymap = Keymap::default();
     assert_eq!(keymap.resolve(&Combo::new(Modifiers::command(), "s")), Some(CommandId::Save));
+}
+
+#[test]
+fn wrap_focused_with_pair_places_pair_to_the_right() {
+    use crate::tabs::Tab;
+    let (focused, file_tree, editor) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let mut tab = Tab::new(focused);
+    tab.wrap_focused_with_pair(Axis::Horizontal, 0.4, 0.5, file_tree, editor, false).unwrap();
+
+    let leaves = tab.layout().leaves();
+    assert_eq!(leaves, vec![focused, file_tree, editor]);
+    assert_eq!(tab.focused(), editor);
+}
+
+#[test]
+fn wrap_focused_with_pair_places_pair_above() {
+    use crate::tabs::Tab;
+    let (focused, file_tree, editor) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let mut tab = Tab::new(focused);
+    tab.wrap_focused_with_pair(Axis::Vertical, 0.4, 0.5, file_tree, editor, true).unwrap();
+
+    let leaves = tab.layout().leaves();
+    assert_eq!(leaves, vec![file_tree, editor, focused]);
+    assert_eq!(tab.focused(), editor);
+}
+
+#[test]
+fn closing_both_pair_panels_collapses_back_to_focused() {
+    use crate::tabs::Tabs;
+    let mut tabs = Tabs::default();
+    let (focused, file_tree, editor) = (PanelId::new(), PanelId::new(), PanelId::new());
+    tabs.open(focused);
+    tabs.active_mut().unwrap().wrap_focused_with_pair(Axis::Horizontal, 0.4, 0.5, file_tree, editor, false).unwrap();
+
+    tabs.close_panel(file_tree).unwrap();
+    let tab = tabs.active().unwrap();
+    let LayoutNode::Split { first, second, .. } = tab.layout() else { panic!("expected outer split") };
+    assert!(matches!(first.as_ref(), LayoutNode::Leaf { .. }));
+    assert!(matches!(second.as_ref(), LayoutNode::Leaf { panel_id } if *panel_id == editor));
+
+    tabs.close_panel(editor).unwrap();
+    let tab = tabs.active().unwrap();
+    assert_eq!(tab.layout(), &LayoutNode::leaf(focused));
+    assert_eq!(tab.focused(), focused);
 }

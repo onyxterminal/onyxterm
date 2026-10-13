@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use domain::{
-    Axis, DomainError, LayoutNode, PanelId, Tab, TabId, Workspace, WorkspaceId,
+    Axis, DomainError, LayoutNode, PanelId, SshHost, Tab, TabId, Workspace, WorkspaceId,
     WorkspaceReducerEvent,
 };
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ mod restore_policy;
 mod store;
 mod writer;
 
-pub use in_memory::{InMemoryLayoutService, InMemoryTabService, InMemoryWorkspaceService};
+pub use in_memory::{InMemoryLayoutService, InMemorySshService, InMemoryTabService, InMemoryWorkspaceService};
 pub use persistence::{PanelSnapshot, RestoreWarning, TabSnapshot, WorkspaceSnapshot};
 pub use restore_policy::{new_terminal_tab, DEFAULT_PANEL_TITLE};
 pub use store::{RestoredState, StoreError, StoreWarning, WorkspaceStore};
@@ -64,6 +64,11 @@ pub trait LayoutService: Send + Sync {
         workspace: WorkspaceId,
         tab: TabId,
     ) -> Result<LayoutNode, DomainError>;
+}
+
+pub trait SshService: Send + Sync {
+    fn list_hosts(&self) -> Vec<SshHost>;
+    fn host_count(&self) -> usize;
 }
 
 #[derive(Debug, Clone, Default)]

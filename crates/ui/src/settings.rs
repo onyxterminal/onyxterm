@@ -158,10 +158,32 @@ mod tests {
     }
 
     #[test]
+    fn editor_bundle_settings_roundtrip() {
+        for side in [BundleSide::Left, BundleSide::Right, BundleSide::Top, BundleSide::Bottom] {
+            let encoded = serde_json::to_string(&side).unwrap();
+            let restored: BundleSide = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(restored, side);
+        }
+        let settings = Settings::from_pairs(&[
+            (EDITOR_BUNDLE_SIDE_KEY.into(), "left".into()),
+            (EDITOR_BUNDLE_SIZE_KEY.into(), "0.6".into()),
+        ]);
+        assert_eq!(settings.editor_bundle_side, BundleSide::Left);
+        assert_eq!(settings.editor_bundle_size, 0.6);
+        let settings = Settings::from_pairs(&[
+            (EDITOR_BUNDLE_SIDE_KEY.into(), "bottom".into()),
+            (EDITOR_BUNDLE_SIZE_KEY.into(), "0.9".into()),
+        ]);
+        assert_eq!(settings.editor_bundle_side, BundleSide::Bottom);
+        assert_eq!(settings.editor_bundle_size, 0.9);
+    }
+
+    #[test]
     fn invalid_persisted_sizes_use_safe_defaults() {
         let settings = Settings::from_pairs(&[
             (FONT_SIZE_KEY.into(), "NaN".into()),
             (UI_SCALE_KEY.into(), "25".into()),
+            (EDITOR_BUNDLE_SIZE_KEY.into(), "1.5".into()),
         ]);
         assert_eq!(settings, Settings::default());
     }

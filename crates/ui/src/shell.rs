@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use terminal_core::broadcast::{error::RecvError, Receiver};
 use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
-use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
+use workspace_service::{InMemorySshService, PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
 mod document_strip;
@@ -107,6 +107,8 @@ pub struct Startup {
 pub struct Shell {
     state: AppState,
     terminals: Arc<InMemoryTerminalService>,
+    #[allow(dead_code)]
+    ssh: Arc<InMemorySshService>,
     store: WorkspaceStore,
     style: TerminalStyle,
     focus_handle: FocusHandle,
@@ -144,11 +146,13 @@ impl Shell {
         let font_family = state.theme.font.resolve_family(&cx.text_system().all_font_names());
         tracing::info!(%font_family, "terminal font resolved");
         let Startup { terminals, store, restored, home } = startup;
+        let ssh = Arc::new(InMemorySshService::new(&home));
         let mut shell = Self {
             style: TerminalStyle::from_theme(&state.theme, font_family),
             stage: islands::Stage::new(&state.theme.layout),
             state,
             terminals,
+            ssh,
             store,
             focus_handle: cx.focus_handle(),
             model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
