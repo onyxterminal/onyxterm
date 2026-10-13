@@ -7,7 +7,7 @@ use gpui::{
     canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, MouseMoveEvent, Pixels, Point, SharedString,
     Window,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -20,6 +20,18 @@ const DROP_HIGHLIGHT_ALPHA: f32 = 0.18;
 const SWAP_OUTLINE_PX: f32 = 2.0;
 const SWAP_LABEL: &str = "Swap";
 const HALF: f32 = 0.5;
+const DRAG_NOTIFY_FRAME_MS: u128 = 8;
+
+fn should_notify_drag(last: &Cell<Option<Instant>>, now: Instant) -> bool {
+    let ready = match last.get() {
+        Some(previous) => now.duration_since(previous).as_millis() >= DRAG_NOTIFY_FRAME_MS,
+        None => true,
+    };
+    if ready {
+        last.set(Some(now));
+    }
+    ready
+}
 
 pub(super) type BoundsMap<K> = Rc<RefCell<HashMap<K, Bounds<Pixels>>>>;
 
@@ -29,6 +41,7 @@ pub(super) struct PaneDrag {
     grab: Point<Pixels>,
     cursor: Point<Pixels>,
     is_active: bool,
+    last_notify_at: Cell<Option<Instant>>,
 }
 
 pub(super) struct DroppedGhost {
@@ -54,7 +67,14 @@ where
 impl Shell {
     pub(super) fn press_pane_title(&mut self, panel: PanelId, press: Point<Pixels>) {
         let origin = self.stage.island_origin(panel).unwrap_or(press);
-        self.pane_drag = Some(PaneDrag { panel, press, grab: press - origin, cursor: press, is_active: false });
+        self.pane_drag = Some(PaneDrag {
+            panel,
+            press,
+            grab: press - origin,
+            cursor: press,
+            is_active: false,
+            last_notify_at: Cell::new(None),
+        });
     }
 
     pub(super) fn is_dragging_pane(&self) -> bool {
@@ -75,8 +95,11 @@ impl Shell {
             return;
         }
         let (source, cursor) = (drag.panel, drag.cursor);
+        let should_notify = should_notify_drag(&drag.last_notify_at, Instant::now());
         self.drop_target = self.hit_test(source, cursor);
-        cx.notify();
+        if should_notify {
+            cx.notify();
+        }
     }
 
     fn hit_test(&self, source: PanelId, cursor: Point<Pixels>) -> Option<DropTarget> {

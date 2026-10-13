@@ -3,12 +3,27 @@ use crate::pane_layout::Gap;
 use crate::tabs::{clamp_split_ratio, SplitPath, SplitSide, SPLIT_RATIO};
 use domain::Axis;
 use gpui::{div, prelude::*, px, AnyElement, Context, CursorStyle, MouseButton, MouseMoveEvent};
+use std::cell::Cell;
+use std::time::Instant;
 
 const DOUBLE_CLICK: usize = 2;
+const DRAG_NOTIFY_FRAME_MS: u128 = 8;
 
 pub(super) struct SplitDrag {
     path: SplitPath,
     axis: Axis,
+    last_notify_at: Cell<Option<Instant>>,
+}
+
+fn should_notify_drag(last: &Cell<Option<Instant>>, now: Instant) -> bool {
+    let ready = match last.get() {
+        Some(previous) => now.duration_since(previous).as_millis() >= DRAG_NOTIFY_FRAME_MS,
+        None => true,
+    };
+    if ready {
+        last.set(Some(now));
+    }
+    ready
 }
 
 fn resize_cursor(axis: Axis) -> CursorStyle {
@@ -53,7 +68,7 @@ impl Shell {
             cx.notify();
             return;
         }
-        self.split_drag = Some(SplitDrag { path, axis });
+        self.split_drag = Some(SplitDrag { path, axis, last_notify_at: Cell::new(None) });
     }
 
     pub(super) fn drag_split(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -73,9 +88,12 @@ impl Shell {
             Axis::Vertical => (local.y, bounds.size.height),
         };
         let ratio = clamp_split_ratio(f32::from(offset), f32::from(extent), self.state.theme.layout.min_pane_px);
+        let should_notify = should_notify_drag(&drag.last_notify_at, Instant::now());
         let path = drag.path.clone();
         self.apply_split_ratio(&path, ratio);
-        cx.notify();
+        if should_notify {
+            cx.notify();
+        }
     }
 
     pub(super) fn end_split_drag(&mut self, cx: &mut Context<Self>) {

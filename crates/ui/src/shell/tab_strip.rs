@@ -6,16 +6,16 @@ use crate::tabs::numbered_tab_label;
 use crate::theme::icons::Icon;
 use crate::text_field::TextField;
 use crate::theme::menu_chrome::field_text;
-use crate::theme::{box_shadows, Theme};
+use crate::theme::Theme;
 use crate::workspace_menu::workspace_button_label;
 use gpui::{
-    div, img, prelude::*, px, AnyElement, Bounds, BoxShadow, Context, Div, FontWeight, Image, ImageFormat, Keystroke,
+    div, prelude::*, px, AnyElement, Bounds, BoxShadow, Context, Div, FontWeight, Keystroke,
     MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Stateful, Window,
 };
-use std::sync::{Arc, LazyLock};
+use std::cell::Cell;
+use std::time::Instant;
 
 const DOUBLE_CLICK: usize = 2;
-const LOGO_PNG: &[u8] = include_bytes!("../../../../assets/logo.png");
 const WORKSPACE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const WORKSPACE_BUTTON_GAP_PX: f32 = 6.0;
 const CHEVRON_PX: f32 = 10.0;
@@ -27,11 +27,20 @@ const PALETTE_ICON_PX: f32 = 12.0;
 const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
-const TAB_PILL_MIN_WIDTH_PX: f32 = 40.0;
+const TAB_PILL_MIN_WIDTH_PX: f32 = 64.0;
 const TAB_PILL_GAP_PX: f32 = 6.0;
+const DRAG_NOTIFY_FRAME_MS: u128 = 8;
 
-static LOGO: LazyLock<Arc<Image>> =
-    LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
+fn should_notify_drag(last: &Cell<Option<Instant>>, now: Instant) -> bool {
+    let ready = match last.get() {
+        Some(previous) => now.duration_since(previous).as_millis() >= DRAG_NOTIFY_FRAME_MS,
+        None => true,
+    };
+    if ready {
+        last.set(Some(now));
+    }
+    ready
+}
 
 enum TabLabel {
     Title(String),
@@ -49,12 +58,17 @@ pub(super) struct TabDrag {
     press: Point<Pixels>,
     cursor: Point<Pixels>,
     is_active: bool,
+    last_notify_at: Cell<Option<Instant>>,
 }
 
 impl Shell {
     pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let layout = theme.layout;
+        let active = (self.model.active_id(), self.model.tabs().active_index());
+        if self.visible_tab.replace(Some(active)) != Some(active) {
+            self.tab_scroll.scroll_to_item(active.1);
+        }
         let leading_inset = theme.top_bar_leading_inset_px(is_fullscreen);
         div()
             .h(px(layout.tab_strip_height_px))
@@ -72,17 +86,21 @@ impl Shell {
                 }
             })
             .child(self.render_workspace_button(cx))
-            .child(strip_separator(theme))
+            .child(div().flex_none().w(px(theme.top_bar.item_gap_px * 2.0)))
             .child(
                 div()
+                    .id("workspace-tabs")
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.tab_scroll)
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(TAB_PILL_GAP_PX))
+                    .gap(px(TAB_PILL_GAP_PX * self.state.settings.ui_scale))
                     .children(self.tab_pills().into_iter().map(|pill| self.render_tab_pill(pill, cx))),
             )
             .child(self.render_new_tab_button(cx))
-            .child(div().flex_1())
             .child(self.render_palette_button(cx))
     }
 
@@ -111,20 +129,19 @@ impl Shell {
         let is_raised = pill.is_active || matches!(pill.label, TabLabel::Editing(_));
         let content = match pill.label {
             TabLabel::Editing(input) => field_text(&input, &numbered_tab_label(index), theme),
-            TabLabel::Title(title) => div().child(title),
+            TabLabel::Title(title) => div().min_w(px(0.0)).truncate().child(title),
         };
-        let mut shadows = match is_raised {
-            true => box_shadows(&theme.shadow.tab),
-            false => Vec::new(),
-        };
+        let mut shadows = Vec::new();
         if self.is_tab_drop_target(index) || self.is_tab_drag_target(index) {
             shadows.push(drop_ring(theme));
         }
         div()
             .id(("tab", index))
             .relative()
+            .flex_none()
+            .max_w(px(180.0 * self.state.settings.ui_scale))
             .h(px(top_bar.control_height_px))
-            .min_w(px(TAB_PILL_MIN_WIDTH_PX))
+            .min_w(px(TAB_PILL_MIN_WIDTH_PX * self.state.settings.ui_scale))
             .px(px(top_bar.tab_padding_x_px))
             .flex()
             .items_center()
@@ -132,7 +149,7 @@ impl Shell {
             .rounded(px(top_bar.control_radius_px))
             .text_color(theme.text.muted)
             .shadow(shadows)
-            .when(is_raised, |pill| pill.bg(theme.surface.canvas))
+            .when(is_raised, |pill| pill.bg(theme.chrome.control_fill))
             .when(pill.is_active, |pill| pill.text_color(theme.text.default).font_weight(FontWeight::MEDIUM))
             .when(!is_raised, |pill| pill.hover(move |style| style.bg(hover_fill)))
             .child(bounds_probe(&self.tab_bounds, index))
@@ -151,9 +168,12 @@ impl Shell {
         let theme = &self.state.theme;
         let name = workspace_button_label(self.model.workspace_name(self.model.active_id())).to_string();
         strip_button("workspace-menu-button", theme)
-            .px(px(WORKSPACE_BUTTON_PADDING_X_PX))
-            .gap(px(WORKSPACE_BUTTON_GAP_PX))
-            .bg(theme.chrome.control_fill)
+            .px(px(WORKSPACE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale))
+            .gap(px(WORKSPACE_BUTTON_GAP_PX * self.state.settings.ui_scale))
+            .max_w(px(180.0 * self.state.settings.ui_scale))
+            .text_color(theme.text.muted)
+            .when(self.is_workspace_menu_open, |el| el.bg(theme.chrome.control_fill))
+            .tooltip(self.tooltip_builder("Switch workspace".into()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|shell, _event, _window, cx| {
@@ -161,9 +181,8 @@ impl Shell {
                     shell.toggle_workspace_menu(cx);
                 }),
             )
-            .child(img(LOGO.clone()).size(px(theme.top_bar.logo_px)).flex_none())
-            .child(div().font_weight(FontWeight::MEDIUM).text_color(theme.text.default).child(name))
-            .child(Icon::Chevron.sized(CHEVRON_PX))
+            .child(div().min_w(px(0.0)).truncate().font_weight(FontWeight::MEDIUM).text_color(theme.text.default).child(name))
+            .child(Icon::Chevron.sized(CHEVRON_PX * self.state.settings.ui_scale))
     }
 
     fn render_new_tab_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -172,8 +191,9 @@ impl Shell {
             .w(px(theme.top_bar.control_height_px))
             .justify_center()
             .ml(px(theme.top_bar.tab_gap_px))
-            .text_size(px(NEW_TAB_GLYPH_PX))
-            .text_color(theme.text.subtle)
+            .text_size(px(NEW_TAB_GLYPH_PX * self.state.settings.ui_scale))
+            .text_color(theme.text.muted)
+            .tooltip(self.tooltip_builder("New tab · ⌘T".into()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|shell, _event, window, cx| {
@@ -188,8 +208,8 @@ impl Shell {
         let theme = &self.state.theme;
         let shortcut = self.state.keymap.combo_for(CommandId::OpenPalette).map(|combo| combo.glyphs());
         strip_button("palette-button", theme)
-            .px(px(PALETTE_BUTTON_PADDING_X_PX))
-            .gap(px(PALETTE_BUTTON_GAP_PX))
+            .px(px(PALETTE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale))
+            .gap(px(PALETTE_BUTTON_GAP_PX * self.state.settings.ui_scale))
             .text_size(px(theme.ui_font.hint_px))
             .text_color(theme.text.subtle)
             .on_mouse_down(
@@ -199,7 +219,8 @@ impl Shell {
                     shell.run_command(CommandId::OpenPalette, window, cx);
                 }),
             )
-            .child(Icon::Magnifier.sized(PALETTE_ICON_PX))
+            .tooltip(self.tooltip_builder("Search commands".into()))
+            .child(Icon::Magnifier.sized(PALETTE_ICON_PX * self.state.settings.ui_scale))
             .children(shortcut)
     }
 
@@ -211,7 +232,13 @@ impl Shell {
             return;
         }
         self.commit_tab_field();
-        self.tab_drag = Some(TabDrag { from: index, press, cursor: press, is_active: false });
+        self.tab_drag = Some(TabDrag {
+            from: index,
+            press,
+            cursor: press,
+            is_active: false,
+            last_notify_at: Cell::new(None),
+        });
         cx.notify();
     }
 
@@ -225,7 +252,7 @@ impl Shell {
         }
         drag.cursor = event.position;
         drag.is_active = drag.is_active || has_left_dead_zone(drag.press, event.position);
-        if drag.is_active {
+        if drag.is_active && should_notify_drag(&drag.last_notify_at, Instant::now()) {
             cx.notify();
         }
     }
@@ -370,16 +397,6 @@ fn strip_button(id: &'static str, theme: &Theme) -> Stateful<Div> {
         .cursor_pointer()
         .rounded(px(theme.top_bar.control_radius_px))
         .hover(move |style| style.bg(hover_fill))
-}
-
-fn strip_separator(theme: &Theme) -> Div {
-    let top_bar = theme.top_bar;
-    div()
-        .flex_none()
-        .w(px(top_bar.separator_width_px))
-        .h(px(top_bar.separator_height_px))
-        .mx(px(top_bar.item_gap_px))
-        .bg(theme.border.default)
 }
 
 fn drop_ring(theme: &Theme) -> BoxShadow {
