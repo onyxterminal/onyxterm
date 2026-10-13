@@ -249,6 +249,10 @@ impl Shell {
         self.open_file_tree(folder, cx);
     }
 
+    fn toggle_editor_bundle(&mut self, cx: &mut Context<Self>) {
+        cx.notify();
+    }
+
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
         let id = panel.id;
         let zone = document_zone(panel.kind);
@@ -391,6 +395,7 @@ impl Shell {
             CommandId::OpenFolder => self.prompt_open(true, cx),
             CommandId::OpenEditorHere => self.open_editor_here(cx),
             CommandId::ToggleFileTree => self.toggle_file_tree(cx),
+            CommandId::ToggleEditorBundle => self.toggle_editor_bundle(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         self.remember_focused_editor();

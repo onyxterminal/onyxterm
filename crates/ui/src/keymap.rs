@@ -184,6 +184,7 @@ fn bind_application(map: &mut Keymap) {
     map.bind(Combo::new(Modifiers::command_shift(), "o"), OpenFolder);
     map.bind(Combo::new(cmd, "e"), OpenEditorHere);
     map.bind(Combo::new(Modifiers::command_shift(), "b"), ToggleFileTree);
+    map.bind(Combo::new(Modifiers::command_shift(), "y"), ToggleEditorBundle);
     map.bind(Combo::new(cmd, "s"), Save);
     map.bind(Combo::new(cmd, ","), OpenSettings);
     map.bind(Combo::new(cmd, "c"), Copy);
