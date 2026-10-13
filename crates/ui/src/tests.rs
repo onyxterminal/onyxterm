@@ -130,6 +130,13 @@ fn input_uses_ss3_arrows_in_app_cursor_mode() {
 }
 
 #[test]
+fn input_shift_space_sends_newline_to_the_pty() {
+    assert_eq!(encode(Modifiers::shift(), "space", Some(" ")), Some(b"\n".to_vec()));
+    assert_eq!(encode(Modifiers::none(), "space", Some(" ")), Some(b" ".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "space", Some(" ")), Some(vec![0]));
+}
+
+#[test]
 fn input_encodes_control_letters_and_option_as_meta() {
     assert_eq!(encode(Modifiers::control(), "c", None), Some(vec![0x03]));
     assert_eq!(encode(Modifiers::control(), "[", None), Some(vec![0x1b]));
@@ -248,8 +255,8 @@ fn keymap_binds_tabs_and_workspaces_by_index_and_order() {
         assert_eq!(map.resolve(&Combo::new(cmd, key.as_str())), Some(CommandId::SelectTab(slot - 1)));
         assert_eq!(map.resolve(&Combo::new(cmd_alt, key.as_str())), Some(CommandId::SelectWorkspace(slot - 1)));
     }
-    assert_eq!(map.resolve(&Combo::new(Modifiers::control(), "tab")), Some(CommandId::NextTab));
-    assert_eq!(map.resolve(&Combo::new(Modifiers::control() | Modifiers::shift(), "tab")), Some(CommandId::PrevTab));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::control(), "tab")), Some(CommandId::NextDocument));
+    assert_eq!(map.resolve(&Combo::new(Modifiers::control() | Modifiers::shift(), "tab")), Some(CommandId::PrevDocument));
     assert_eq!(map.resolve(&Combo::new(cmd_alt, "]")), Some(CommandId::NextWorkspace));
     assert_eq!(map.resolve(&Combo::new(cmd_alt, "[")), Some(CommandId::PrevWorkspace));
     assert_eq!(map.resolve(&Combo::new(cmd, "o")), Some(CommandId::OpenWorkspaceMenu));
@@ -356,6 +363,9 @@ fn palette_lists_required_commands() {
         "Focus Next Pane",
         "Copy",
         "Paste",
+        "Next Document",
+        "Previous Document",
+        "Close Document",
     ] {
         assert!(titles.contains(&required), "missing {required}");
     }
@@ -775,7 +785,7 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
         ("Rename Pane\u{2026}", None),
         ("Move to New Tab", None),
         ("-", None),
-        ("Close Pane", Some("\u{2318}W")),
+        ("Close Pane", None),
     ];
     let expected: Vec<(String, Option<String>)> =
         expected.iter().map(|(title, shortcut)| (title.to_string(), shortcut.map(str::to_string))).collect();
@@ -784,7 +794,7 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
     assert!(matches!(&restore[2], PaneMenuEntry::Item(item) if item.title == "Restore Pane"));
     let commands = selectable_commands(&entries);
     assert_eq!(commands.len(), 6);
-    assert_eq!(commands.last(), Some(&CommandId::CloseActive));
+    assert_eq!(commands.last(), Some(&CommandId::ClosePane));
     let destructive: Vec<&str> = entries
         .iter()
         .filter_map(|entry| match entry {

@@ -83,6 +83,7 @@ fn named_key_bytes(keystroke: &Keystroke, modes: InputModes) -> Option<Vec<u8>> 
         "tab" if keystroke.modifiers.shift => b"\x1b[Z",
         "tab" => b"\t",
         "escape" => &[ESC],
+        "space" if keystroke.modifiers.shift => b"\n",
         "space" if keystroke.modifiers.control => &[0],
         "space" => b" ",
         "up" | "down" | "right" | "left" => return Some(arrow_bytes(&keystroke.key, modes)),
