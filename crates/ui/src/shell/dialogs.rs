@@ -30,6 +30,7 @@ impl Shell {
         let model = WorkspaceMenuModel {
             items: self.workspace_menu_items(),
             field: self.menu_field.clone(),
+            search: self.menu_search.clone(),
             new_workspace_shortcut: self.state.keymap.combo_for(CommandId::NewWorkspace).map(|combo| combo.glyphs()),
         };
         let actions = WorkspaceMenuActions {

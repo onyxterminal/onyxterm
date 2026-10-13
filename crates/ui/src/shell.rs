@@ -116,6 +116,7 @@ pub struct Shell {
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
+    menu_search: TextField,
     tab_field: Option<TabField>,
     notice: Option<String>,
     marked_text: Option<String>,
@@ -155,6 +156,7 @@ impl Shell {
             pending: None,
             is_workspace_menu_open: false,
             menu_field: None,
+            menu_search: TextField::default(),
             tab_field: None,
             notice: restore_notice(&restored.warnings),
             marked_text: None,
@@ -528,9 +530,15 @@ impl Shell {
     fn handle_menu_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
         if self.menu_field.is_none() {
             if keystroke.key == ESCAPE_KEY {
-                self.close_workspace_menu(cx);
+                if self.menu_search.is_empty() {
+                    self.close_workspace_menu(cx);
+                } else {
+                    self.menu_search.clear();
+                    cx.notify();
+                }
+                return true;
             }
-            return true;
+            return self.type_into_field(FieldTarget::MenuSearch, keystroke, cx);
         }
         match keystroke.key.as_str() {
             ESCAPE_KEY => self.menu_field = None,

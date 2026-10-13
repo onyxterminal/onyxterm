@@ -24,6 +24,7 @@ const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const PALETTE_BUTTON_GAP_PX: f32 = 5.0;
 const PALETTE_ICON_PX: f32 = 12.0;
 const DROP_RING_PX: f32 = 1.5;
+const ACTIVE_TAB_UNDERLINE_PX: f32 = 2.0;
 
 static LOGO: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
@@ -122,6 +123,17 @@ impl Shell {
             .when(is_raised, |pill| pill.bg(theme.surface.canvas))
             .when(pill.is_active, |pill| pill.text_color(theme.text.default).font_weight(FontWeight::MEDIUM))
             .when(!is_raised, |pill| pill.hover(move |style| style.bg(hover_fill)))
+            .when(pill.is_active, |pill| {
+                pill.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(px(ACTIVE_TAB_UNDERLINE_PX))
+                        .bg(theme.accent.primary),
+                )
+            })
             .child(bounds_probe(&self.tab_bounds, index))
             .on_mouse_down(
                 MouseButton::Left,

@@ -14,11 +14,13 @@ use std::rc::Rc;
 const SECTION_LABEL: &str = "Workspaces";
 const NEW_WORKSPACE_LABEL: &str = "New Workspace\u{2026}";
 const NAME_PLACEHOLDER: &str = "Workspace name";
+const SEARCH_PLACEHOLDER: &str = "Filter workspaces";
 const CHECK_MARK: &str = "\u{2713}";
 const CHECK_COLUMN_PX: f32 = 18.0;
 const ROW_ACTION_GAP_PX: f32 = 2.0;
 const ROW_ACTION_ICON_PX: f32 = 13.0;
 const NEW_WORKSPACE_GROUP: &str = "new-workspace";
+const SEARCH_GROUP: &str = "workspace-search";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceMenuItem {
@@ -40,6 +42,7 @@ pub struct MenuField {
 pub struct WorkspaceMenuModel {
     pub items: Vec<WorkspaceMenuItem>,
     pub field: Option<MenuField>,
+    pub search: TextField,
     pub new_workspace_shortcut: Option<String>,
 }
 
@@ -66,9 +69,18 @@ pub fn tab_count_label(count: usize) -> String {
 }
 
 pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: WorkspaceMenuActions) -> Div {
-    let WorkspaceMenuModel { items, field, new_workspace_shortcut } = model;
+    let WorkspaceMenuModel { items, field, search, new_workspace_shortcut } = model;
     let is_creating = field.as_ref().is_some_and(|field| field.renaming.is_none());
-    let rows: Vec<_> = items
+    let needle = search.text().trim().to_ascii_lowercase();
+    let filtered: Vec<WorkspaceMenuItem> = if needle.is_empty() {
+        items
+    } else {
+        items
+            .into_iter()
+            .filter(|item| item.name.to_ascii_lowercase().contains(&needle))
+            .collect()
+    };
+    let rows: Vec<_> = filtered
         .into_iter()
         .map(|item| {
             let editing = field.as_ref().filter(|field| field.renaming.as_ref() == Some(&item.id));
@@ -83,10 +95,27 @@ pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: Workspa
         None => new_workspace_row(new_workspace_shortcut, theme, actions.create.clone()).into_any_element(),
     };
     menu_panel(theme)
+        .child(search_field(&search, theme))
         .child(menu_section_label(SECTION_LABEL, theme))
         .children(rows)
         .child(menu_separator(theme))
         .child(footer)
+}
+
+fn search_field(search: &TextField, theme: &Theme) -> impl IntoElement {
+    let group = SharedString::from(SEARCH_GROUP);
+    focused_field(theme)
+        .id(group)
+        .h(px(theme.menu.row_height_px))
+        .flex_none()
+        .mx(px(theme.menu.padding_px))
+        .mt(px(theme.menu.padding_px))
+        .mb(px(theme.menu.row_padding_x_px))
+        .px(px(theme.menu.row_padding_x_px))
+        .rounded(px(theme.menu.row_radius_px))
+        .flex()
+        .items_center()
+        .child(field_text(search, SEARCH_PLACEHOLDER, theme))
 }
 
 fn row_style(group: SharedString) -> MenuRowStyle {
@@ -229,6 +258,7 @@ mod paint_tests {
                 can_delete: true,
             }],
             field: None,
+            search: TextField::default(),
             new_workspace_shortcut: None,
         };
         let actions = WorkspaceMenuActions {
@@ -240,7 +270,11 @@ mod paint_tests {
             delete: Rc::new(|_, _, _| {}),
             create: Rc::new(|_, _| {}),
         };
-        let row_y = theme.menu.padding_px + theme.menu.section_label_height_px + theme.menu.row_height_px / 2.0;
+        let row_y = theme.menu.padding_px
+            + theme.menu.row_height_px
+            + theme.menu.row_padding_x_px
+            + theme.menu.section_label_height_px
+            + theme.menu.row_height_px / 2.0;
         let action_x = theme.menu.width_px
             - theme.menu.padding_px
             - theme.menu.row_padding_x_px

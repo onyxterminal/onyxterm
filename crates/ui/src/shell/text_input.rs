@@ -1,6 +1,5 @@
 use super::{write_to, Shell};
 use crate::command::CommandId;
-use crate::document::DocumentPane;
 use crate::input::is_composed_text;
 use crate::terminal_view::cursor_bounds;
 use crate::text_field::{Clipboard, TextField};
@@ -16,6 +15,7 @@ pub(super) enum FieldTarget {
     HexColor,
     FontQuery,
     MenuName,
+    MenuSearch,
     PaneName,
     TabName,
     PaletteQuery,
@@ -46,7 +46,11 @@ impl Shell {
             return self.settings_field();
         }
         if self.is_workspace_menu_open {
-            return self.menu_field.as_ref().map(|_| FieldTarget::MenuName);
+            return self
+                .menu_field
+                .as_ref()
+                .map(|_| FieldTarget::MenuName)
+                .or(Some(FieldTarget::MenuSearch));
         }
         if self.is_pane_menu_open() {
             return None;
@@ -64,6 +68,7 @@ impl Shell {
         match target {
             FieldTarget::HexColor => Some(&self.state.theme_color_input),
             FieldTarget::FontQuery => Some(&self.state.font_picker_query),
+            FieldTarget::MenuSearch => Some(&self.menu_search),
             FieldTarget::MenuName => self.menu_field.as_ref().map(|field| &field.input),
             FieldTarget::PaneName => self.pane_field.as_ref().map(|field| &field.input),
             FieldTarget::TabName => self.tab_field.as_ref().map(|field| &field.input),
@@ -75,6 +80,7 @@ impl Shell {
         match target {
             FieldTarget::HexColor => Some(&mut self.state.theme_color_input),
             FieldTarget::FontQuery => Some(&mut self.state.font_picker_query),
+            FieldTarget::MenuSearch => Some(&mut self.menu_search),
             FieldTarget::MenuName => self.menu_field.as_mut().map(|field| &mut field.input),
             FieldTarget::PaneName => self.pane_field.as_mut().map(|field| &mut field.input),
             FieldTarget::TabName => self.tab_field.as_mut().map(|field| &mut field.input),
@@ -123,7 +129,7 @@ impl Shell {
                 self.scroll_palette_to_top();
             }
             FieldTarget::HexColor => self.preview_typed_hex(cx),
-            FieldTarget::MenuName | FieldTarget::PaneName | FieldTarget::TabName => {}
+            FieldTarget::MenuName | FieldTarget::MenuSearch | FieldTarget::PaneName | FieldTarget::TabName => {}
         }
     }
 
@@ -249,11 +255,8 @@ impl EntityInputHandler for Shell {
             return field.caret_bounds().get();
         }
         if let Some(panel) = self.model.focused_document() {
-            let pane = self.documents.get(&panel)?;
-            let DocumentPane::Editor(editor_pane) = pane else {
-                return None;
-            };
-            return editor_pane.view.borrow().layout.as_ref().and_then(|layout| layout.cursor_bounds);
+            let editor_pane = self.editor_pane(panel)?;
+            return editor_pane.active().view.borrow().layout.as_ref().and_then(|layout| layout.cursor_bounds);
         }
         let cursor = self.focused_handle()?.snapshot_grid().cursor?;
         Some(cursor_bounds(element_bounds, self.style.cell_size(window), cursor))
