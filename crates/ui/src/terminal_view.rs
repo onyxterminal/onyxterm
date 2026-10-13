@@ -2,11 +2,12 @@
 #![forbid(unsafe_code)]
 
 use crate::input::wheel_bytes;
+use crate::pixel_grid::{align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point};
 use crate::theme::Theme;
 use gpui::{
     canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, ContentMask, DispatchPhase, Font,
     FontWeight, Hitbox, HitboxBehavior, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollWheelEvent, SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
+    ScrollWheelEvent, ShapedLine, SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -116,6 +117,11 @@ pub fn content_bounds(bounds: Bounds<Pixels>, insets: ContentInsets) -> Bounds<P
     Bounds::new(bounds.origin + point(insets.x, insets.top), size(width, height))
 }
 
+fn device_aligned_content(bounds: Bounds<Pixels>, insets: ContentInsets, window: &Window) -> Bounds<Pixels> {
+    let content = content_bounds(bounds, insets);
+    Bounds::new(snap_point(content.origin, window.scale_factor()), content.size)
+}
+
 pub fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<Pixels>, grid: GridSize) -> (GridPoint, Side) {
     let local = position - origin;
     let col_position = (local.x / cell.width).max(0.0);
@@ -164,17 +170,26 @@ pub struct TerminalStyle {
     pub line_height: Pixels,
     pub selection: Hsla,
     pub insets: ContentInsets,
+    cell_size_cache: Rc<RefCell<Option<(f32, Size<Pixels>)>>>,
 }
 
 impl TerminalStyle {
     pub fn cell_size(&self, window: &Window) -> Size<Pixels> {
+        let scale = window.scale_factor();
+        if let Some((cached_scale, cached_size)) = *self.cell_size_cache.borrow() {
+            if cached_scale == scale {
+                return cached_size;
+            }
+        }
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(&self.font());
         let width = text_system
             .advance(font_id, self.font_size, 'm')
             .map(|advance| advance.width)
             .unwrap_or(self.font_size * FALLBACK_CELL_WIDTH_RATIO);
-        size(width, self.line_height)
+        let resolved = size(snap_cell_length(width, scale), snap_cell_length(self.line_height, scale));
+        *self.cell_size_cache.borrow_mut() = Some((scale, resolved));
+        resolved
     }
 
     pub fn from_theme(theme: &Theme, font_family: String) -> Self {
@@ -185,6 +200,7 @@ impl TerminalStyle {
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
             selection: theme.accent.primary.opacity(SELECTION_ALPHA),
             insets: ContentInsets::from_theme(theme),
+            cell_size_cache: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -223,7 +239,7 @@ pub fn terminal_canvas(
             (prepare_frame(&prepare_handle, &prepare_style, window), hitbox)
         },
         move |bounds, (frame, hitbox), window, cx| {
-            let bounds = content_bounds(bounds, style.insets);
+            let bounds = device_aligned_content(bounds, style.insets, window);
             let is_focused = focus.is_some();
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -247,7 +263,7 @@ pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<
     canvas(
         move |_bounds, window, _cx| prepare_frame(&handle, &prepare_style, window),
         move |bounds, frame, window, cx| {
-            let bounds = content_bounds(bounds, style.insets);
+            let bounds = device_aligned_content(bounds, style.insets, window);
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused: false };
             window.with_content_mask(Some(ContentMask { bounds }), |window| painter.paint(window, cx));
         },
@@ -367,7 +383,8 @@ impl FramePainter<'_> {
             strikethrough: None,
         };
         let line = window.text_system().shape_line(text.to_string().into(), self.style.font_size, &[run], None);
-        if let Err(err) = line.paint(bounds.origin, self.frame.cell.height, window, cx) {
+        let origin = self.glyph_origin(&line, bounds.origin, window);
+        if let Err(err) = line.paint(origin, self.frame.cell.height, window, cx) {
             tracing::warn!(?err, "marked text paint failed");
         }
     }
@@ -434,11 +451,17 @@ impl FramePainter<'_> {
             return;
         }
         let cell = self.frame.cell;
-        let line = window.text_system().shape_line(text.into(), self.style.font_size, &runs, Some(cell.width));
-        let origin = self.origin + point(px(0.0), cell.height * row_index as f32);
+        let mut line = window.text_system().shape_line(text.into(), self.style.font_size, &runs, None);
+        align_glyphs_to_cells(&mut line, cell.width);
+        let row_origin = self.origin + point(px(0.0), cell.height * row_index as f32);
+        let origin = self.glyph_origin(&line, row_origin, window);
         if let Err(err) = line.paint(origin, cell.height, window, cx) {
             tracing::warn!(?err, "terminal row paint failed");
         }
+    }
+
+    fn glyph_origin(&self, line: &ShapedLine, origin: Point<Pixels>, window: &Window) -> Point<Pixels> {
+        glyph_aligned_origin(origin, baseline_offset(line, self.frame.cell.height), window.scale_factor())
     }
 
     fn text_runs(&self, row_index: usize, row: &[Cell]) -> (String, Vec<TextRun>) {
