@@ -171,6 +171,7 @@ pub struct TerminalStyle {
     pub selection: Hsla,
     pub insets: ContentInsets,
     cell_size_cache: Rc<RefCell<Option<(f32, Size<Pixels>)>>>,
+    align_cache: crate::pixel_grid::AlignCache,
 }
 
 impl TerminalStyle {
@@ -201,6 +202,7 @@ impl TerminalStyle {
             selection: theme.accent.primary.opacity(SELECTION_ALPHA),
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
+            align_cache: RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -446,13 +448,16 @@ impl FramePainter<'_> {
     }
 
     fn paint_text(&self, row_index: usize, row: &[Cell], window: &mut Window, cx: &mut App) {
+        if row.iter().all(|cell| cell.ch <= ' ') {
+            return;
+        }
         let (text, runs) = self.text_runs(row_index, row);
         if text.trim_end().is_empty() {
             return;
         }
         let cell = self.frame.cell;
         let mut line = window.text_system().shape_line(text.into(), self.style.font_size, &runs, None);
-        align_glyphs_to_cells(&mut line, cell.width);
+        align_glyphs_to_cells(&mut line, cell.width, &self.style.align_cache);
         let row_origin = self.origin + point(px(0.0), cell.height * row_index as f32);
         let origin = self.glyph_origin(&line, row_origin, window);
         if let Err(err) = line.paint(origin, cell.height, window, cx) {
