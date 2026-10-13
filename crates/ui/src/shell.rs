@@ -7,16 +7,16 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{
-    document_cwd, document_title, document_zone, render_document, DocumentPane, EditorPane, EditorState,
-};
+use crate::document::{document_cwd, document_zone, render_document, DocumentPane};
+use crate::editor_pane::OpenDocument;
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
 use crate::confirm::{
-    close_pane_copy, close_tab_copy, delete_workspace_copy, discard_pane_copy, discard_tab_copy, quit_copy, ConfirmCopy,
-    Confirmation,
+    close_pane_copy, close_tab_copy, delete_workspace_copy, discard_documents_copy, discard_pane_copy, discard_tab_copy,
+    quit_copy, ConfirmCopy, Confirmation,
 };
 use crate::menus::RunCommand;
 use crate::motion::fade_in;
+use crate::open_target::RecentEditors;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
 use crate::settings::Settings;
@@ -40,6 +40,8 @@ use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEve
 use workspace_service::{PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
+mod document_strip;
+mod documents;
 mod editor_io;
 mod file_tree_input;
 mod islands;
@@ -67,6 +69,7 @@ const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
 const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
+const UNNAMED_FILE: &str = "This file";
 
 struct Pane {
     session: TerminalSessionId,
@@ -109,7 +112,7 @@ pub struct Shell {
     model: WorkspaceModel,
     panes: HashMap<PanelId, Pane>,
     documents: HashMap<PanelId, DocumentPane>,
-    last_editor: Option<PanelId>,
+    recent_editors: RecentEditors,
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
     menu_field: Option<MenuField>,
@@ -148,7 +151,7 @@ impl Shell {
             model: WorkspaceModel::from_snapshot(restored.snapshot, &home),
             panes: HashMap::new(),
             documents: HashMap::new(),
-            last_editor: None,
+            recent_editors: RecentEditors::default(),
             pending: None,
             is_workspace_menu_open: false,
             menu_field: None,
@@ -222,11 +225,15 @@ impl Shell {
         let Some(document) = DocumentPane::from_snapshot(&record) else {
             return;
         };
-        match &document {
-            DocumentPane::Editor(editor_pane) => self.load_editor(panel, editor_pane.path.clone(), cx),
-            DocumentPane::FileTree(tree_pane) => self.load_tree_dir(panel, tree_pane.root.clone(), cx),
-        }
+        let tree_root = match &document {
+            DocumentPane::FileTree(tree_pane) => Some(tree_pane.root.clone()),
+            DocumentPane::Editor(_) => None,
+        };
         self.documents.insert(panel, document);
+        match tree_root {
+            Some(root) => self.load_tree_dir(panel, root, cx),
+            None => self.load_editor_documents(panel, cx),
+        }
     }
 
     fn open_editor_here(&mut self, cx: &mut Context<Self>) {
@@ -243,6 +250,7 @@ impl Shell {
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
         self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path), documents: Vec::new() });
         self.restore_document(id, cx);
+        self.sync_editor_record(id);
         let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
         };
@@ -309,11 +317,34 @@ impl Shell {
             CommandId::MaximizePane => self.toggle_maximized(),
             CommandId::GridLayout => self.arrange_grid(),
             CommandId::EqualizePanes => self.equalize_panes(),
-            CommandId::CloseActive => self.request_close_focused(cx),
+            CommandId::CloseActive => {
+                if !self.request_close_focused_document(cx) {
+                    self.request_close_focused(cx);
+                }
+            }
+            CommandId::ClosePane => self.request_close_focused(cx),
+            CommandId::CloseDocument => {
+                self.request_close_focused_document(cx);
+            }
+            CommandId::NextDocument => {
+                if !self.cycle_documents(1) {
+                    self.model.tabs_mut().select_next();
+                }
+            }
+            CommandId::PrevDocument => {
+                if !self.cycle_documents(-1) {
+                    self.model.tabs_mut().select_previous();
+                }
+            }
             CommandId::Copy => self.copy_selection(cx),
             CommandId::Paste => self.paste_clipboard(cx),
             CommandId::SwitchWorkspace => self.open_workspace_picker(),
             CommandId::NewWorkspace => self.start_new_workspace(cx),
+            CommandId::RenameWorkspace => {
+                let id = self.model.active_id();
+                let key = SharedString::from(id.to_string());
+                self.start_rename_workspace(&key, cx);
+            }
             CommandId::RenameTab => self.start_rename_tab(self.model.tabs().active_index()),
             CommandId::Quit => self.request_quit(cx),
             CommandId::ToggleFullScreen => window.toggle_fullscreen(),
@@ -589,19 +620,9 @@ impl Shell {
     }
 
     fn request_close_focused(&mut self, cx: &mut Context<Self>) {
-        let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) else {
-            return;
-        };
-        if self.documents.get(&panel).is_some_and(DocumentPane::is_dirty) {
-            self.pending = Some(Confirmation::DiscardPane(panel));
-            return;
+        if let Some(panel) = self.model.tabs().active().map(|tab| tab.focused()) {
+            self.request_close_pane(panel, cx);
         }
-        let is_busy = self.panes.get(&panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job());
-        if is_busy {
-            self.pending = Some(Confirmation::ClosePane(panel));
-            return;
-        }
-        self.close_pane(panel, cx);
     }
 
     fn request_close_tab(&mut self, cx: &mut Context<Self>) {
@@ -628,9 +649,7 @@ impl Shell {
     }
 
     fn unsaved_count(&self, panels: impl Iterator<Item = PanelId>) -> usize {
-        panels
-            .filter(|panel| self.documents.get(panel).is_some_and(DocumentPane::is_dirty))
-            .count()
+        panels.filter_map(|panel| self.documents.get(&panel)).map(DocumentPane::unsaved_count).sum()
     }
 
     fn close_tab(&mut self, id: TabId, cx: &mut Context<Self>) {
@@ -652,6 +671,9 @@ impl Shell {
             Some(Confirmation::ClosePane(panel)) => self.close_pane(panel, cx),
             Some(Confirmation::CloseTab(id)) => self.close_tab(id, cx),
             Some(Confirmation::DiscardPane(panel)) => self.close_pane(panel, cx),
+            Some(Confirmation::DiscardDocument(panel, id)) => {
+                self.close_document(editor_io::DocumentRef { panel, id }, cx);
+            }
             Some(Confirmation::DiscardTab(id)) => self.close_tab(id, cx),
             Some(Confirmation::DeleteWorkspace(id)) => self.delete_workspace(id, cx),
             Some(Confirmation::Quit { .. }) => cx.quit(),
@@ -664,9 +686,13 @@ impl Shell {
         match confirmation {
             Confirmation::ClosePane(_) => close_pane_copy(),
             Confirmation::CloseTab(_) => close_tab_copy(),
-            Confirmation::DiscardPane(panel) => {
-                let name = self.documents.get(&panel).map(|doc| document_title(doc.path())).unwrap_or_else(|| "This file".to_string());
-                discard_pane_copy(&name)
+            Confirmation::DiscardPane(panel) => match self.unsaved_count(std::iter::once(panel)) {
+                0 | 1 => discard_pane_copy(&self.dirty_document_name(panel).unwrap_or_else(|| UNNAMED_FILE.to_string())),
+                unsaved => discard_documents_copy(unsaved),
+            },
+            Confirmation::DiscardDocument(panel, id) => {
+                let name = self.document_name(editor_io::DocumentRef { panel, id });
+                discard_pane_copy(&name.unwrap_or_else(|| UNNAMED_FILE.to_string()))
             }
             Confirmation::DiscardTab(id) => {
                 let leaves = self
@@ -771,13 +797,10 @@ impl Shell {
                 return;
             };
             let updated = shell.update(cx, |shell, cx| {
-                let title = document_title(&path);
-                let panel = if is_folder {
-                    Panel::new_file_tree(PanelId::new(), title)
-                } else {
-                    Panel::new_editor(PanelId::new(), title)
-                };
-                shell.open_document(panel, path, cx);
+                match is_folder {
+                    true => shell.open_file_tree(path, cx),
+                    false => shell.open_file(path, cx),
+                }
                 cx.notify();
             });
             if let Err(err) = updated {
@@ -868,14 +891,16 @@ impl Shell {
     fn remember_focused_editor(&mut self) {
         let is_editor = |panel: &PanelId| matches!(self.documents.get(panel), Some(DocumentPane::Editor(_)));
         if let Some(panel) = self.model.focused_document().filter(is_editor) {
-            self.last_editor = Some(panel);
+            self.recent_editors.touch(panel);
         }
     }
 
     fn close_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         if matches!(
             self.pending,
-            Some(Confirmation::ClosePane(p)) | Some(Confirmation::DiscardPane(p)) if p == panel
+            Some(Confirmation::ClosePane(p))
+                | Some(Confirmation::DiscardPane(p))
+                | Some(Confirmation::DiscardDocument(p, _)) if p == panel
         ) {
             self.pending = None;
         }
@@ -890,6 +915,7 @@ impl Shell {
 
     fn discard_pane(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         self.documents.remove(&panel);
+        self.recent_editors.forget(panel);
         let Some(pane) = self.panes.remove(&panel) else {
             return;
         };
@@ -980,23 +1006,36 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match document {
-            DocumentPane::Editor(EditorPane { state: EditorState::Ready(editor), view, .. }) => {
-                let frame = EditorFrame {
-                    rope: editor.buffer().rope().clone(),
-                    selections: editor.selections().clone(),
-                    is_focused,
-                    marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
-                };
-                let style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
-                let focus = is_focused.then(|| self.pane_focus(cx));
-                let handler = self.editor_pointer_handler(panel, cx);
-                editor_canvas(frame, style, view.clone(), focus, handler).into_any_element()
-            }
+            DocumentPane::Editor(pane) => match pane.active().ready() {
+                Some(editor) => self.render_editor_canvas(panel, pane.active(), editor, is_focused, cx),
+                None => render_document(document, &self.state.theme),
+            },
             DocumentPane::FileTree(tree_pane) if tree_pane.exists => {
                 self.render_file_tree(panel, tree_pane, is_focused, cx)
             }
             _ => render_document(document, &self.state.theme),
         }
+    }
+
+    fn render_editor_canvas(
+        &self,
+        panel: PanelId,
+        document: &OpenDocument,
+        editor: &editor_core::Editor,
+        is_focused: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let frame = EditorFrame {
+            rope: editor.buffer().rope().clone(),
+            selections: editor.selections().clone(),
+            is_focused,
+            marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
+        };
+        let mut style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
+        style.insets.top += px(document_strip::STRIP_HEIGHT_PX);
+        let focus = is_focused.then(|| self.pane_focus(cx));
+        let handler = self.editor_pointer_handler(panel, cx);
+        editor_canvas(frame, style, document.view.clone(), focus, handler).into_any_element()
     }
 
     fn field_input_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1031,6 +1070,7 @@ impl Shell {
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
             .child(islands::island_content(look, content))
             .child(header)
+            .children(self.render_document_strip(panel, is_focused, cx))
             .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))
             .into_any_element()

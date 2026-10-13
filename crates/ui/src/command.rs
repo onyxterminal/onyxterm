@@ -9,6 +9,7 @@ use domain::Direction;
 pub enum CommandId {
     NewTab,
     CloseActive,
+    ClosePane,
     OpenPalette,
     OpenSettings,
     ClosePalette,
@@ -20,6 +21,7 @@ pub enum CommandId {
     MaximizePane,
     SwitchWorkspace,
     NewWorkspace,
+    RenameWorkspace,
     RenameTab,
     Copy,
     Paste,
@@ -51,6 +53,9 @@ pub enum CommandId {
     OpenEditorHere,
     ToggleFileTree,
     Save,
+    NextDocument,
+    PrevDocument,
+    CloseDocument,
 }
 
 impl CommandId {
@@ -59,7 +64,8 @@ impl CommandId {
         matches!(
             self,
             NewTab | NextTab | PrevTab | SelectTab(_) | SplitRight | SplitDown | FocusAdjacent | FocusPane(_)
-                | SwapPane(_) | ResizePane(_) | GridLayout | EqualizePanes | CloseActive | CloseTab | MoveToNewTab
+                | SwapPane(_) | ResizePane(_) | GridLayout | EqualizePanes | CloseActive | ClosePane | CloseTab | MoveToNewTab
+                | NextDocument | PrevDocument | CloseDocument
         )
     }
 }
@@ -214,7 +220,8 @@ pub fn default_commands() -> Vec<Command> {
     use CommandId::*;
     vec![
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
-        Command::builder(CloseActive, "Close Pane", "Panes", no_op).build(),
+        Command::builder(CloseActive, "Close", "Panes", no_op).build(),
+        Command::builder(ClosePane, "Close Pane", "Panes", no_op).build(),
         Command::builder(OpenPalette, "Open Palette", "Palette", toggle_palette).build(),
         Command::builder(OpenSettings, "Settings", "Application", no_op).build(),
         Command::builder(ClosePalette, "Close Palette", "Palette", close_palette)
@@ -244,8 +251,12 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(OpenEditorHere, "Open Editor Here", "Files", no_op).build(),
         Command::builder(ToggleFileTree, "Toggle File Tree", "Files", no_op).build(),
         Command::builder(Save, "Save", "Files", no_op).build(),
+        Command::builder(NextDocument, "Next Document", "Files", no_op).build(),
+        Command::builder(PrevDocument, "Previous Document", "Files", no_op).build(),
+        Command::builder(CloseDocument, "Close Document", "Files", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
+        Command::builder(RenameWorkspace, "Rename Workspace\u{2026}", "Workspaces", no_op).build(),
         Command::builder(NextWorkspace, "Next Workspace", "Workspaces", no_op).build(),
         Command::builder(PrevWorkspace, "Previous Workspace", "Workspaces", no_op).build(),
         Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),

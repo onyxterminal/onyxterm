@@ -204,9 +204,11 @@ impl WorkspaceModel {
     }
 
     pub fn rename_workspace(&mut self, id: WorkspaceId, name: String) {
-        if let Some(index) = self.position(id) {
-            self.entries[index].workspace.name = name;
-        }
+        let Some(index) = self.position(id) else {
+            return;
+        };
+        self.entries[index].workspace.name = name;
+        self.entries[index].is_scratch = false;
     }
 
     pub fn workspace_panels(&self, id: WorkspaceId) -> Vec<PanelId> {

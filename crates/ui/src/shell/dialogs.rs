@@ -73,7 +73,8 @@ impl Shell {
                 name: entry.workspace.name.clone().into(),
                 tab_count: entry.tabs.len(),
                 is_active: entry.workspace.id == active,
-                is_editable: !entry.is_scratch,
+                can_rename: true,
+                can_delete: !entry.is_scratch,
             })
             .collect()
     }

@@ -232,6 +232,22 @@ fn scratch_disappears_when_closed_once_a_workspace_exists() {
 }
 
 #[test]
+fn renaming_scratch_promotes_it_so_drop_empty_scratch_no_longer_drops_it() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut model = WorkspaceModel::from_snapshot(WorkspaceSnapshot::default(), dir.path());
+    open_terminal_tab(&mut model, dir.path());
+    let scratch_id = model.active_id();
+    assert!(model.entries().iter().any(|entry| entry.is_scratch));
+
+    model.rename_workspace(scratch_id, "My Project".to_string());
+    assert!(model.entries().iter().all(|entry| !entry.is_scratch));
+    let snapshot = model.snapshot();
+    assert_eq!(snapshot.workspaces.len(), 1);
+    assert_eq!(snapshot.workspaces[0].name, "My Project");
+    assert_eq!(snapshot.active_workspace, Some(scratch_id));
+}
+
+#[test]
 fn created_workspace_is_exactly_what_comes_back_after_reopen() {
     let dir = TempDir::new().expect("tempdir");
     let database = dir.path().join("profile").join("onyxterm.db");

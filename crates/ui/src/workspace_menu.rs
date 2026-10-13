@@ -26,7 +26,8 @@ pub struct WorkspaceMenuItem {
     pub name: SharedString,
     pub tab_count: usize,
     pub is_active: bool,
-    pub is_editable: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,9 +97,10 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
     let group = SharedString::from(format!("workspace-row-{}", item.id));
     let style = row_style(group.clone());
     let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme);
-    let trailing = if item.is_editable {
-        let width = theme.pane_header.icon_button_px * 2.0 + ROW_ACTION_GAP_PX;
-        // Keep both states in the layout so hover changes cannot skip child prepaint.
+    let has_actions = item.can_rename || item.can_delete;
+    let trailing = if has_actions {
+        let button_count = (item.can_rename as u8 + item.can_delete as u8) as f32;
+        let width = theme.pane_header.icon_button_px * button_count + ROW_ACTION_GAP_PX * (button_count - 1.0).max(0.0);
         div()
             .relative()
             .w(px(width))
@@ -112,7 +114,7 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
                     .justify_end()
                     .child(count.group_hover(group.clone(), |style| style.invisible())),
             )
-            .child(row_actions(&item.id, group, theme, &actions))
+            .child(row_actions(&item.id, group, theme, &actions, item.can_rename, item.can_delete))
             .into_any_element()
     } else {
         count.into_any_element()
@@ -125,10 +127,10 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
         .child(trailing)
 }
 
-fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
+fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions, can_rename: bool, can_delete: bool) -> Div {
     let (rename, delete) = (actions.rename.clone(), actions.delete.clone());
     let (rename_id, delete_id) = (id.clone(), id.clone());
-    div()
+    let mut row = div()
         .absolute()
         .inset_0()
         .flex()
@@ -136,13 +138,18 @@ fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &
         .items_center()
         .gap(px(ROW_ACTION_GAP_PX))
         .invisible()
-        .group_hover(group, |style| style.visible())
-        .child(row_button(format!("rename-{id}"), Icon::Pencil, theme, move |window, cx| {
+        .group_hover(group, |style| style.visible());
+    if can_rename {
+        row = row.child(row_button(format!("rename-{id}"), Icon::Pencil, theme, move |window, cx| {
             rename(&rename_id, window, cx)
-        }))
-        .child(row_button(format!("delete-{id}"), Icon::Trash, theme, move |window, cx| {
+        }));
+    }
+    if can_delete {
+        row = row.child(row_button(format!("delete-{id}"), Icon::Trash, theme, move |window, cx| {
             delete(&delete_id, window, cx)
-        }))
+        }));
+    }
+    row
 }
 
 fn row_button(
@@ -218,7 +225,8 @@ mod paint_tests {
                 name: "Project".into(),
                 tab_count: 2,
                 is_active: true,
-                is_editable: true,
+                can_rename: true,
+                can_delete: true,
             }],
             field: None,
             new_workspace_shortcut: None,

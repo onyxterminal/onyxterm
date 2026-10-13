@@ -169,6 +169,7 @@ impl Default for Keymap {
         bind_panes(&mut map);
         bind_pane_movement(&mut map);
         bind_tabs(&mut map);
+        bind_documents(&mut map);
         bind_workspaces(&mut map);
         map
     }
@@ -221,17 +222,22 @@ fn bind_tabs(map: &mut Keymap) {
     map.bind(Combo::new(Modifiers::command_shift(), "w"), CloseTab);
     map.bind(Combo::new(cmd, "}"), NextTab);
     map.bind(Combo::new(cmd, "{"), PrevTab);
-    map.bind(Combo::new(Modifiers::control(), "tab"), NextTab);
-    map.bind(Combo::new(Modifiers::control() | Modifiers::shift(), "tab"), PrevTab);
     for index in 0..INDEXED_SLOTS {
         map.bind(Combo::new(cmd, slot_key(index)), SelectTab(index));
     }
+}
+
+fn bind_documents(map: &mut Keymap) {
+    use CommandId::*;
+    map.bind(Combo::new(Modifiers::control(), "tab"), NextDocument);
+    map.bind(Combo::new(Modifiers::control() | Modifiers::shift(), "tab"), PrevDocument);
 }
 
 fn bind_workspaces(map: &mut Keymap) {
     use CommandId::*;
     let cmd_alt = Modifiers::command() | Modifiers::alt();
     map.bind(Combo::new(Modifiers::command_shift(), "n"), NewWorkspace);
+    map.bind(Combo::new(Modifiers::command_shift(), "r"), RenameWorkspace);
     map.bind(Combo::new(Modifiers::command(), "o"), OpenWorkspaceMenu);
     map.bind(Combo::new(cmd_alt, "]"), NextWorkspace);
     map.bind(Combo::new(cmd_alt, "["), PrevWorkspace);
