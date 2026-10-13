@@ -28,6 +28,7 @@ const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
 const TAB_PILL_MIN_WIDTH_PX: f32 = 40.0;
+const TAB_PILL_GAP_PX: f32 = 6.0;
 
 static LOGO: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
@@ -77,7 +78,7 @@ impl Shell {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(theme.top_bar.tab_gap_px))
+                    .gap(px(TAB_PILL_GAP_PX))
                     .children(self.tab_pills().into_iter().map(|pill| self.render_tab_pill(pill, cx))),
             )
             .child(self.render_new_tab_button(cx))
