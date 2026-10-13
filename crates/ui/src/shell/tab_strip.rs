@@ -224,9 +224,8 @@ impl Shell {
             return;
         }
         drag.cursor = event.position;
-        let was_active = drag.is_active;
         drag.is_active = drag.is_active || has_left_dead_zone(drag.press, event.position);
-        if !was_active && drag.is_active {
+        if drag.is_active {
             cx.notify();
         }
     }
