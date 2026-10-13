@@ -156,7 +156,7 @@ impl Shell {
             .size_full()
             .child(self.stage.origin_probe())
             .children(self.render_island_ghosts(now))
-            .children(self.render_islands(now, cx))
+            .children(self.render_islands(now, window.viewport_size(), cx))
             .children(self.render_gaps(cx));
         Some(area.into_any_element())
     }
@@ -219,13 +219,19 @@ impl Shell {
         }
     }
 
-    fn render_islands(&self, now: Instant, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let panels: Vec<PanelId> = self.stage.layout.islands.iter().map(|island| island.panel).collect();
-        panels
-            .into_iter()
-            .filter_map(|panel| {
-                let frame = self.stage.motion.frame(panel, now)?;
-                Some(placed(frame).child(self.render_pane(panel, cx)).into_any_element())
+    fn render_islands(&self, now: Instant, viewport: Size<Pixels>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let origin = self.stage.origin.get();
+        let viewport_bounds = Bounds::new(point(px(0.0), px(0.0)), viewport);
+        self.stage
+            .layout
+            .islands
+            .iter()
+            .filter_map(|island| {
+                let frame = self.stage.motion.frame(island.panel, now)?;
+                if !frame.rect.to_bounds(origin).intersects(&viewport_bounds) {
+                    return None;
+                }
+                Some(placed(frame).child(self.render_pane(island.panel, cx)).into_any_element())
             })
             .collect()
     }
