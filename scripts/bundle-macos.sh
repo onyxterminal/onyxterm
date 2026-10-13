@@ -36,7 +36,18 @@ plutil -replace CFBundleShortVersionString -string "$version" "$bundle/Contents/
 plutil -replace CFBundleVersion -string "$version" "$bundle/Contents/Info.plist"
 plutil -lint "$bundle/Contents/Info.plist"
 
-codesign --force --deep -s - "$bundle"
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  sign_args=(--force --options runtime --timestamp "--sign" "$APPLE_SIGNING_IDENTITY")
+  if [ -f "$repo_root/packaging/Entitlements.plist" ]; then
+    sign_args=(--force --options runtime --timestamp "--entitlements" "$repo_root/packaging/Entitlements.plist" "--sign" "$APPLE_SIGNING_IDENTITY")
+  fi
+else
+  sign_args=(--force --options runtime "--sign" "-")
+  echo "warning: ad-hoc signing — Gatekeeper will warn" >&2
+fi
+
+codesign "${sign_args[@]}" "$bundle/Contents/MacOS/$executable_name"
+codesign "${sign_args[@]}" "$bundle"
 codesign --verify --verbose "$bundle"
 echo "built $bundle ($version)"
 
