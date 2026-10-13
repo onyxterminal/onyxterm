@@ -1,3 +1,11 @@
+# Required secrets to enable Developer ID signing and notarization:
+#   APPLE_SIGNING_IDENTITY    e.g. "Developer ID Application: Onyx (TEAMID)"
+#   APPLE_TEAM_ID             10-character Apple team identifier
+#   APPLE_CERT_P12_BASE64     base64 of the Developer ID Application .p12
+#   APPLE_CERT_PASSWORD       password for the .p12 above
+#   APPLE_KEYCHAIN_PROFILE    notarytool keychain profile, seeded once per runner
+# The signing block below stays inert until APPLE_SIGNING_IDENTITY is set.
+
 name: Build
 run-name: "build ${{ github.ref_name }}"
 
@@ -13,6 +21,11 @@ permissions:
 env:
   BIN_NAME: Onyx
   APP_NAME: Onyx
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+  APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+  APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+  APPLE_KEYCHAIN_PROFILE: ${{ secrets.APPLE_KEYCHAIN_PROFILE }}
 
 jobs:
   build:
@@ -43,6 +56,45 @@ jobs:
       - name: Bundle .app
         run: scripts/bundle-macos.sh
 
+      ## ENABLED: when you have an Apple Developer ID, set the five
+      ## APPLE_* secrets and remove this comment block header.
+      ## The block stays inert until APPLE_SIGNING_IDENTITY is non-empty.
+      - name: Import Developer ID certificate
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ env.APPLE_CERT_P12_BASE64 }}
+          p12-password: ${{ env.APPLE_CERT_PASSWORD }}
+
+      ## ENABLED: when you have a Developer ID, also create
+      ## packaging/Entitlements.plist and add --entitlements to the
+      ## two codesign lines below.
+      - name: Re-sign .app with Developer ID
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        run: |
+          BUNDLE="target/release/${{ env.APP_NAME }}.app"
+          codesign --force --options runtime --timestamp \
+            --sign "${{ env.APPLE_SIGNING_IDENTITY }}" \
+            "$BUNDLE/Contents/MacOS/${{ env.APP_NAME }}"
+          codesign --force --options runtime --timestamp \
+            --sign "${{ env.APPLE_SIGNING_IDENTITY }}" \
+            "$BUNDLE"
+          codesign --verify --verbose=2 "$BUNDLE"
+
+      - name: Notarize .app
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        run: |
+          xcrun notarytool submit "target/release/${{ env.APP_NAME }}.app" \
+            --keychain-profile "${{ env.APPLE_KEYCHAIN_PROFILE }}" --wait
+
+      - name: Staple .app
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        run: xcrun stapler staple "target/release/${{ env.APP_NAME }}.app"
+
+      - name: Gatekeeper accept .app
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        run: spctl -a -t exec --verbose=2 "target/release/${{ env.APP_NAME }}.app"
+
       - name: Install create-dmg
         run: brew install create-dmg
 
@@ -67,6 +119,11 @@ jobs:
             staging
           rm -rf staging
         shell: bash
+
+      - name: Staple .dmg
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        working-directory: target/release
+        run: xcrun stapler staple "${{ env.APP_NAME }}-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
