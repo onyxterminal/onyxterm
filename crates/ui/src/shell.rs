@@ -7,7 +7,7 @@ use crate::command::{
     close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
     CommandId,
 };
-use crate::document::{document_cwd, document_zone, render_document, DocumentPane};
+use crate::document::{document_cwd, document_title, document_zone, render_document, DocumentPane};
 use crate::editor_pane::OpenDocument;
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
 use crate::confirm::{
@@ -19,13 +19,13 @@ use crate::motion::fade_in;
 use crate::open_target::RecentEditors;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
-use crate::settings::Settings;
+use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
 use crate::pane_title::OscTitle;
 use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle};
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
-use domain::{Axis, Direction, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
+use domain::{Axis, Direction, LayoutNode, Panel, PanelId, PanelKind, TabId, TerminalSessionId, WorkspaceId};
 use gpui::{
     canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
     FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
@@ -250,7 +250,91 @@ impl Shell {
     }
 
     fn toggle_editor_bundle(&mut self, cx: &mut Context<Self>) {
+        let Some(_focused) = self.model.tabs().active().map(|tab| tab.focused()) else {
+            return;
+        };
+        let side = self.state.settings.editor_bundle_side;
+        let size = self.state.settings.editor_bundle_size;
+        if let Some((file_tree, editor)) = self.find_bundle() {
+            self.close_pane(file_tree, cx);
+            self.close_pane(editor, cx);
+        } else {
+            self.spawn_bundle(cx);
+        }
+        self.save_editor_bundle_settings(side, size);
+        self.remember_focused_editor();
+        self.persist();
         cx.notify();
+    }
+
+    fn find_bundle(&self) -> Option<(PanelId, PanelId)> {
+        let tab = self.model.tabs().active()?;
+        Self::find_bundle_in(tab.layout(), &|id| self.model.panel(id).map(|record| record.panel.kind))
+    }
+
+    fn find_bundle_in(node: &LayoutNode, kind: &dyn Fn(PanelId) -> Option<PanelKind>) -> Option<(PanelId, PanelId)> {
+        let LayoutNode::Split { first, second, .. } = node else {
+            return None;
+        };
+        if let (LayoutNode::Leaf { panel_id: a }, LayoutNode::Leaf { panel_id: b }) = (first.as_ref(), second.as_ref()) {
+            match (kind(*a), kind(*b)) {
+                (Some(PanelKind::FileTree), Some(PanelKind::Editor)) => return Some((*a, *b)),
+                (Some(PanelKind::Editor), Some(PanelKind::FileTree)) => return Some((*b, *a)),
+                _ => {}
+            }
+        }
+        Self::find_bundle_in(first, kind).or_else(|| Self::find_bundle_in(second, kind))
+    }
+
+    fn spawn_bundle(&mut self, cx: &mut Context<Self>) {
+        let Some(focused) = self.model.tabs().active().map(|tab| tab.focused()) else {
+            return;
+        };
+        let cwd = self.panel_cwd(focused);
+        let file_tree_panel = Panel::new_file_tree(PanelId::new(), document_title(&cwd));
+        let editor_panel = Panel::new_editor(PanelId::new(), UNNAMED_FILE.to_string());
+        let file_tree_id = file_tree_panel.id;
+        let editor_id = editor_panel.id;
+
+        self.model.add_panel(PanelSnapshot {
+            panel: file_tree_panel,
+            cwd: cwd.clone(),
+            name: None,
+            path: Some(cwd.clone()),
+            documents: Vec::new(),
+        });
+        self.restore_document(file_tree_id, cx);
+
+        self.model.add_panel(PanelSnapshot {
+            panel: editor_panel,
+            cwd: cwd.clone(),
+            name: None,
+            path: Some(cwd.clone()),
+            documents: Vec::new(),
+        });
+        self.restore_document(editor_id, cx);
+
+        let side = self.state.settings.editor_bundle_side;
+        let size = self.state.settings.editor_bundle_size;
+        let (outer_axis, places_before) = match side {
+            BundleSide::Left => (Axis::Horizontal, true),
+            BundleSide::Right => (Axis::Horizontal, false),
+            BundleSide::Top => (Axis::Vertical, true),
+            BundleSide::Bottom => (Axis::Vertical, false),
+        };
+
+        let Some(tab) = self.model.tabs_mut().active_mut() else {
+            return;
+        };
+        if tab.wrap_focused_with_pair(outer_axis, size, 0.5, file_tree_id, editor_id, places_before).is_err() {
+            self.discard_pane(file_tree_id, cx);
+            self.discard_pane(editor_id, cx);
+        }
+    }
+
+    fn save_editor_bundle_settings(&mut self, side: BundleSide, size: f32) {
+        let _ = self.store.set_setting(EDITOR_BUNDLE_SIDE_KEY, side.key());
+        let _ = self.store.set_setting(EDITOR_BUNDLE_SIZE_KEY, &size.to_string());
     }
 
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {

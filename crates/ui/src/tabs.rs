@@ -125,6 +125,39 @@ impl Tab {
         Ok(())
     }
 
+    pub fn wrap_focused_with_pair(
+        &mut self,
+        outer_axis: Axis,
+        outer_ratio: f32,
+        inner_ratio: f32,
+        pair_first: PanelId,
+        pair_second: PanelId,
+        places_before: bool,
+    ) -> Result<(), DomainError> {
+        let focused = self.focused;
+        let bundle = LayoutNode::Split {
+            axis: Axis::Horizontal,
+            ratio: inner_ratio,
+            first: Box::new(LayoutNode::leaf(pair_first)),
+            second: Box::new(LayoutNode::leaf(pair_second)),
+        };
+        let (first, second) = if places_before {
+            (bundle, LayoutNode::leaf(focused))
+        } else {
+            (LayoutNode::leaf(focused), bundle)
+        };
+        let outer = LayoutNode::Split {
+            axis: outer_axis,
+            ratio: outer_ratio,
+            first: Box::new(first),
+            second: Box::new(second),
+        };
+        self.layout.replace_leaf(&mut |id| id == focused, outer)?;
+        self.focused = pair_second;
+        self.is_maximized = false;
+        Ok(())
+    }
+
     fn adopt_panel(&mut self, panel: PanelId) -> Result<(), DomainError> {
         self.insert_beside_focused(panel, DropZone::Right)
     }
