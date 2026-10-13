@@ -2,6 +2,7 @@
 
 use crate::theme::custom::{ColorField, CustomColors};
 use crate::theme::{Theme, ThemeKind};
+use serde::{Deserialize, Serialize};
 
 pub const THEME_KEY: &str = "appearance.theme";
 pub const FONT_KEY: &str = "terminal.font_family";
@@ -10,6 +11,36 @@ pub const UI_SCALE_KEY: &str = "appearance.ui_scale";
 pub const DIM_UNFOCUSED_KEY: &str = "appearance.dim_unfocused_panes";
 pub const CUSTOM_BASE_KEY: &str = "theme.custom.base";
 pub const CUSTOM_COLORS_KEY: &str = "theme.custom.colors";
+pub const EDITOR_BUNDLE_SIDE_KEY: &str = "editor.bundle_side";
+pub const EDITOR_BUNDLE_SIZE_KEY: &str = "editor.bundle_size";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BundleSide {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl BundleSide {
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "left" => Self::Left,
+            "top" => Self::Top,
+            "bottom" => Self::Bottom,
+            _ => Self::Right,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -20,6 +51,8 @@ pub struct Settings {
     pub font_size: f32,
     pub ui_scale: f32,
     pub dim_unfocused_panes: bool,
+    pub editor_bundle_side: BundleSide,
+    pub editor_bundle_size: f32,
 }
 
 impl Default for Settings {
@@ -27,7 +60,8 @@ impl Default for Settings {
         Self { theme: ThemeKind::Light, custom_base: ThemeKind::Dark,
             custom_colors: CustomColors::from_theme(&Theme::load(ThemeKind::Dark).expect("built-in dark theme")),
             font_family: "JetBrains Mono".into(), font_size: 13.0,
-            ui_scale: 1.0, dim_unfocused_panes: true }
+            ui_scale: 1.0, dim_unfocused_panes: true,
+            editor_bundle_side: BundleSide::Right, editor_bundle_size: 0.4 }
     }
 }
 
@@ -50,6 +84,8 @@ impl Settings {
                 FONT_SIZE_KEY => settings.font_size = bounded(value, 10.0, 28.0, settings.font_size),
                 UI_SCALE_KEY => settings.ui_scale = bounded(value, 0.75, 1.5, settings.ui_scale),
                 DIM_UNFOCUSED_KEY => settings.dim_unfocused_panes = value != "false",
+                EDITOR_BUNDLE_SIDE_KEY => settings.editor_bundle_side = BundleSide::from_key(value),
+                EDITOR_BUNDLE_SIZE_KEY => settings.editor_bundle_size = bounded(value, 0.1, 0.9, settings.editor_bundle_size),
                 _ => {}
             }
         }
