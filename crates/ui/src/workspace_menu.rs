@@ -8,10 +8,12 @@ use crate::theme::menu_chrome::{
 };
 use crate::theme::Theme;
 use crate::workspaces::SCRATCH_NAME;
+use domain::SshHost;
 use gpui::{div, prelude::*, px, App, Div, MouseButton, SharedString, Window};
 use std::rc::Rc;
 
 const SECTION_LABEL: &str = "Workspaces";
+const SSH_SECTION_LABEL: &str = "SSH";
 const NEW_WORKSPACE_LABEL: &str = "New Workspace\u{2026}";
 const NAME_PLACEHOLDER: &str = "Workspace name";
 const SEARCH_PLACEHOLDER: &str = "Filter workspaces";
@@ -41,6 +43,7 @@ pub struct MenuField {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceMenuModel {
     pub items: Vec<WorkspaceMenuItem>,
+    pub ssh_hosts: Vec<SshHost>,
     pub field: Option<MenuField>,
     pub search: TextField,
     pub new_workspace_shortcut: Option<String>,
@@ -69,17 +72,11 @@ pub fn tab_count_label(count: usize) -> String {
 }
 
 pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: WorkspaceMenuActions) -> Div {
-    let WorkspaceMenuModel { items, field, search, new_workspace_shortcut } = model;
+    let WorkspaceMenuModel { items, ssh_hosts, field, search, new_workspace_shortcut } = model;
     let is_creating = field.as_ref().is_some_and(|field| field.renaming.is_none());
     let needle = search.text().trim().to_ascii_lowercase();
-    let filtered: Vec<WorkspaceMenuItem> = if needle.is_empty() {
-        items
-    } else {
-        items
-            .into_iter()
-            .filter(|item| item.name.to_ascii_lowercase().contains(&needle))
-            .collect()
-    };
+    let filtered: Vec<WorkspaceMenuItem> = filter_workspaces(items, &needle);
+    let filtered_ssh: Vec<SshHost> = filter_ssh_hosts(ssh_hosts, &needle);
     let rows: Vec<_> = filtered
         .into_iter()
         .map(|item| {
@@ -90,6 +87,10 @@ pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: Workspa
             }
         })
         .collect();
+    let ssh_rows: Vec<_> = filtered_ssh
+        .into_iter()
+        .map(|host| ssh_row(host, theme).into_any_element())
+        .collect();
     let footer = match field.filter(|_| is_creating) {
         Some(field) => name_field(&field.input, theme).into_any_element(),
         None => new_workspace_row(new_workspace_shortcut, theme, actions.create.clone()).into_any_element(),
@@ -99,7 +100,43 @@ pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: Workspa
         .child(menu_section_label(SECTION_LABEL, theme))
         .children(rows)
         .child(menu_separator(theme))
+        .child(menu_section_label(SSH_SECTION_LABEL, theme))
+        .children(ssh_rows)
         .child(footer)
+}
+
+fn filter_workspaces(items: Vec<WorkspaceMenuItem>, needle: &str) -> Vec<WorkspaceMenuItem> {
+    if needle.is_empty() {
+        items
+    } else {
+        items
+            .into_iter()
+            .filter(|item| item.name.to_ascii_lowercase().contains(needle))
+            .collect()
+    }
+}
+
+fn filter_ssh_hosts(hosts: Vec<SshHost>, needle: &str) -> Vec<SshHost> {
+    if needle.is_empty() {
+        hosts
+    } else {
+        hosts
+            .into_iter()
+            .filter(|host| ssh_matches(host, needle))
+            .collect()
+    }
+}
+
+fn ssh_matches(host: &SshHost, needle: &str) -> bool {
+    host.alias.to_ascii_lowercase().contains(needle)
+        || host
+            .hostname
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains(needle))
+        || host
+            .user
+            .as_deref()
+            .is_some_and(|value| value.to_ascii_lowercase().contains(needle))
 }
 
 fn search_field(search: &TextField, theme: &Theme) -> impl IntoElement {
@@ -120,6 +157,16 @@ fn search_field(search: &TextField, theme: &Theme) -> impl IntoElement {
 
 fn row_style(group: SharedString) -> MenuRowStyle {
     MenuRowStyle { group, is_highlighted: false, is_destructive: false }
+}
+
+fn ssh_row(host: SshHost, theme: &Theme) -> impl IntoElement {
+    let group = SharedString::from(format!("ssh-row-{}", host.alias));
+    let id = SharedString::from(format!("ssh-host-{}", host.alias));
+    let style = MenuRowStyle { group, is_highlighted: false, is_destructive: false };
+    let label: SharedString = host.to_string().into();
+    menu_row(id, style, theme)
+        .child(div().w(px(CHECK_COLUMN_PX)).flex_none())
+        .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
 }
 
 fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuActions) -> impl IntoElement {
@@ -258,6 +305,7 @@ mod paint_tests {
                 can_rename: true,
                 can_delete: true,
             }],
+            ssh_hosts: Vec::new(),
             field: None,
             search: TextField::default(),
             new_workspace_shortcut: None,

@@ -107,7 +107,6 @@ pub struct Startup {
 pub struct Shell {
     state: AppState,
     terminals: Arc<InMemoryTerminalService>,
-    #[allow(dead_code)]
     ssh: Arc<InMemorySshService>,
     store: WorkspaceStore,
     style: TerminalStyle,

@@ -5,6 +5,7 @@ use crate::theme::box_shadows;
 use crate::workspace_menu::{workspace_menu, WorkspaceMenuActions, WorkspaceMenuItem, WorkspaceMenuModel};
 use gpui::{div, prelude::*, px, Context, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 use std::rc::Rc;
+use workspace_service::SshService;
 
 const HALF: f32 = 0.5;
 const DIALOG_PADDING_PX: f32 = 18.0;
@@ -29,6 +30,7 @@ impl Shell {
         let theme = &self.state.theme;
         let model = WorkspaceMenuModel {
             items: self.workspace_menu_items(),
+            ssh_hosts: self.ssh.list_hosts(),
             field: self.menu_field.clone(),
             search: self.menu_search.clone(),
             new_workspace_shortcut: self.state.keymap.combo_for(CommandId::NewWorkspace).map(|combo| combo.glyphs()),
