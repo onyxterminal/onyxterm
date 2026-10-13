@@ -15,29 +15,3 @@ ui = { path = "../ui" }
 terminal-core = { path = "../terminal-core" }
 workspace-service = { path = "../workspace-service" }
 tracing = { workspace = true }
-
-[package.metadata.deb]
-maintainer = "Onyxterm <dev@onyxterm.local>"
-copyright = "2026, Onyxterm"
-license-file = []
-section = "utils"
-priority = "optional"
-depends = "$auto"
-extended-description = "Onyxterm — local-first Rust terminal workspace."
-description = "Onyxterm terminal workspace"
-assets = [
-    ["target/release/onyxterm", "usr/bin/", "755"],
-    ["packaging/linux/onyxterm.desktop", "usr/share/applications/", "644"],
-    ["packaging/linux/onyxterm.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
-]
-
-[package.metadata.wix]
-installer-name = "Onyxterm-{version}-x86_64.msi"
-
-[package.metadata.wix.product]
-name = "Onyxterm"
-manufacturer = "Onyxterm"
-version = "{version}"
-
-[package.metadata.wix.msi]
-install-step-ui = "basic"
