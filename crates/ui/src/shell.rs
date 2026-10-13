@@ -129,6 +129,8 @@ pub struct Shell {
     stage: islands::Stage,
     dropped_ghost: Option<pane_drag::DroppedGhost>,
     tab_bounds: pane_drag::BoundsMap<usize>,
+    tab_scroll: gpui::ScrollHandle,
+    visible_tab: std::cell::Cell<Option<(WorkspaceId, usize)>>,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     is_copy_top_pending: bool,
@@ -171,6 +173,8 @@ impl Shell {
             tab_drag: None,
             dropped_ghost: None,
             tab_bounds: pane_drag::BoundsMap::default(),
+            tab_scroll: gpui::ScrollHandle::new(),
+            visible_tab: std::cell::Cell::new(None),
             pane_menu: None,
             pane_field: None,
             is_copy_top_pending: false,
@@ -1090,6 +1094,7 @@ impl Shell {
     }
 
     fn apply_batch(&mut self, panel: PanelId, batch: EventBatch, cx: &mut Context<Self>) {
+        let has_title = batch.title.is_some();
         if let Some(title) = batch.title {
             if let Some(pane) = self.panes.get_mut(&panel) {
                 let owner = pane.terminal.handle.foreground_process_group();
@@ -1103,7 +1108,9 @@ impl Shell {
             self.close_pane(panel, cx);
         }
         self.refresh_status(panel, cx);
-        cx.notify();
+        if has_title || batch.exited {
+            cx.notify();
+        }
     }
 
     fn select_workspace_by_key(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -1158,7 +1165,7 @@ impl Shell {
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
         };
         let mut style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
-        style.insets.top += px(document_strip::STRIP_HEIGHT_PX);
+        style.insets.top += px(document_strip::strip_height(self.state.settings.ui_scale));
         let focus = is_focused.then(|| self.pane_focus(cx));
         let handler = self.editor_pointer_handler(panel, cx);
         editor_canvas(frame, style, document.view.clone(), focus, handler).into_any_element()
@@ -1213,7 +1220,21 @@ impl Render for Shell {
         }
         self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
-        let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll);
+        let shell = cx.entity().downgrade();
+        let on_select = std::rc::Rc::new(move |index, window: &mut Window, cx: &mut gpui::App| {
+            if let Some(shell) = shell.upgrade() {
+                shell.update(cx, |shell, cx| {
+                    shell.state.palette_selection = index;
+                    shell.run_palette_selection(window, cx);
+                    cx.notify();
+                });
+            }
+        });
+        let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll, on_select)
+            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
+                close_palette(&mut shell.state);
+                cx.notify();
+            }));
         let palette_visible = self.state.palette_visible;
         let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
