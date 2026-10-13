@@ -151,6 +151,7 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
     let (select, select_id) = (actions.select.clone(), item.id.clone());
     menu_row(item.id.clone(), style, theme)
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
+        .when(item.is_active, |row| row.bg(theme.surface.subtle))
         .child(div().w(px(CHECK_COLUMN_PX)).flex_none().child(if item.is_active { CHECK_MARK } else { "" }))
         .child(div().flex_1().min_w(px(0.0)).truncate().child(item.name))
         .child(trailing)
