@@ -43,13 +43,29 @@ jobs:
       - name: Bundle .app
         run: scripts/bundle-macos.sh
 
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Build .dmg
+        working-directory: target/release
         run: |
-          cd target/release
-          hdiutil create -volname "${{ env.APP_NAME }}" \
-            -srcfolder "${{ env.APP_NAME }}.app" \
-            -ov -format UDZO \
-            "${{ env.APP_NAME }}-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg"
+          rm -rf staging
+          mkdir staging
+          cp -R "${{ env.APP_NAME }}.app" staging/
+          create-dmg \
+            --volname "${{ env.APP_NAME }}" \
+            --volicon "$GITHUB_WORKSPACE/assets/icons/${{ env.APP_NAME }}.icns" \
+            --background "$GITHUB_WORKSPACE/packaging/dmg/background.png" \
+            --window-pos 200 120 \
+            --window-size 540 360 \
+            --icon-size 100 \
+            --icon "${{ env.APP_NAME }}.app" 150 180 \
+            --hide-extension "${{ env.APP_NAME }}.app" \
+            --app-drop-link 390 180 \
+            --overwrite \
+            "${{ env.APP_NAME }}-${{ steps.version.outputs.VERSION }}-macos-arm64.dmg" \
+            staging
+          rm -rf staging
         shell: bash
 
       - name: Upload macOS artifact
