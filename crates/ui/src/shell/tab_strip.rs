@@ -27,6 +27,7 @@ const PALETTE_ICON_PX: f32 = 12.0;
 const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
+const TAB_PILL_MIN_WIDTH_PX: f32 = 40.0;
 
 static LOGO: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
@@ -122,6 +123,7 @@ impl Shell {
             .id(("tab", index))
             .relative()
             .h(px(top_bar.control_height_px))
+            .min_w(px(TAB_PILL_MIN_WIDTH_PX))
             .px(px(top_bar.tab_padding_x_px))
             .flex()
             .items_center()
