@@ -134,7 +134,6 @@ impl Shell {
             .when(is_raised, |pill| pill.bg(theme.surface.canvas))
             .when(pill.is_active, |pill| pill.text_color(theme.text.default).font_weight(FontWeight::MEDIUM))
             .when(!is_raised, |pill| pill.hover(move |style| style.bg(hover_fill)))
-            .when(pill.is_active, |pill| pill.border_b_2().border_color(theme.accent.primary))
             .child(bounds_probe(&self.tab_bounds, index))
             .on_mouse_down(
                 MouseButton::Left,
