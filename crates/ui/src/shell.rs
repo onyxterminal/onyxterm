@@ -57,6 +57,7 @@ mod theme_editor;
 mod tab_strip;
 mod text_input;
 
+use tab_strip::TabDrag;
 use tab_strip::TabField;
 use text_input::FieldTarget;
 
@@ -123,6 +124,7 @@ pub struct Shell {
     split_drag: Option<splits::SplitDrag>,
     drop_target: Option<crate::pane_drop::DropTarget>,
     pane_drag: Option<pane_drag::PaneDrag>,
+    tab_drag: Option<TabDrag>,
     stage: islands::Stage,
     dropped_ghost: Option<pane_drag::DroppedGhost>,
     tab_bounds: pane_drag::BoundsMap<usize>,
@@ -163,6 +165,7 @@ impl Shell {
             split_drag: None,
             drop_target: None,
             pane_drag: None,
+            tab_drag: None,
             dropped_ghost: None,
             tab_bounds: pane_drag::BoundsMap::default(),
             pane_menu: None,
@@ -407,6 +410,10 @@ impl Shell {
         let keystroke = &event.keystroke;
         if keystroke.key == ESCAPE_KEY && self.is_dragging_pane() {
             return self.cancel_pane_drag(cx);
+        }
+        if keystroke.key == ESCAPE_KEY && self.is_dragging_tab() {
+            self.cancel_tab_drag(cx);
+            return true;
         }
         if self.pending.is_some() {
             self.handle_confirmation_key(keystroke, cx);
@@ -1120,6 +1127,7 @@ impl Render for Shell {
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
+        let tab_ghost = self.render_tab_ghost();
         let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
         let settings_overlay = self.state.settings_visible.then(|| self.render_settings(window, cx));
         let field_input = self.active_field().map(|_| self.field_input_probe(cx));
@@ -1141,10 +1149,12 @@ impl Render for Shell {
             .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| {
                 shell.drag_split(event, cx);
                 shell.drag_pane(event, cx);
+                shell.drag_tab(event, cx);
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|shell, _event, window, cx| {
+            .on_mouse_up(MouseButton::Left, cx.listener(|shell, event: &gpui::MouseUpEvent, window, cx| {
                 shell.end_split_drag(cx);
                 shell.release_pane_drag(window, cx);
+                shell.release_tab_drag(event, window, cx);
             }))
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
@@ -1154,6 +1164,7 @@ impl Render for Shell {
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
             .children(pane_ghost)
+            .children(tab_ghost)
             .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
             .children(settings_overlay)

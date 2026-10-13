@@ -1,6 +1,7 @@
 use super::pane_drag::bounds_probe;
 use super::{FieldTarget, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::command::CommandId;
+use crate::pane_drop::{has_left_dead_zone, tab_drop_target};
 use crate::tabs::numbered_tab_label;
 use crate::theme::icons::Icon;
 use crate::text_field::TextField;
@@ -8,8 +9,8 @@ use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme};
 use crate::workspace_menu::workspace_button_label;
 use gpui::{
-    div, img, prelude::*, px, AnyElement, BoxShadow, Context, Div, FontWeight, Image, ImageFormat, Keystroke,
-    MouseButton, SharedString, Stateful, Window,
+    div, img, prelude::*, px, AnyElement, Bounds, BoxShadow, Context, Div, FontWeight, Image, ImageFormat, Keystroke,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Stateful, Window,
 };
 use std::sync::{Arc, LazyLock};
 
@@ -24,6 +25,8 @@ const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const PALETTE_BUTTON_GAP_PX: f32 = 5.0;
 const PALETTE_ICON_PX: f32 = 12.0;
 const DROP_RING_PX: f32 = 1.5;
+const TAB_GHOST_OPACITY: f32 = 0.7;
+const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
 
 static LOGO: LazyLock<Arc<Image>> =
     LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())));
@@ -36,6 +39,13 @@ enum TabLabel {
 struct TabPill {
     index: usize,
     label: TabLabel,
+    is_active: bool,
+}
+
+pub(super) struct TabDrag {
+    from: usize,
+    press: Point<Pixels>,
+    cursor: Point<Pixels>,
     is_active: bool,
 }
 
@@ -105,7 +115,7 @@ impl Shell {
             true => box_shadows(&theme.shadow.tab),
             false => Vec::new(),
         };
-        if self.is_tab_drop_target(index) {
+        if self.is_tab_drop_target(index) || self.is_tab_drag_target(index) {
             shadows.push(drop_ring(theme));
         }
         div()
@@ -126,8 +136,9 @@ impl Shell {
             .child(bounds_probe(&self.tab_bounds, index))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
-                    shell.click_tab(index, event.click_count, window, cx)
+                cx.listener(move |shell, event: &gpui::MouseDownEvent, _window, cx| {
+                    cx.stop_propagation();
+                    shell.press_tab_pill(index, event.position, cx);
                 }),
             )
             .child(content)
@@ -190,16 +201,115 @@ impl Shell {
             .children(shortcut)
     }
 
-    fn click_tab(&mut self, index: usize, click_count: usize, window: &mut Window, cx: &mut Context<Self>) {
-        cx.stop_propagation();
+    fn press_tab_pill(&mut self, index: usize, press: Point<Pixels>, cx: &mut Context<Self>) {
         if self.tab_field.as_ref().is_some_and(|field| field.index == index) {
             return;
         }
-        self.commit_tab_field();
-        self.activate_tab(index, window, cx);
-        if click_count == DOUBLE_CLICK {
-            self.start_rename_tab(index);
+        if index >= self.model.tabs().len() {
+            return;
         }
+        self.commit_tab_field();
+        self.tab_drag = Some(TabDrag { from: index, press, cursor: press, is_active: false });
+        cx.notify();
+    }
+
+    pub(super) fn drag_tab(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(drag) = self.tab_drag.as_mut() else {
+            return;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.cancel_tab_drag(cx);
+            return;
+        }
+        drag.cursor = event.position;
+        let was_active = drag.is_active;
+        drag.is_active = drag.is_active || has_left_dead_zone(drag.press, event.position);
+        if !was_active && drag.is_active {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn release_tab_drag(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.tab_drag.take() else {
+            return;
+        };
+        cx.notify();
+        if !drag.is_active {
+            self.activate_tab(drag.from, window, cx);
+            if event.click_count == DOUBLE_CLICK {
+                self.start_rename_tab(drag.from);
+            }
+            return;
+        }
+        let bounds: Vec<(usize, Bounds<Pixels>)> =
+            self.tab_bounds.borrow().iter().map(|(index, bounds)| (*index, *bounds)).collect();
+        let Some(target) = tab_drop_target(event.position, &bounds, drag.from) else {
+            return;
+        };
+        if target != drag.from {
+            self.model.tabs_mut().reorder(drag.from, target);
+            self.persist();
+        }
+    }
+
+    pub(super) fn cancel_tab_drag(&mut self, cx: &mut Context<Self>) {
+        if self.tab_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn is_dragging_tab(&self) -> bool {
+        self.tab_drag.as_ref().is_some_and(|drag| drag.is_active)
+    }
+
+    fn is_tab_drag_target(&self, index: usize) -> bool {
+        let Some(drag) = self.tab_drag.as_ref() else {
+            return false;
+        };
+        if !drag.is_active || drag.from == index {
+            return false;
+        }
+        self.tab_bounds.borrow().get(&index).is_some_and(|bounds| bounds.contains(&drag.cursor))
+    }
+
+    pub(super) fn render_tab_ghost(&self) -> Option<AnyElement> {
+        let drag = self.tab_drag.as_ref().filter(|drag| drag.is_active)?;
+        let theme = &self.state.theme;
+        let title = self
+            .model
+            .tabs()
+            .iter()
+            .nth(drag.from)
+            .map(|tab| tab.label(drag.from))
+            .unwrap_or_default();
+        let from_bounds = self.tab_bounds.borrow().get(&drag.from).copied();
+        let width = from_bounds
+            .map(|bounds| bounds.size.width)
+            .unwrap_or(px(TAB_GHOST_MIN_WIDTH_PX));
+        let height = from_bounds
+            .map(|bounds| bounds.size.height)
+            .unwrap_or(px(theme.top_bar.control_height_px));
+        let origin_x = drag.cursor.x - width * 0.5;
+        let origin_y = drag.cursor.y - height * 0.5;
+        Some(
+            div()
+                .absolute()
+                .left(origin_x)
+                .top(origin_y)
+                .w(width)
+                .h(height)
+                .opacity(TAB_GHOST_OPACITY)
+                .bg(theme.surface.canvas)
+                .border_1()
+                .border_color(theme.accent.primary)
+                .rounded(px(theme.top_bar.control_radius_px))
+                .flex()
+                .items_center()
+                .px(px(theme.top_bar.tab_padding_x_px))
+                .text_color(theme.text.default)
+                .child(title)
+                .into_any_element(),
+        )
     }
 
     pub(super) fn start_rename_tab(&mut self, index: usize) {
