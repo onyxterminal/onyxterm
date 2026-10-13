@@ -32,5 +32,30 @@
 	<true/>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Text and Source</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>txt</string>
+				<string>md</string>
+				<string>rs</string>
+				<string>js</string>
+				<string>ts</string>
+				<string>py</string>
+				<string>json</string>
+				<string>toml</string>
+				<string>yaml</string>
+				<string>yml</string>
+				<string>sh</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
