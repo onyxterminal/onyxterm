@@ -197,6 +197,22 @@ impl Tabs {
         self.tabs.iter().position(|tab| tab.contains(panel))
     }
 
+    pub fn reorder(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.tabs.len() {
+            return;
+        }
+        let target = to.min(self.tabs.len() - 1);
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(target, tab);
+        if self.active == from {
+            self.active = target;
+        } else if from < target && self.active > from && self.active <= target {
+            self.active -= 1;
+        } else if from > target && self.active >= target && self.active < from {
+            self.active += 1;
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.tabs.len()
     }

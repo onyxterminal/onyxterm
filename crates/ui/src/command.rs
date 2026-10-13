@@ -22,6 +22,8 @@ pub enum CommandId {
     SwitchWorkspace,
     NewWorkspace,
     RenameWorkspace,
+    MoveTabLeft,
+    MoveTabRight,
     RenameTab,
     Copy,
     Paste,
@@ -221,6 +223,8 @@ pub fn default_commands() -> Vec<Command> {
     vec![
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
         Command::builder(CloseActive, "Close", "Panes", no_op).build(),
+        Command::builder(MoveTabLeft, "Move Tab Left", "Tabs", no_op).build(),
+        Command::builder(MoveTabRight, "Move Tab Right", "Tabs", no_op).build(),
         Command::builder(ClosePane, "Close Pane", "Panes", no_op).build(),
         Command::builder(OpenPalette, "Open Palette", "Palette", toggle_palette).build(),
         Command::builder(OpenSettings, "Settings", "Application", no_op).build(),

@@ -304,6 +304,25 @@ impl Shell {
             CommandId::NextTab => self.model.tabs_mut().select_next(),
             CommandId::PrevTab => self.model.tabs_mut().select_previous(),
             CommandId::SelectTab(index) => self.model.tabs_mut().activate(index),
+            CommandId::MoveTabLeft => {
+                let active = self.model.tabs().active_index();
+                let target = active.saturating_sub(1);
+                if target != active {
+                    let tabs = self.model.tabs_mut();
+                    tabs.reorder(active, target);
+                }
+            }
+            CommandId::MoveTabRight => {
+                let active = self.model.tabs().active_index();
+                let len = self.model.tabs().len();
+                if len > 0 {
+                    let target = (active + 1).min(len - 1);
+                    if target != active {
+                        let tabs = self.model.tabs_mut();
+                        tabs.reorder(active, target);
+                    }
+                }
+            }
             CommandId::SelectWorkspace(index) => self.select_workspace_at(index, cx),
             CommandId::NextWorkspace => self.select_neighbor_workspace(1, cx),
             CommandId::PrevWorkspace => self.select_neighbor_workspace(-1, cx),

@@ -222,6 +222,8 @@ fn bind_tabs(map: &mut Keymap) {
     map.bind(Combo::new(Modifiers::command_shift(), "w"), CloseTab);
     map.bind(Combo::new(cmd, "}"), NextTab);
     map.bind(Combo::new(cmd, "{"), PrevTab);
+    map.bind(Combo::new(Modifiers::command_shift(), "left"), MoveTabLeft);
+    map.bind(Combo::new(Modifiers::command_shift(), "right"), MoveTabRight);
     for index in 0..INDEXED_SLOTS {
         map.bind(Combo::new(cmd, slot_key(index)), SelectTab(index));
     }

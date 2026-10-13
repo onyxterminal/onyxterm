@@ -203,6 +203,39 @@ fn grid_size_floors_area_by_cell_metrics() {
 }
 
 #[test]
+fn tabs_reorder_swaps_within_range_and_clamps_out_of_range() {
+    use crate::tabs::Tab;
+    use domain::TabId;
+    let mut tabs = Tabs::default();
+    let ids = [PanelId::new(), PanelId::new(), PanelId::new(), PanelId::new()];
+    for id in ids {
+        tabs.open(id);
+    }
+    tabs.activate(0);
+    let original: Vec<TabId> = tabs.iter().map(Tab::id).collect();
+
+    tabs.reorder(0, 2);
+    let mut expected = original.clone();
+    expected.remove(0);
+    expected.insert(2, original[0]);
+    assert_eq!(tabs.iter().map(Tab::id).collect::<Vec<_>>(), expected);
+    assert_eq!(tabs.active_index(), 2);
+
+    tabs.activate(0);
+    tabs.reorder(0, 0);
+    assert_eq!(tabs.iter().map(Tab::id).collect::<Vec<_>>(), expected);
+    assert_eq!(tabs.active_index(), 0);
+
+    tabs.reorder(2, 99);
+    assert_eq!(tabs.iter().last().map(Tab::id), Some(expected[2]));
+
+    tabs.activate(1);
+    tabs.reorder(3, 1);
+    let pos_of_active = tabs.iter().position(|tab| tab.id() == expected[1]).unwrap();
+    assert_eq!(tabs.active_index(), pos_of_active);
+}
+
+#[test]
 fn tabs_split_focus_and_close_collapse_layout() {
     let mut tabs = Tabs::default();
     let first = PanelId::new();
