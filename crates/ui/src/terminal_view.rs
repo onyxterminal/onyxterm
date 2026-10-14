@@ -24,6 +24,8 @@ const CUBE_START: u8 = 16;
 const GRAYSCALE_START: u8 = 232;
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
+type CellSizeCache = Rc<RefCell<Option<(f32, Size<Pixels>)>>>;
+
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalColors {
     pub foreground: Hsla,
@@ -170,7 +172,7 @@ pub struct TerminalStyle {
     pub line_height: Pixels,
     pub selection: Hsla,
     pub insets: ContentInsets,
-    cell_size_cache: Rc<RefCell<Option<(f32, Size<Pixels>)>>>,
+    cell_size_cache: CellSizeCache,
     align_cache: crate::pixel_grid::AlignCache,
 }
 
