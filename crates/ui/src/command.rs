@@ -61,7 +61,7 @@ pub enum CommandId {
     CloseDocument,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 48] = [
+const COMMAND_KEYS: [(CommandId, &str); 72] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -85,6 +85,31 @@ const COMMAND_KEYS: [(CommandId, &str); 48] = [
     (CommandId::CloseTab, "close_tab"), (CommandId::Copy, "copy"), (CommandId::SelectAll, "select_all"),
     (CommandId::ToggleCopyMode, "toggle_copy_mode"), (CommandId::Paste, "paste"),
     (CommandId::ToggleFullScreen, "toggle_full_screen"), (CommandId::Quit, "quit"),
+    (CommandId::Minimize, "minimize"), (CommandId::OpenWorkspaceMenu, "open_workspace_menu"),
+    (CommandId::ResizePane(Direction::Left), "resize_pane_left"),
+    (CommandId::ResizePane(Direction::Right), "resize_pane_right"),
+    (CommandId::ResizePane(Direction::Up), "resize_pane_up"),
+    (CommandId::ResizePane(Direction::Down), "resize_pane_down"),
+    (CommandId::SelectTab(0), "select_tab_1"), (CommandId::SelectTab(1), "select_tab_2"),
+    (CommandId::SelectTab(2), "select_tab_3"), (CommandId::SelectTab(3), "select_tab_4"),
+    (CommandId::SelectTab(4), "select_tab_5"), (CommandId::SelectTab(5), "select_tab_6"),
+    (CommandId::SelectTab(6), "select_tab_7"), (CommandId::SelectTab(7), "select_tab_8"),
+    (CommandId::SelectTab(8), "select_tab_9"),
+    (CommandId::SelectWorkspace(0), "select_workspace_1"), (CommandId::SelectWorkspace(1), "select_workspace_2"),
+    (CommandId::SelectWorkspace(2), "select_workspace_3"), (CommandId::SelectWorkspace(3), "select_workspace_4"),
+    (CommandId::SelectWorkspace(4), "select_workspace_5"), (CommandId::SelectWorkspace(5), "select_workspace_6"),
+    (CommandId::SelectWorkspace(6), "select_workspace_7"), (CommandId::SelectWorkspace(7), "select_workspace_8"),
+    (CommandId::SelectWorkspace(8), "select_workspace_9"),
+];
+
+const SELECT_TAB_TITLES: [&str; 9] = [
+    "Select Tab 1", "Select Tab 2", "Select Tab 3", "Select Tab 4", "Select Tab 5", "Select Tab 6", "Select Tab 7",
+    "Select Tab 8", "Select Tab 9",
+];
+
+const SELECT_WORKSPACE_TITLES: [&str; 9] = [
+    "Select Workspace 1", "Select Workspace 2", "Select Workspace 3", "Select Workspace 4", "Select Workspace 5",
+    "Select Workspace 6", "Select Workspace 7", "Select Workspace 8", "Select Workspace 9",
 ];
 
 impl CommandId {
@@ -260,7 +285,7 @@ pub fn palette_selected(state: &AppState) -> Option<CommandId> {
 
 pub fn default_commands() -> Vec<Command> {
     use CommandId::*;
-    vec![
+    let mut commands = vec![
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
         Command::builder(CloseActive, "Close", "Panes", no_op).build(),
         Command::builder(MoveTabLeft, "Move Tab Left", "Tabs", no_op).build(),
@@ -285,6 +310,10 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(SwapPane(Direction::Right), "Swap Pane Right", "Panes", no_op).build(),
         Command::builder(SwapPane(Direction::Up), "Swap Pane Up", "Panes", no_op).build(),
         Command::builder(SwapPane(Direction::Down), "Swap Pane Down", "Panes", no_op).build(),
+        Command::builder(ResizePane(Direction::Left), "Resize Pane Left", "Panes", no_op).build(),
+        Command::builder(ResizePane(Direction::Right), "Resize Pane Right", "Panes", no_op).build(),
+        Command::builder(ResizePane(Direction::Up), "Resize Pane Up", "Panes", no_op).build(),
+        Command::builder(ResizePane(Direction::Down), "Resize Pane Down", "Panes", no_op).build(),
         Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
         Command::builder(GridLayout, "Arrange Panes in Grid", "Panes", no_op).build(),
         Command::builder(EqualizePanes, "Equalize Panes", "Panes", no_op).build(),
@@ -304,16 +333,29 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(RenameWorkspace, "Rename Workspace\u{2026}", "Workspaces", no_op).build(),
         Command::builder(NextWorkspace, "Next Workspace", "Workspaces", no_op).build(),
         Command::builder(PrevWorkspace, "Previous Workspace", "Workspaces", no_op).build(),
+        Command::builder(OpenWorkspaceMenu, "Open Workspace Menu", "Workspaces", no_op).build(),
         Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
         Command::builder(SelectAll, "Select All", "Edit", no_op).build(),
         Command::builder(ToggleCopyMode, "Toggle Copy Mode", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
+        Command::builder(Minimize, "Minimize", "Window", no_op).build(),
         Command::builder(Quit, "Quit Onyx", "Application", no_op)
             .enabled_when(always_enabled)
             .build(),
-    ]
+    ];
+    commands.extend(indexed_commands(SelectTab, &SELECT_TAB_TITLES, "Tabs"));
+    commands.extend(indexed_commands(SelectWorkspace, &SELECT_WORKSPACE_TITLES, "Workspaces"));
+    commands
+}
+
+fn indexed_commands(
+    id_at: fn(usize) -> CommandId,
+    titles: &'static [&'static str],
+    category: &'static str,
+) -> impl Iterator<Item = Command> {
+    titles.iter().enumerate().map(move |(index, title)| Command::builder(id_at(index), title, category, no_op).build())
 }
 
 pub fn no_op(_state: &mut AppState) {}

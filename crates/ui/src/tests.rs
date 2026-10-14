@@ -1417,8 +1417,10 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
     assert_eq!(listed, registry.list().len());
     let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
-    assert_eq!(tab_titles, ["New Tab", "Move Tab Left", "Move Tab Right", "Next Tab", "Rename Tab", "Previous Tab",
-        "Close Tab"]);
+    assert_eq!(tab_titles[..7], ["New Tab", "Move Tab Left", "Move Tab Right", "Next Tab", "Rename Tab",
+        "Previous Tab", "Close Tab"]);
+    assert_eq!(tab_titles[7..], ["Select Tab 1", "Select Tab 2", "Select Tab 3", "Select Tab 4", "Select Tab 5",
+        "Select Tab 6", "Select Tab 7", "Select Tab 8", "Select Tab 9"]);
     assert_eq!(groups[0].shortcuts[0].combo, None);
     assert_eq!(groups[0].shortcuts[1].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
     let save = groups[4].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
@@ -1435,8 +1437,9 @@ fn shortcut_filter_matches_title_or_category_ignoring_case() {
             .flat_map(|group| group.shortcuts.iter().map(|shortcut| shortcut.title)).collect()
     };
     assert_eq!(titles("SPLIT"), ["Split Right", "Split Down"]);
-    assert_eq!(titles("  workspaces "), ["Switch Workspace", "New Workspace", "Rename Workspace\u{2026}",
-        "Next Workspace", "Previous Workspace"]);
+    assert_eq!(titles("  workspaces ")[..6], ["Switch Workspace", "New Workspace", "Rename Workspace\u{2026}",
+        "Next Workspace", "Previous Workspace", "Open Workspace Menu"]);
+    assert_eq!(titles("select workspace 9"), ["Select Workspace 9"]);
     assert!(titles("no such command").is_empty());
     let categories: Vec<&str> = shortcut_groups(&registry, &map, "copy").iter().map(|group| group.category).collect();
     assert_eq!(categories, ["Edit"]);

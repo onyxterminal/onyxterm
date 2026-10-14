@@ -444,7 +444,17 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), registry.list().len());
-        assert_eq!(CommandId::SelectTab(0).key(), None);
+        assert_eq!(CommandId::SelectTab(0).key(), Some("select_tab_1"));
+        assert_eq!(CommandId::SelectWorkspace(8).key(), Some("select_workspace_9"));
+        assert_eq!(CommandId::SelectTab(9).key(), None);
+    }
+
+    #[test]
+    fn every_default_binding_targets_a_registered_command() {
+        let registry = CommandRegistry::with_defaults();
+        for (combo, command) in Keymap::default().iter() {
+            assert!(registry.get(*command).is_some(), "{} is bound to unregistered {command:?}", combo.binding_text());
+        }
     }
 
     #[test]
