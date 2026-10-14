@@ -14,7 +14,7 @@ use crate::confirm::{
     close_pane_copy, close_tab_copy, delete_workspace_copy, discard_documents_copy, discard_pane_copy, discard_tab_copy,
     quit_copy, ConfirmCopy, Confirmation,
 };
-use crate::menus::RunCommand;
+use crate::menus::{install_menus, RunCommand};
 use crate::motion::fade_in;
 use crate::open_target::RecentEditors;
 use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
@@ -1342,6 +1342,7 @@ pub fn open_shell_window(
     cx: &mut gpui::App,
 ) -> gpui::Result<gpui::WindowHandle<Shell>> {
     let state = AppState::with_settings(Settings::from_pairs(&startup.restored.settings));
+    install_menus(&state.keymap, cx);
     let layout = state.theme.layout;
     let themed_options = WindowOptions {
         window_background: state.theme.window_background(),

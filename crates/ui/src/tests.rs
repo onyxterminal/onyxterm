@@ -632,6 +632,17 @@ fn every_keymap_binding_round_trips_into_a_gpui_menu_shortcut() {
     assert_eq!(shortcuts.len(), map.len());
     let quit = crate::menus::RunCommand(CommandId::Quit);
     assert!(shortcuts.iter().any(|binding| binding.action().partial_eq(&quit)));
+    let mut overrides = crate::keymap::ShortcutOverrides::default();
+    overrides.set(CommandId::Save, Combo::parse("alt-cmd-s"));
+    overrides.set(CommandId::Quit, None);
+    let effective = Keymap::with_overrides(&overrides);
+    let shortcuts = crate::menus::menu_shortcuts(&effective);
+    assert_eq!(shortcuts.len(), effective.len());
+    let save = crate::menus::RunCommand(CommandId::Save);
+    let save_keys: Vec<String> = shortcuts.iter().filter(|binding| binding.action().partial_eq(&save))
+        .flat_map(|binding| binding.keystrokes().iter().map(|keystroke| keystroke.inner().unparse())).collect();
+    assert_eq!(save_keys, ["alt-cmd-s"]);
+    assert!(!shortcuts.iter().any(|binding| binding.action().partial_eq(&quit)));
 }
 
 #[test]

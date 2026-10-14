@@ -70,7 +70,6 @@ pub fn run_app(startup: Startup) -> Result<(), UiError> {
         ]) {
             tracing::error!(?err, "failed to load bundled JetBrains Mono");
         }
-        menus::install_menus(cx);
         let options = WindowOptions {
             titlebar: Some(gpui::TitlebarOptions {
                 title: Some("Onyx".into()),

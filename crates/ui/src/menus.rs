@@ -11,8 +11,9 @@ const MENU_ONLY_CONTEXT: &str = "OnyxtermMenuShortcut";
 #[action(namespace = onyxterm, no_json)]
 pub struct RunCommand(pub CommandId);
 
-pub fn install_menus(cx: &mut App) {
-    cx.bind_keys(menu_shortcuts(&Keymap::default()));
+pub fn install_menus(keymap: &Keymap, cx: &mut App) {
+    cx.clear_key_bindings();
+    cx.bind_keys(menu_shortcuts(keymap));
     cx.set_menus(app_menus());
 }
 
