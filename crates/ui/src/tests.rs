@@ -1405,29 +1405,23 @@ fn keycaps_split_modifier_glyphs_from_the_key() {
 }
 
 #[test]
-fn shortcut_groups_follow_registry_category_order_and_skip_unbound_commands() {
+fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     use crate::keymap::shortcut_groups;
     let registry = CommandRegistry::with_defaults();
     let mut map = Keymap::new();
     map.bind(Combo::new(Modifiers::command(), "s"), CommandId::Save);
-    map.bind(Combo::new(Modifiers::command(), "c"), CommandId::Copy);
-    map.bind(Combo::new(Modifiers::command(), "t"), CommandId::NewTab);
     map.bind(Combo::new(Modifiers::command_shift(), "left"), CommandId::MoveTabLeft);
     let groups = shortcut_groups(&registry, &map);
     let categories: Vec<&str> = groups.iter().map(|group| group.category).collect();
-    assert_eq!(categories, ["Tabs", "Files", "Edit"]);
-    let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|(title, _)| *title).collect();
-    assert_eq!(tab_titles, ["New Tab", "Move Tab Left"]);
-    assert_eq!(groups[1].shortcuts, [("Save", Combo::new(Modifiers::command(), "s"))]);
+    assert_eq!(categories, ["Tabs", "Panes", "Palette", "Application", "Files", "Workspaces", "Edit", "Window"]);
+    let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
+    assert_eq!(listed, registry.list().len());
+    let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
+    assert_eq!(tab_titles, ["New Tab", "Move Tab Left", "Move Tab Right", "Next Tab", "Rename Tab", "Previous Tab",
+        "Close Tab"]);
+    assert_eq!(groups[0].shortcuts[0].combo, None);
+    assert_eq!(groups[0].shortcuts[1].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
+    let save = groups[4].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
+    assert_eq!(save.combo, Some(Combo::new(Modifiers::command(), "s")));
 }
 
-#[test]
-fn shortcut_groups_order_categories_by_first_registered_command_even_when_unbound() {
-    use crate::keymap::shortcut_groups;
-    let registry = CommandRegistry::with_defaults();
-    let mut map = Keymap::new();
-    map.bind(Combo::new(Modifiers::command_shift(), "left"), CommandId::MoveTabLeft);
-    map.bind(Combo::new(Modifiers::command(), "w"), CommandId::CloseActive);
-    let categories: Vec<&str> = shortcut_groups(&registry, &map).iter().map(|group| group.category).collect();
-    assert_eq!(categories, ["Tabs", "Panes"]);
-}

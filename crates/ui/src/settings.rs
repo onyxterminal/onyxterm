@@ -73,7 +73,7 @@ impl SettingsPane {
             Self::Appearance => &[THEME_KEY, UI_SCALE_KEY, DIM_UNFOCUSED_KEY],
             Self::Terminal => &[FONT_KEY, FONT_SIZE_KEY],
             Self::Editor => &[EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY],
-            Self::Keyboard => &[],
+            Self::Keyboard => &[SHORTCUTS_KEY],
         }
     }
 
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(pairs(SettingsPane::Editor), [
             (EDITOR_BUNDLE_SIDE_KEY, "right".to_string()), (EDITOR_BUNDLE_SIZE_KEY, "0.4".to_string()),
         ]);
-        assert!(pairs(SettingsPane::Keyboard).is_empty());
+        assert_eq!(pairs(SettingsPane::Keyboard), [(SHORTCUTS_KEY, "{}".to_string())]);
     }
 
     #[test]

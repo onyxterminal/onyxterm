@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::color_picker::ColorPicker;
-use crate::command::CommandRegistry;
+use crate::command::{CommandId, CommandRegistry};
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::settings::{Settings, SettingsPane};
@@ -20,6 +20,8 @@ pub struct AppState {
     pub settings: Settings,
     pub settings_visible: bool,
     pub settings_pane: SettingsPane,
+    pub shortcut_recording: Option<CommandId>,
+    pub shortcut_replaced: Option<(CommandId, CommandId)>,
     pub font_picker_visible: bool,
     pub font_picker_query: TextField,
     pub font_picker_selection: usize,
@@ -48,6 +50,8 @@ impl AppState {
             settings,
             settings_visible: false,
             settings_pane: SettingsPane::default(),
+            shortcut_recording: None,
+            shortcut_replaced: None,
             font_picker_visible: false,
             font_picker_query: TextField::default(),
             font_picker_selection: 0,
@@ -64,7 +68,7 @@ impl AppState {
         }
     }
 
-    pub fn filtered_commands(&self) -> Vec<crate::command::CommandId> {
+    pub fn filtered_commands(&self) -> Vec<CommandId> {
         self.registry
             .search(self.palette_query.text())
             .into_iter()

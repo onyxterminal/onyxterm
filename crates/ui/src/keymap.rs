@@ -11,6 +11,8 @@ pub type KeyCode = String;
 
 const MAX_OVERRIDES_BYTES: usize = 16 * 1024;
 const MAX_FUNCTION_KEY: u8 = 24;
+const CANCEL_KEY: &str = "escape";
+const UNBIND_KEYS: [&str; 2] = ["backspace", "delete"];
 
 const US_KEY_FOR_LAYOUT_CHAR: [(char, &str); 43] = [
     ('\u{0634}', "a"), ('\u{0632}', "b"), ('\u{0630}', "c"), ('\u{064a}', "d"), ('\u{062b}', "e"), ('\u{0628}', "f"),
@@ -250,28 +252,72 @@ impl ShortcutOverrides {
             self.entries.insert(key, combo);
         }
     }
+
+    pub fn assign(&mut self, command: CommandId, combo: Combo) {
+        let effective = Keymap::with_overrides(self);
+        let displaced = effective.resolve(&combo).filter(|other| *other != command);
+        if let Some(other) = displaced {
+            let remaining = effective.combos_for(other).into_iter().find(|kept| **kept != combo).cloned();
+            self.set(other, remaining);
+        }
+        self.set(command, Some(combo));
+    }
+
+    pub fn reset(&mut self, command: CommandId) {
+        let Some(key) = command.key() else {
+            return;
+        };
+        self.entries.remove(key);
+        let defaults = Keymap::default();
+        let restored = defaults.combos_for(command);
+        for combo in self.entries.values_mut() {
+            if combo.as_ref().is_some_and(|taken| restored.contains(&taken)) {
+                *combo = None;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Capture {
+    Cancel,
+    Unbind,
+    Assign(Combo),
+}
+
+pub fn capture_shortcut(keystroke: &Keystroke) -> Option<Capture> {
+    if keystroke.key == CANCEL_KEY {
+        return Some(Capture::Cancel);
+    }
+    if UNBIND_KEYS.contains(&keystroke.key.as_str()) && !keystroke.modifiers.modified() {
+        return Some(Capture::Unbind);
+    }
+    let combo = physical_combo(keystroke).unwrap_or_else(|| Combo::new(keystroke.modifiers, keystroke.key.as_str()));
+    combo.is_shortcut().then_some(Capture::Assign(combo))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shortcut {
+    pub command: CommandId,
+    pub title: &'static str,
+    pub combo: Option<Combo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShortcutGroup {
     pub category: &'static str,
-    pub shortcuts: Vec<(&'static str, Combo)>,
+    pub shortcuts: Vec<Shortcut>,
 }
 
 pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap) -> Vec<ShortcutGroup> {
     let mut groups: Vec<ShortcutGroup> = Vec::new();
     for command in registry.list() {
-        if !groups.iter().any(|group| group.category == command.category) {
-            groups.push(ShortcutGroup { category: command.category, shortcuts: Vec::new() });
-        }
-        let Some(combo) = keymap.combo_for(command.id) else {
-            continue;
-        };
-        if let Some(group) = groups.iter_mut().find(|group| group.category == command.category) {
-            group.shortcuts.push((command.title, combo.clone()));
+        let shortcut = Shortcut { command: command.id, title: command.title, combo: keymap.combo_for(command.id).cloned() };
+        match groups.iter_mut().find(|group| group.category == command.category) {
+            Some(group) => group.shortcuts.push(shortcut),
+            None => groups.push(ShortcutGroup { category: command.category, shortcuts: vec![shortcut] }),
         }
     }
-    groups.retain(|group| !group.shortcuts.is_empty());
     groups
 }
 
@@ -466,5 +512,76 @@ mod tests {
         let defaults = Keymap::default();
         assert_eq!(map.len(), defaults.len());
         assert!(defaults.iter().all(|(combo, id)| map.resolve(combo) == Some(*id)));
+    }
+
+    fn keystroke(modifiers: Modifiers, key: &str) -> Keystroke {
+        Keystroke { modifiers, key: key.into(), key_char: None }
+    }
+
+    #[test]
+    fn capture_requires_a_command_modifier_or_function_key() {
+        let assign = |modifiers, key| Some(Capture::Assign(Combo::new(modifiers, key)));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::command(), "k")), assign(Modifiers::command(), "k"));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::alt(), "k")), assign(Modifiers::alt(), "k"));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::control(), "k")), assign(Modifiers::control(), "k"));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::none(), "f6")), assign(Modifiers::none(), "f6"));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::none(), "k")), None);
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::shift(), "k")), None);
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::command(), "")), None);
+    }
+
+    #[test]
+    fn capture_cancels_on_escape_and_unbinds_on_plain_delete() {
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::none(), "escape")), Some(Capture::Cancel));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::command(), "escape")), Some(Capture::Cancel));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::none(), "backspace")), Some(Capture::Unbind));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::none(), "delete")), Some(Capture::Unbind));
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::command(), "backspace")),
+            Some(Capture::Assign(cmd("backspace"))));
+    }
+
+    #[test]
+    fn capture_records_the_physical_key_under_another_layout() {
+        assert_eq!(capture_shortcut(&keystroke(Modifiers::command(), "\u{0635}")), Some(Capture::Assign(cmd("w"))));
+    }
+
+    #[test]
+    fn assigning_a_taken_combo_moves_it_off_the_other_command() {
+        let mut overrides = ShortcutOverrides::default();
+        overrides.assign(CommandId::Save, cmd("t"));
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.resolve(&cmd("t")), Some(CommandId::Save));
+        assert_eq!(map.combo_for(CommandId::NewTab), None);
+        assert_eq!(map.resolve(&cmd("s")), None);
+        assert!(map.conflicts().is_empty());
+    }
+
+    #[test]
+    fn moving_one_of_several_combos_keeps_the_other() {
+        let mut overrides = ShortcutOverrides::default();
+        overrides.assign(CommandId::Save, cmd("h"));
+        let map = Keymap::with_overrides(&overrides);
+        let arrow = Combo::new(Modifiers::command() | Modifiers::alt(), "left");
+        assert_eq!(map.combos_for(CommandId::FocusPane(Direction::Left)), [&arrow]);
+        assert_eq!(map.resolve(&cmd("h")), Some(CommandId::Save));
+    }
+
+    #[test]
+    fn reset_restores_defaults_and_wins_over_a_colliding_override() {
+        let mut overrides = ShortcutOverrides::default();
+        overrides.assign(CommandId::Save, cmd("t"));
+        overrides.assign(CommandId::NewTab, cmd("y"));
+        overrides.assign(CommandId::Copy, cmd("s"));
+        overrides.reset(CommandId::NewTab);
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.resolve(&cmd("t")), Some(CommandId::NewTab));
+        assert_eq!(map.combo_for(CommandId::Save), None);
+        assert_eq!(map.resolve(&cmd("s")), Some(CommandId::Copy));
+        overrides.reset(CommandId::Save);
+        overrides.reset(CommandId::Copy);
+        assert!(overrides.is_empty());
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.resolve(&cmd("s")), Some(CommandId::Save));
+        assert_eq!(map.resolve(&cmd("c")), Some(CommandId::Copy));
     }
 }

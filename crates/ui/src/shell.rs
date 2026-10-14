@@ -50,6 +50,7 @@ mod pane_drag;
 mod pane_options;
 mod pane_status;
 mod splits;
+mod settings_keyboard;
 mod settings_panes;
 mod settings_view;
 mod color_picker_view;
@@ -399,7 +400,11 @@ impl Shell {
             }
             CommandId::NewTab => self.open_tab(cx),
             CommandId::OpenSettings => {
-                self.state.settings_visible = !self.state.settings_visible;
+                if self.state.settings_visible {
+                    self.close_settings();
+                } else {
+                    self.state.settings_visible = true;
+                }
                 self.state.palette_visible = false;
             }
             CommandId::NextTab => self.model.tabs_mut().select_next(),

@@ -54,7 +54,7 @@ impl Shell {
             return;
         }
         if matches!(action, SettingAction::Close) {
-            self.state.settings_visible = false;
+            self.close_settings();
             cx.notify();
             return;
         }
@@ -105,12 +105,25 @@ impl Shell {
             self.state.settings.apply_pair(key, &value);
             self.save_setting(key, &value);
         }
+        self.state.shortcut_replaced = None;
         self.apply_settings(cx);
+        self.apply_shortcuts(cx);
     }
 
     pub(super) fn show_settings_pane(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
         self.state.settings_pane = pane;
+        self.reset_settings_interaction();
         cx.notify();
+    }
+
+    pub(super) fn close_settings(&mut self) {
+        self.state.settings_visible = false;
+        self.state.shortcut_replaced = None;
+        self.reset_settings_interaction();
+    }
+
+    fn reset_settings_interaction(&mut self) {
+        self.state.shortcut_recording = None;
     }
 
     pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
@@ -119,7 +132,7 @@ impl Shell {
         self.style = TerminalStyle::from_theme(&self.state.theme, family);
     }
 
-    fn save_setting(&mut self, key: &str, value: &str) {
+    pub(super) fn save_setting(&mut self, key: &str, value: &str) {
         if let Err(err) = self.store.set_setting(key, value) {
             self.state.settings_error = Some(format!("Could not save setting: {err}"));
         }
@@ -188,8 +201,12 @@ impl Shell {
         if self.state.font_picker_visible {
             return self.handle_font_picker_key(key, cx);
         }
+        if let Some(command) = self.state.shortcut_recording {
+            self.record_shortcut_key(command, key, cx);
+            return true;
+        }
         if key.key == ESCAPE_KEY {
-            self.state.settings_visible = false;
+            self.close_settings();
         }
         true
     }
@@ -248,7 +265,7 @@ impl Shell {
             .bg(theme.chrome.backdrop).occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                 shell.finish_color_picker(cx);
-                shell.state.settings_visible = false;
+                shell.close_settings();
                 shell.state.font_picker_visible = false;
                 shell.state.theme_editor_visible = false;
                 cx.notify();
@@ -260,6 +277,7 @@ impl Shell {
                 .border_1().border_color(theme.border.default).occlude()
                 .font_family(SharedString::from(theme.ui_font.family.clone()))
                 .text_size(px(theme.ui_font.dialog_body_px))
+                .capture_any_mouse_down(cx.listener(|shell, _event, _window, _cx| shell.reset_settings_interaction()))
                 .on_mouse_down(MouseButton::Left, |_event, _window, cx| cx.stop_propagation()))
             .children(picker_drag_listener)
     }
