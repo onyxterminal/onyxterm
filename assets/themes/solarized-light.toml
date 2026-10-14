@@ -81,6 +81,9 @@ gutter_text_active = "rgba(0,0,0,0.72)"
 current_line = "rgba(0,0,0,0.04)"
 selection = "rgba(38,139,210,0.30)"
 cursor = "#268BD2"
+diff_added = "#5E7300"
+diff_modified = "#268BD2"
+diff_deleted = "#C4261F"
 gutter_padding_px = 12.0
 cursor_width_px = 2.0
 

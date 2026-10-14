@@ -1176,7 +1176,9 @@ impl Shell {
     ) -> AnyElement {
         let frame = EditorFrame {
             rope: Arc::new(editor.buffer().rope().clone()),
+            saved_rope: Arc::new(editor.buffer().saved_rope().clone()),
             version: editor.buffer().version(),
+            saved_version: editor.buffer().saved_version(),
             language: Language::from_path(&document.path),
             selections: Arc::new(editor.selections().clone()),
             is_focused,

@@ -1103,6 +1103,18 @@ fn every_builtin_theme_has_readable_syntax_colors() {
 }
 
 #[test]
+fn every_builtin_theme_has_visible_change_marks() {
+    for kind in ThemeKind::ALL {
+        let theme = Theme::load(kind).expect("theme loads");
+        let editor = theme.editor;
+        for color in [editor.diff_added, editor.diff_modified, editor.diff_deleted] {
+            let ratio = contrast_ratio(color, theme.surface.canvas);
+            assert!(ratio >= 3.0, "{kind:?} change mark {color:?} has contrast {ratio}");
+        }
+    }
+}
+
+#[test]
 fn custom_theme_keeps_its_base_syntax_colors() {
     let mut settings = crate::settings::Settings { theme: ThemeKind::Nord, ..Default::default() };
     settings.customize_current_theme();

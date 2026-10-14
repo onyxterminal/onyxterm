@@ -5,7 +5,7 @@ use crate::pixel_grid::{baseline_offset, glyph_aligned_origin, snap_bounds, snap
 use crate::terminal_view::{content_bounds, ContentInsets, PaneFocus};
 use crate::theme::{EditorTokens, SyntaxTokens, Theme};
 use editor_core::syntax::{HighlightSource, Language, LineStates, Span, TokenKind};
-use editor_core::{line_len, Rope, Selections, Selection, TAB_WIDTH};
+use editor_core::{line_len, DiffSource, HunkKind, LineDiff, LineMark, Rope, Selections, Selection, TAB_WIDTH};
 use gpui::{
     canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font, Hitbox, HitboxBehavior,
     Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString,
@@ -28,6 +28,9 @@ const WORD_BYTES: usize = 8;
 const BITS_PER_BYTE: usize = 8;
 const TAB_BYTES: u64 = 0x0909_0909_0909_0909;
 const LOW_SEVEN_BITS: u64 = 0x7F7F_7F7F_7F7F_7F7F;
+const CHANGE_BAR_WIDTH_PX: f32 = 2.0;
+const DELETION_TICK_WIDTH_PX: f32 = 6.0;
+const DELETION_TICK_HEIGHT_PX: f32 = 2.0;
 
 #[derive(Debug, Default)]
 pub struct EditorView {
@@ -36,6 +39,7 @@ pub struct EditorView {
     pub layout: Option<Rc<FrameLayout>>,
     pub is_selecting: bool,
     pub line_states: LineStates,
+    pub line_diff: LineDiff,
 }
 
 #[derive(Debug)]
@@ -96,7 +100,11 @@ impl FrameLayout {
     }
 
     fn row_y(&self, laid: &LaidLine) -> Pixels {
-        self.text_origin.y + self.line_height * (laid.line - self.first_line) as f32
+        self.line_y(laid.line)
+    }
+
+    fn line_y(&self, line: usize) -> Pixels {
+        self.text_origin.y + self.line_height * line.saturating_sub(self.first_line) as f32
     }
 
     fn caret_bounds(&self, rope: &Rope, head: usize) -> Option<Bounds<Pixels>> {
@@ -548,7 +556,9 @@ impl EditorStyle {
 #[derive(Clone)]
 pub struct EditorFrame {
     pub rope: Arc<Rope>,
+    pub saved_rope: Arc<Rope>,
     pub version: u64,
+    pub saved_version: u64,
     pub language: Option<Language>,
     pub selections: Arc<Selections>,
     pub is_focused: bool,
@@ -567,6 +577,7 @@ pub struct CanvasState {
     cell: Size<Pixels>,
     text_rect: Bounds<Pixels>,
     gutter_rect: Bounds<Pixels>,
+    change_marks: Vec<LineMark>,
     hitbox: Hitbox,
 }
 
@@ -609,6 +620,7 @@ pub fn editor_canvas(
                 }
             });
             paint_gutter(&state.layout, state.gutter_rect, &style, window, cx);
+            paint_change_marks(&state.layout, state.gutter_rect, &state.change_marks, style.tokens, window);
             let area = PointerArea {
                 layout: state.layout.clone(),
                 rope: frame.rope.clone(),
@@ -735,6 +747,13 @@ fn prepare_state(
     let source = HighlightSource { rope: &frame.rope, version: frame.version, language: frame.language };
     view_ref.line_states.update(source, range.end.saturating_sub(1));
     let highlights: Vec<Vec<Span>> = range.clone().map(|line| view_ref.line_states.highlight(line)).collect();
+    view_ref.line_diff.update(DiffSource {
+        saved: &frame.saved_rope,
+        current: &frame.rope,
+        version: frame.version,
+        saved_version: frame.saved_version,
+    });
+    let change_marks = view_ref.line_diff.marks(range.clone());
     let text_width = f32::from(text_rect.size.width);
     let shaper = LineShaper { rope: &frame.rope, style, cell_width: cell.width, window };
     let visible = visible_columns(view_ref.scroll_left, text_width, f32::from(cell.width));
@@ -773,6 +792,7 @@ fn prepare_state(
         cell,
         text_rect,
         gutter_rect,
+        change_marks,
         hitbox,
     }
 }
@@ -993,6 +1013,37 @@ fn paint_gutter(layout: &FrameLayout, gutter_rect: Bounds<Pixels>, style: &Edito
             }
         }
     });
+}
+
+fn paint_change_marks(
+    layout: &FrameLayout,
+    gutter_rect: Bounds<Pixels>,
+    marks: &[LineMark],
+    tokens: EditorTokens,
+    window: &mut Window,
+) {
+    let bar_x = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_px + CHANGE_BAR_WIDTH_PX) / 2.0;
+    window.with_content_mask(Some(ContentMask { bounds: gutter_rect }), |window| {
+        for mark in marks {
+            let y = layout.line_y(mark.line);
+            let (bounds, color) = match mark.kind {
+                HunkKind::Added => (change_bar(bar_x, y, layout.line_height), tokens.diff_added),
+                HunkKind::Modified => (change_bar(bar_x, y, layout.line_height), tokens.diff_modified),
+                HunkKind::Deleted => (deletion_tick(bar_x, y), tokens.diff_deleted),
+            };
+            fill_on_device_grid(bounds, color, window);
+        }
+    });
+}
+
+fn change_bar(x: Pixels, y: Pixels, line_height: Pixels) -> Bounds<Pixels> {
+    Bounds::new(point(x, y), size(px(CHANGE_BAR_WIDTH_PX), line_height))
+}
+
+fn deletion_tick(bar_x: Pixels, boundary_y: Pixels) -> Bounds<Pixels> {
+    let x = bar_x - px(DELETION_TICK_WIDTH_PX - CHANGE_BAR_WIDTH_PX) / 2.0;
+    let y = boundary_y - px(DELETION_TICK_HEIGHT_PX) / 2.0;
+    Bounds::new(point(x, y), size(px(DELETION_TICK_WIDTH_PX), px(DELETION_TICK_HEIGHT_PX)))
 }
 
 #[cfg(test)]

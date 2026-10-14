@@ -622,6 +622,12 @@ pub struct EditorTokens {
     pub selection: Hsla,
     #[serde(deserialize_with = "color")]
     pub cursor: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub diff_added: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub diff_modified: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub diff_deleted: Hsla,
     pub gutter_padding_px: f32,
     pub cursor_width_px: f32,
 }
