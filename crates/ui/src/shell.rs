@@ -52,6 +52,7 @@ mod pane_status;
 mod splits;
 mod settings_keyboard;
 mod settings_panes;
+mod settings_search_view;
 mod settings_view;
 mod color_picker_view;
 mod copy_mode;

@@ -7,8 +7,8 @@ use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme, ThemeKind};
-use gpui::{div, prelude::*, px, uniform_list, Context, CursorStyle, Div, FontWeight, Keystroke, MouseButton,
-    ScrollStrategy, SharedString, Stateful, Window};
+use gpui::{div, prelude::*, px, uniform_list, Context, CursorStyle, Div, FontWeight, Keystroke, Modifiers,
+    MouseButton, ScrollStrategy, SharedString, Stateful, Window};
 use std::ops::Range;
 
 const FONT_ROWS: usize = 9;
@@ -30,6 +30,10 @@ const TOOLBAR_LABEL_PX: f32 = 11.0;
 const SEARCH_FIELD_WIDTH_PX: f32 = 180.0;
 const SEARCH_FIELD_HEIGHT_PX: f32 = 26.0;
 const SEARCH_ICON_PX: f32 = 12.0;
+const SEARCH_FIELD_BOTTOM_PX: f32 = 19.0;
+const SEARCH_TITLE: &str = "Search";
+const FIND_KEY: &str = "f";
+const SEARCH_PLACEHOLDER: &str = "Search";
 pub(super) const TITLE_PX: f32 = 13.0;
 pub(super) const CAPTION_PX: f32 = 11.5;
 
@@ -115,6 +119,7 @@ impl Shell {
 
     pub(super) fn show_settings_pane(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
         self.state.settings_pane = pane;
+        self.clear_settings_search();
         self.reset_settings_interaction();
         cx.notify();
     }
@@ -123,11 +128,13 @@ impl Shell {
         self.state.settings_visible = false;
         self.state.shortcut_replaced = None;
         self.state.shortcut_filter.clear();
+        self.clear_settings_search();
         self.reset_settings_interaction();
     }
 
-    fn reset_settings_interaction(&mut self) {
+    pub(super) fn reset_settings_interaction(&mut self) {
         self.state.shortcut_recording = None;
+        self.state.settings_highlight = None;
         self.settings_focus = None;
     }
 
@@ -218,14 +225,21 @@ impl Shell {
             self.record_shortcut_key(command, key, cx);
             return true;
         }
-        if key.key == ESCAPE_KEY {
-            self.close_settings();
+        self.state.settings_highlight = None;
+        if is_find_shortcut(key) {
+            self.focus_settings_field(FieldTarget::SettingsQuery, cx);
             return true;
         }
-        match self.settings_focus {
-            Some(target) => self.type_into_field(target, key, cx),
-            None => true,
+        let is_searching = !self.state.settings_query.is_empty();
+        match key.key.as_str() {
+            ESCAPE_KEY if is_searching => self.clear_settings_search(),
+            ESCAPE_KEY => self.close_settings(),
+            UP_KEY if is_searching => self.move_search_selection(-1),
+            DOWN_KEY if is_searching => self.move_search_selection(1),
+            ENTER_KEY if is_searching => self.open_selected_search_result(cx),
+            _ => return self.settings_focus.is_none_or(|target| self.type_into_field(target, key, cx)),
         }
+        true
     }
 
     fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
@@ -308,7 +322,7 @@ impl Shell {
         let scale = self.state.settings.ui_scale;
         div().flex().flex_col()
             .child(self.render_settings_toolbar(cx))
-            .child(self.render_settings_pane(cx).id("settings-content").flex_1().min_h(px(0.0)).overflow_y_scroll()
+            .child(self.render_settings_content(cx).id("settings-content").flex_1().min_h(px(0.0)).overflow_y_scroll()
                 .px(px(CONTENT_PADDING_X_PX * scale)).py(px(CONTENT_PADDING_Y_PX * scale)))
             .child(self.render_settings_footer(cx))
     }
@@ -316,15 +330,18 @@ impl Shell {
     fn render_settings_toolbar(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
+        let title = if self.state.settings_query.is_empty() { self.state.settings_pane.label() } else { SEARCH_TITLE };
         div().flex_none().relative().pt(px(12.0 * scale)).pb(px(8.0 * scale))
             .flex().flex_col().items_center().gap(px(8.0 * scale))
             .border_b_1().border_color(theme.border.muted)
             .child(div().text_size(px(TITLE_PX * scale)).font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.text.default).child(self.state.settings_pane.label()))
+                .text_color(theme.text.default).child(title))
             .child(div().flex().gap(px(4.0 * scale))
                 .children(SettingsPane::ALL.map(|pane| self.settings_toolbar_button(pane, cx))))
             .child(div().absolute().top(px(10.0 * scale)).right(px(12.0 * scale))
                 .child(self.settings_button("Done", SettingAction::Close, cx)))
+            .child(div().absolute().bottom(px(SEARCH_FIELD_BOTTOM_PX * scale)).right(px(16.0 * scale))
+                .child(self.settings_search_field(FieldTarget::SettingsQuery, SEARCH_PLACEHOLDER, cx)))
     }
 
     fn settings_toolbar_button(&self, pane: SettingsPane, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -488,4 +505,8 @@ fn pane_icon(pane: SettingsPane) -> Icon {
         SettingsPane::Editor => Icon::Editor,
         SettingsPane::Keyboard => Icon::Keyboard,
     }
+}
+
+fn is_find_shortcut(key: &Keystroke) -> bool {
+    key.modifiers == Modifiers::command() && key.key == FIND_KEY
 }

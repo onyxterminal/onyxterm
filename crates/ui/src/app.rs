@@ -6,6 +6,7 @@ use crate::command::{CommandId, CommandRegistry};
 use crate::keymap::Keymap;
 use crate::theme::Theme;
 use crate::settings::{Settings, SettingsPane};
+use crate::settings_search::SettingsRow;
 use crate::text_field::TextField;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +24,9 @@ pub struct AppState {
     pub shortcut_recording: Option<CommandId>,
     pub shortcut_replaced: Option<(CommandId, CommandId)>,
     pub shortcut_filter: TextField,
+    pub settings_query: TextField,
+    pub settings_result_selection: usize,
+    pub settings_highlight: Option<SettingsRow>,
     pub font_picker_visible: bool,
     pub font_picker_query: TextField,
     pub font_picker_selection: usize,
@@ -54,6 +58,9 @@ impl AppState {
             shortcut_recording: None,
             shortcut_replaced: None,
             shortcut_filter: TextField::default(),
+            settings_query: TextField::default(),
+            settings_result_selection: 0,
+            settings_highlight: None,
             font_picker_visible: false,
             font_picker_query: TextField::default(),
             font_picker_selection: 0,

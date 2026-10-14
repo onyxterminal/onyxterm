@@ -4,6 +4,7 @@ use super::Shell;
 use crate::command::CommandId;
 use crate::keymap::Combo;
 use crate::settings::{BundleSide, SettingsPane};
+use crate::settings_search::SettingsRow;
 use crate::theme::{box_shadows, Theme, ThemeKind};
 use gpui::{div, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, Hsla, MouseButton, SharedString,
     Stateful};
@@ -17,6 +18,7 @@ const THEME_CARD_HEIGHT_PX: f32 = 92.0;
 const THEME_CARD_RADIUS_PX: f32 = 9.0;
 const THEME_CARD_LABEL_PX: f32 = 12.5;
 const SELECTED_RING_SPREAD_PX: f32 = 1.5;
+const THEME_RING_OUTSET_PX: f32 = 6.0;
 const TRAFFIC_DOT_PX: f32 = 6.0;
 const PREVIEW_BAR_HEIGHT_PX: f32 = 5.0;
 const PREVIEW_BAR_WIDTHS: [f32; 3] = [0.45, 0.7, 0.35];
@@ -64,16 +66,24 @@ impl Shell {
                 .map(|(index, row)| div().when(index > 0, |el| el.child(divider())).child(row)))
     }
 
-    fn settings_row(&self, title: &'static str, caption: &'static str, control: impl IntoElement) -> Div {
+    fn settings_row(&self, row: SettingsRow, caption: &'static str, control: impl IntoElement) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        div().min_h(px(ROW_MIN_HEIGHT_PX * scale)).px(px(ROW_INSET_PX * scale)).py(px(10.0 * scale))
+        div().relative().min_h(px(ROW_MIN_HEIGHT_PX * scale)).px(px(ROW_INSET_PX * scale)).py(px(10.0 * scale))
             .flex().items_center().justify_between().gap(px(16.0 * scale))
             .child(div().flex_1().min_w(px(0.0))
-                .child(div().text_size(px(TITLE_PX * scale)).text_color(theme.text.default).child(title))
+                .child(div().text_size(px(TITLE_PX * scale)).text_color(theme.text.default).child(row.label()))
                 .child(div().mt(px(2.0 * scale)).text_size(px(CAPTION_PX * scale))
                     .text_color(theme.text.muted).child(caption)))
             .child(control)
+            .when(self.state.settings_highlight == Some(row), |el| el.child(self.highlight_ring(0.0)))
+    }
+
+    fn highlight_ring(&self, outset_px: f32) -> Div {
+        let scale = self.state.settings.ui_scale;
+        let outset = px(-outset_px * scale);
+        div().absolute().top(outset).left(outset).right(outset).bottom(outset)
+            .rounded(px(GROUP_RADIUS_PX * scale)).border_2().border_color(self.state.theme.accent.primary)
     }
 
     fn render_appearance_pane(&self, cx: &mut Context<Self>) -> Div {
@@ -87,13 +97,16 @@ impl Shell {
                     .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                         cx.stop_propagation(); shell.change_setting(SettingAction::Customize, cx);
                     }))))
-            .child(div().grid().grid_cols(THEME_COLUMNS).gap(px(14.0 * scale))
-                .children(ThemeKind::ALL.map(|kind| self.theme_card(kind, cx))))
+            .child(div().relative()
+                .child(div().grid().grid_cols(THEME_COLUMNS).gap(px(14.0 * scale))
+                    .children(ThemeKind::ALL.map(|kind| self.theme_card(kind, cx))))
+                .when(self.state.settings_highlight == Some(SettingsRow::Theme),
+                    |el| el.child(self.highlight_ring(THEME_RING_OUTSET_PX))))
             .child(self.settings_group([
-                self.settings_row("Interface size", "Tabs, menus, and controls.",
+                self.settings_row(SettingsRow::InterfaceSize, "Tabs, menus, and controls.",
                     self.setting_stepper("ui-size", format!("{}%", (scale * 100.0).round() as u32),
                         SettingAction::UiSmaller, SettingAction::UiLarger, cx)),
-                self.settings_row("Dim inactive panes", "Keep your active pane in focus.", self.setting_switch(cx)),
+                self.settings_row(SettingsRow::DimPanes, "Keep your active pane in focus.", self.setting_switch(cx)),
             ]))
     }
 
@@ -151,8 +164,8 @@ impl Shell {
         div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
             .child(self.terminal_live_preview())
             .child(self.settings_group([
-                self.settings_row("Font", "Used in terminals and the editor.", self.font_popup_button(cx)),
-                self.settings_row("Text size", "Terminal and editor text.",
+                self.settings_row(SettingsRow::Font, "Used in terminals and the editor.", self.font_popup_button(cx)),
+                self.settings_row(SettingsRow::TextSize, "Terminal and editor text.",
                     self.setting_stepper("text-size", format!("{} pt", self.state.settings.font_size as u32),
                         SettingAction::FontSmaller, SettingAction::FontLarger, cx)),
             ]))
@@ -204,9 +217,9 @@ impl Shell {
         let size_percent = (self.state.settings.editor_bundle_size * 100.0).round() as u32;
         div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
             .child(self.settings_group([
-                self.settings_row("Editor position", "Where files open beside the active terminal.",
+                self.settings_row(SettingsRow::EditorPosition, "Where files open beside the active terminal.",
                     self.editor_side_control(cx)),
-                self.settings_row("Editor size", "Share of the window the editor takes.",
+                self.settings_row(SettingsRow::EditorSize, "Share of the window the editor takes.",
                     self.setting_stepper("editor-size", format!("{size_percent}%"),
                         SettingAction::EditorSmaller, SettingAction::EditorLarger, cx)),
             ]))

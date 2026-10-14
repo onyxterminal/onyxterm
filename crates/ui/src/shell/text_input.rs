@@ -20,6 +20,7 @@ pub(super) enum FieldTarget {
     TabName,
     PaletteQuery,
     ShortcutFilter,
+    SettingsQuery,
 }
 
 struct AppClipboard<'a>(&'a mut App);
@@ -75,6 +76,7 @@ impl Shell {
             FieldTarget::TabName => self.tab_field.as_ref().map(|field| &field.input),
             FieldTarget::PaletteQuery => Some(&self.state.palette_query),
             FieldTarget::ShortcutFilter => Some(&self.state.shortcut_filter),
+            FieldTarget::SettingsQuery => Some(&self.state.settings_query),
         }
     }
 
@@ -88,6 +90,7 @@ impl Shell {
             FieldTarget::TabName => self.tab_field.as_mut().map(|field| &mut field.input),
             FieldTarget::PaletteQuery => Some(&mut self.state.palette_query),
             FieldTarget::ShortcutFilter => Some(&mut self.state.shortcut_filter),
+            FieldTarget::SettingsQuery => Some(&mut self.state.settings_query),
         }
     }
 
@@ -132,6 +135,7 @@ impl Shell {
                 self.scroll_palette_to_top();
             }
             FieldTarget::HexColor => self.preview_typed_hex(cx),
+            FieldTarget::SettingsQuery => self.state.settings_result_selection = 0,
             FieldTarget::MenuName | FieldTarget::MenuSearch | FieldTarget::PaneName | FieldTarget::TabName
             | FieldTarget::ShortcutFilter => {}
         }
