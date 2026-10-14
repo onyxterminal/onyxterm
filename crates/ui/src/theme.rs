@@ -89,6 +89,7 @@ struct RawTheme {
     dialog: DialogTokens,
     island: IslandTokens,
     editor: EditorTokens,
+    syntax: SyntaxTokens,
     shadow: ShadowTokens,
 }
 
@@ -278,6 +279,7 @@ pub struct Theme {
     pub dialog: DialogTokens,
     pub island: IslandTokens,
     pub editor: EditorTokens,
+    pub syntax: SyntaxTokens,
     pub shadow: ShadowTokens,
 }
 
@@ -395,6 +397,7 @@ impl Theme {
             dialog: raw.dialog,
             island: raw.island,
             editor: raw.editor,
+            syntax: raw.syntax,
             shadow: raw.shadow,
         })
     }
@@ -621,6 +624,28 @@ pub struct EditorTokens {
     pub cursor: Hsla,
     pub gutter_padding_px: f32,
     pub cursor_width_px: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct SyntaxTokens {
+    #[serde(deserialize_with = "color")]
+    pub keyword: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub string: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub number: Hsla,
+    #[serde(rename = "type", deserialize_with = "color")]
+    pub type_name: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub function: Hsla,
+    #[serde(rename = "macro", deserialize_with = "color")]
+    pub macro_name: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub comment: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub punctuation: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub heading: Hsla,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

@@ -84,6 +84,17 @@ cursor = "#268BD2"
 gutter_padding_px = 12.0
 cursor_width_px = 2.0
 
+[syntax]
+keyword = "#5E7300"
+string = "#1B7A72"
+number = "#B62B6B"
+type = "#8F6700"
+function = "#1A6FA8"
+macro = "#B8400F"
+comment = "#637175"
+punctuation = "#4F636A"
+heading = "#1A6FA8"
+
 [menu]
 width_px = 240.0
 radius_px = 10.0

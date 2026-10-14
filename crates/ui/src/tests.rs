@@ -1074,6 +1074,41 @@ fn every_builtin_theme_has_editor_tokens() {
     }
 }
 
+fn relative_luminance(color: gpui::Hsla) -> f32 {
+    let rgba: gpui::Rgba = color.into();
+    let linear = |channel: f32| match channel <= 0.03928 {
+        true => channel / 12.92,
+        false => ((channel + 0.055) / 1.055).powf(2.4),
+    };
+    0.2126 * linear(rgba.r) + 0.7152 * linear(rgba.g) + 0.0722 * linear(rgba.b)
+}
+
+fn contrast_ratio(first: gpui::Hsla, second: gpui::Hsla) -> f32 {
+    let (first, second) = (relative_luminance(first), relative_luminance(second));
+    (first.max(second) + 0.05) / (first.min(second) + 0.05)
+}
+
+#[test]
+fn every_builtin_theme_has_readable_syntax_colors() {
+    for kind in ThemeKind::ALL {
+        let theme = Theme::load(kind).expect("theme loads");
+        let syntax = theme.syntax;
+        let colors = [syntax.keyword, syntax.string, syntax.number, syntax.type_name, syntax.function,
+            syntax.macro_name, syntax.comment, syntax.punctuation, syntax.heading];
+        for color in colors {
+            let ratio = contrast_ratio(color, theme.surface.canvas);
+            assert!(ratio >= 4.5, "{kind:?} syntax color {color:?} has contrast {ratio}");
+        }
+    }
+}
+
+#[test]
+fn custom_theme_keeps_its_base_syntax_colors() {
+    let mut settings = crate::settings::Settings { theme: ThemeKind::Nord, ..Default::default() };
+    settings.customize_current_theme();
+    assert_eq!(settings.theme_tokens().syntax.keyword, Theme::load(ThemeKind::Nord).unwrap().syntax.keyword);
+}
+
 #[test]
 fn every_builtin_theme_reports_its_appearance() {
     let expected = [
