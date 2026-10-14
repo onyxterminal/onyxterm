@@ -22,7 +22,17 @@ pub(super) enum SettingSlider {
     EditorSize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SliderDrag {
+    slider: SettingSlider,
+    pending_percent: Option<f32>,
+}
+
 impl SettingSlider {
+    fn applies_while_dragging(self) -> bool {
+        self == Self::EditorSize
+    }
+
     fn range(self) -> SliderRange {
         match self {
             Self::InterfaceSize => UI_SCALE_PERCENT,
@@ -47,6 +57,10 @@ impl SettingSlider {
 
 impl Shell {
     fn slider_percent(&self, slider: SettingSlider) -> f32 {
+        let pending = self.slider_drag.filter(|drag| drag.slider == slider).and_then(|drag| drag.pending_percent);
+        if let Some(percent) = pending {
+            return percent;
+        }
         let settings = &self.state.settings;
         let share = match slider {
             SettingSlider::InterfaceSize => settings.ui_scale,
@@ -64,20 +78,25 @@ impl Shell {
     }
 
     fn begin_slider_drag(&mut self, slider: SettingSlider, position: Point<Pixels>, cx: &mut Context<Self>) {
-        self.slider_drag = Some(slider);
+        self.slider_drag = Some(SliderDrag { slider, pending_percent: None });
         self.state.settings_error = None;
         self.drag_slider_to(position, cx);
     }
 
     fn drag_slider_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let Some(slider) = self.slider_drag else { return };
+        let Some(drag) = self.slider_drag else { return };
+        let slider = drag.slider;
         let Some(bounds) = self.slider_bounds.borrow().get(&slider).copied() else { return };
         let percent = slider.range().value_at(fraction(position.x - bounds.origin.x, bounds.size.width));
         if percent == self.slider_percent(slider) {
             return;
         }
-        self.set_slider_percent(slider, percent);
-        self.apply_settings(cx);
+        if slider.applies_while_dragging() {
+            self.set_slider_percent(slider, percent);
+            self.apply_settings(cx);
+        } else {
+            self.slider_drag = Some(SliderDrag { pending_percent: Some(percent), ..drag });
+        }
         cx.notify();
     }
 
@@ -90,7 +109,11 @@ impl Shell {
     }
 
     fn release_slider_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(slider) = self.slider_drag.take() else { return };
+        let Some(SliderDrag { slider, pending_percent }) = self.slider_drag.take() else { return };
+        if let Some(percent) = pending_percent {
+            self.set_slider_percent(slider, percent);
+            self.apply_settings(cx);
+        }
         if let Some(value) = self.state.settings.persisted_value(slider.key()) {
             self.save_setting(slider.key(), &value);
         }

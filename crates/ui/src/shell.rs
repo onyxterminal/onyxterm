@@ -142,7 +142,7 @@ pub struct Shell {
     picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
     settings_focus: Option<FieldTarget>,
     slider_bounds: pane_drag::BoundsMap<settings_slider::SettingSlider>,
-    slider_drag: Option<settings_slider::SettingSlider>,
+    slider_drag: Option<settings_slider::SliderDrag>,
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
     _quit_hook: Subscription,
