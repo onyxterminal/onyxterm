@@ -4,10 +4,10 @@ version = "2"
 kind = "dark"
 
 [surface]
-canvas = "#1F2228"
-subtle = "#17191D"
-raised = "#292D35"
-sunken = "#17191D"
+canvas = "#202022"
+subtle = "#18181A"
+raised = "#2C2C2E"
+sunken = "#18181A"
 
 [text]
 default = "#EDEFF2"
@@ -32,7 +32,7 @@ failed = "#D70015"
 stopping = "#FF9500"
 starting = "#78AFFF"
 unknown = "#C7C7CC"
-idle = "#C7C7CC"
+idle = "#636366"
 
 [chrome]
 control_fill = "rgba(255,255,255,0.07)"
@@ -117,7 +117,7 @@ button_radius_px = 6.0
 focus_ring_px = 1.0
 unfocused_border_px = 0.5
 dim_unfocused = true
-unfocused_opacity = 0.55
+unfocused_opacity = 0.82
 pane_padding_x_px = 14.0
 pane_padding_top_px = 6.0
 pane_padding_bottom_px = 12.0
@@ -125,7 +125,7 @@ pane_padding_bottom_px = 12.0
 [[shadow.card]]
 y = 1.0
 blur = 3.0
-color = "rgba(255,255,255,0.07)"
+color = "rgba(0,0,0,0.18)"
 
 [[shadow.tab]]
 spread = 0.5
@@ -134,7 +134,7 @@ color = "rgba(255,255,255,0.13)"
 [[shadow.tab]]
 y = 1.0
 blur = 2.0
-color = "rgba(255,255,255,0.08)"
+color = "rgba(0,0,0,0.18)"
 
 [[shadow.menu]]
 y = 12.0

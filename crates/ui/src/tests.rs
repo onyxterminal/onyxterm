@@ -1082,7 +1082,7 @@ fn apple_light_theme_loads_every_redesign_token() {
     assert_eq!(theme.palette.row_height_px, 32.0);
     assert_eq!(theme.dialog.radius_px, 12.0);
     assert!(theme.island.dim_unfocused);
-    assert_eq!(theme.island.unfocused_opacity, 0.55);
+    assert_eq!(theme.island.unfocused_opacity, 0.82);
     assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 6.0));
     assert_eq!(theme.island.focus_ring_px, 1.0);
 }
@@ -1170,7 +1170,7 @@ fn focus_ring_shows_only_on_the_focused_island_of_a_split() {
 fn unfocused_content_dims_only_in_a_split_with_dimming_enabled() {
     let dimmed = look_for(false, true);
     assert!(dimmed.is_dimmed());
-    assert_eq!(dimmed.content_opacity, 0.55);
+    assert_eq!(dimmed.content_opacity, 0.82);
     assert!(!look_for(true, true).is_dimmed());
     assert!(!look_for(false, false).is_dimmed());
     assert!(!look_for(true, false).is_dimmed());
