@@ -213,8 +213,11 @@ impl Shell {
             return true;
         }
         let is_searching = !self.state.settings_query.is_empty();
+        let is_filtering_shortcuts =
+            self.state.settings_pane == SettingsPane::Keyboard && !self.state.shortcut_filter.is_empty();
         match key.key.as_str() {
             ESCAPE_KEY if is_searching => self.clear_settings_search(),
+            ESCAPE_KEY if is_filtering_shortcuts => self.state.shortcut_filter.clear(),
             ESCAPE_KEY => self.close_settings(),
             UP_KEY if is_searching => self.move_search_selection(-1),
             DOWN_KEY if is_searching => self.move_search_selection(1),
