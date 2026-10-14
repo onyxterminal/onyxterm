@@ -88,6 +88,17 @@ fn command_registry_fuzzy_search() {
 }
 
 #[test]
+fn palette_search_hides_indexed_tab_and_workspace_commands() {
+    let registry = CommandRegistry::with_defaults();
+    let is_indexed = |id: CommandId| matches!(id, CommandId::SelectTab(_) | CommandId::SelectWorkspace(_));
+    for query in ["", "select", "select tab 1", "workspace 2"] {
+        assert!(registry.search(query).iter().all(|command| !is_indexed(command.id)), "{query:?}");
+    }
+    assert_eq!(registry.list().iter().filter(|command| is_indexed(command.id)).count(), 18);
+    assert!(registry.search("tab").iter().any(|command| command.id == CommandId::NewTab));
+}
+
+#[test]
 fn command_registry_execute_calls_handler() {
     let _registry = CommandRegistry::with_defaults();
     let mut state = AppState::new();
