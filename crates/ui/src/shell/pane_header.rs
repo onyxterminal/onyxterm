@@ -8,7 +8,7 @@ use domain::PanelId;
 use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
 
 const GEAR_TOOLTIP: &str = "Pane Options";
-const COPY_MODE_LABEL: &str = "COPY";
+const COPY_MODE_LABEL: &str = "Copy mode";
 const CLOSE_TOOLTIP: &str = "Close Pane";
 const HEADER_GAP_PX: f32 = 7.0;
 const BUTTON_GAP_PX: f32 = 2.0;
@@ -74,7 +74,8 @@ impl Shell {
         div()
             .flex_none()
             .text_color(self.state.theme.accent.primary)
-            .font_weight(FontWeight::BOLD)
+            .text_size(px(self.state.theme.ui_font.hint_px))
+            .font_weight(FontWeight::MEDIUM)
             .child(COPY_MODE_LABEL)
     }
 
@@ -129,12 +130,13 @@ impl Shell {
             .justify_center()
             .rounded(px(header.icon_button_radius_px))
             .cursor_pointer()
+            .text_color(self.state.theme.text.muted)
             .hover(move |style| style.bg(hover_fill))
             .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
             .child(icon.sized(header.icon_px))
     }
 
-    fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    pub(super) fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
         let theme = &self.state.theme;
         let style = TooltipStyle {
             fill: theme.surface.canvas,
@@ -166,7 +168,7 @@ impl Shell {
                 cx.stop_propagation();
                 shell.focus_pane(panel);
                 window.focus(&shell.focus_handle);
-                shell.run_command(CommandId::CloseActive, window, cx);
+                shell.run_command(CommandId::ClosePane, window, cx);
             }),
         )
     }

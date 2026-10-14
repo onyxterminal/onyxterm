@@ -1,4 +1,3 @@
-use crate::editor_view::EditorView;
 use crate::file_tree::FileTree;
 use crate::theme::Theme;
 use domain::{DropZone, PanelKind};
@@ -7,29 +6,17 @@ use fs_service::Entry;
 use gpui::{
     div, px, AnyElement, IntoElement, ParentElement, ScrollStrategy, SharedString, Styled, UniformListScrollHandle,
 };
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use workspace_service::PanelSnapshot;
 
 const NOT_FOUND: &str = "not found";
 const LABEL_GAP_PX: f32 = 6.0;
 
+pub use crate::editor_pane::{EditorPane, EditorState};
+
 pub enum DocumentPane {
     Editor(EditorPane),
     FileTree(FileTreePane),
-}
-
-pub struct EditorPane {
-    pub path: PathBuf,
-    pub state: EditorState,
-    pub view: Rc<RefCell<EditorView>>,
-}
-
-pub enum EditorState {
-    Loading,
-    Ready(editor_core::Editor),
-    Failed(String),
 }
 
 pub struct FileTreePane {
@@ -43,7 +30,10 @@ impl DocumentPane {
     pub fn from_snapshot(record: &PanelSnapshot) -> Option<Self> {
         let path = record.path.clone()?;
         match record.panel.kind {
-            PanelKind::Editor => Some(Self::Editor(EditorPane::loading(path))),
+            PanelKind::Editor => {
+                let paths = if record.documents.is_empty() { vec![path.clone()] } else { record.documents.clone() };
+                EditorPane::restored(paths, Some(&path)).map(Self::Editor)
+            }
             PanelKind::FileTree => Some(Self::FileTree(FileTreePane::new(path))),
             PanelKind::Terminal | PanelKind::Agent => None,
         }
@@ -51,32 +41,19 @@ impl DocumentPane {
 
     pub fn path(&self) -> &Path {
         match self {
-            Self::Editor(pane) => &pane.path,
+            Self::Editor(pane) => &pane.active().path,
             Self::FileTree(pane) => &pane.root,
         }
     }
 
     pub fn is_dirty(&self) -> bool {
-        matches!(self, Self::Editor(pane) if pane.ready().is_some_and(|editor| editor.buffer().is_dirty()))
-    }
-}
-
-impl EditorPane {
-    pub fn loading(path: PathBuf) -> Self {
-        Self { path, state: EditorState::Loading, view: Rc::new(RefCell::new(EditorView::default())) }
+        self.unsaved_count() > 0
     }
 
-    pub fn ready(&self) -> Option<&editor_core::Editor> {
-        match &self.state {
-            EditorState::Ready(editor) => Some(editor),
-            EditorState::Loading | EditorState::Failed(_) => None,
-        }
-    }
-
-    pub fn ready_mut(&mut self) -> Option<&mut editor_core::Editor> {
-        match &mut self.state {
-            EditorState::Ready(editor) => Some(editor),
-            EditorState::Loading | EditorState::Failed(_) => None,
+    pub fn unsaved_count(&self) -> usize {
+        match self {
+            Self::Editor(pane) => pane.unsaved_count(),
+            Self::FileTree(_) => 0,
         }
     }
 }
@@ -147,8 +124,9 @@ pub fn render_document(pane: &DocumentPane, theme: &Theme) -> AnyElement {
 }
 
 fn render_editor_pane(pane: &EditorPane, theme: &Theme) -> AnyElement {
-    let name = document_title(&pane.path);
-    if let EditorState::Failed(message) = &pane.state {
+    let document = pane.active();
+    let name = document_title(&document.path);
+    if let EditorState::Failed(message) = &document.state {
         return centered_label(format!("{name} — {message}"), theme);
     }
     div().size_full().into_any_element()
@@ -234,10 +212,29 @@ mod tests {
         let Some(DocumentPane::Editor(mut pane)) = DocumentPane::from_snapshot(&record) else {
             panic!("expected an editor pane");
         };
-        assert!(matches!(pane.state, EditorState::Loading));
-        pane.state = EditorState::Ready(Editor::new(Buffer::from_text("x")));
-        assert!(pane.ready().is_some());
+        assert!(matches!(pane.active().state, EditorState::Loading));
+        pane.active_mut().state = EditorState::Ready(Editor::new(Buffer::from_text("x")));
+        assert!(pane.active().ready().is_some());
         assert!(!DocumentPane::Editor(pane).is_dirty());
+    }
+
+    #[test]
+    fn a_single_path_snapshot_restores_one_document() {
+        let Some(DocumentPane::Editor(pane)) = DocumentPane::from_snapshot(&editor_record()) else {
+            panic!("expected an editor pane");
+        };
+        assert_eq!(pane.paths(), vec![PathBuf::from("/home/me/proj/main.rs")]);
+    }
+
+    #[test]
+    fn a_multi_document_snapshot_restores_every_document_and_the_active_one() {
+        let mut record = editor_record();
+        record.documents = vec![PathBuf::from("/home/me/proj/lib.rs"), PathBuf::from("/home/me/proj/main.rs")];
+        let Some(DocumentPane::Editor(pane)) = DocumentPane::from_snapshot(&record) else {
+            panic!("expected an editor pane");
+        };
+        assert_eq!(pane.paths(), record.documents);
+        assert_eq!(pane.active_index(), 1);
     }
 
     fn tree_pane() -> FileTreePane {

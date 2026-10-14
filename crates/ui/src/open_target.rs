@@ -6,80 +6,145 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenTarget {
-    Focus(PanelId),
-    Replace(PanelId),
-    SplitRightOf(PanelId),
+    Activate { panel: PanelId, index: usize },
+    AddTo(PanelId),
+    NewPane,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenEditor {
     pub panel: PanelId,
-    pub path: PathBuf,
-    pub is_dirty: bool,
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabEditors {
-    pub tree: PanelId,
+    pub focused: Option<PanelId>,
     pub editors: Vec<OpenEditor>,
-    pub last_editor: Option<PanelId>,
+    pub recent: Vec<PanelId>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecentEditors {
+    panels: Vec<PanelId>,
+}
+
+impl RecentEditors {
+    pub fn touch(&mut self, panel: PanelId) {
+        self.forget(panel);
+        self.panels.insert(0, panel);
+    }
+
+    pub fn forget(&mut self, panel: PanelId) {
+        self.panels.retain(|recent| *recent != panel);
+    }
+
+    pub fn order(&self) -> Vec<PanelId> {
+        self.panels.clone()
+    }
+}
+
+impl TabEditors {
+    fn showing(&self, path: &Path) -> Option<OpenTarget> {
+        self.editors.iter().find_map(|editor| {
+            let index = editor.paths.iter().position(|open| open == path)?;
+            Some(OpenTarget::Activate { panel: editor.panel, index })
+        })
+    }
+
+    fn host(&self) -> Option<PanelId> {
+        let is_editor = |panel: &PanelId| self.editors.iter().any(|editor| editor.panel == *panel);
+        self.focused
+            .filter(is_editor)
+            .or_else(|| self.recent.iter().copied().find(is_editor))
+            .or_else(|| self.editors.first().map(|editor| editor.panel))
+    }
 }
 
 pub fn choose_editor_target(tab: &TabEditors, path: &Path) -> OpenTarget {
-    if let Some(showing) = tab.editors.iter().find(|editor| editor.path == path) {
-        return OpenTarget::Focus(showing.panel);
+    if let Some(showing) = tab.showing(path) {
+        return showing;
     }
-    let reusable = tab
-        .last_editor
-        .and_then(|last| tab.editors.iter().find(|editor| editor.panel == last))
-        .filter(|editor| !editor.is_dirty);
-    match reusable {
-        Some(editor) => OpenTarget::Replace(editor.panel),
-        None => OpenTarget::SplitRightOf(tab.tree),
-    }
+    tab.host().map_or(OpenTarget::NewPane, OpenTarget::AddTo)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn editor(path: &str, is_dirty: bool) -> OpenEditor {
-        OpenEditor { panel: PanelId::new(), path: PathBuf::from(path), is_dirty }
+    fn editor(paths: &[&str]) -> OpenEditor {
+        OpenEditor { panel: PanelId::new(), paths: paths.iter().map(PathBuf::from).collect() }
     }
 
-    fn tab(editors: Vec<OpenEditor>, last_editor: Option<PanelId>) -> TabEditors {
-        TabEditors { tree: PanelId::new(), editors, last_editor }
-    }
-
-    #[test]
-    fn an_editor_already_showing_the_path_is_focused() {
-        let showing = editor("/r/a.rs", true);
-        let other = editor("/r/b.rs", false);
-        let tab = tab(vec![other.clone(), showing.clone()], Some(other.panel));
-
-        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::Focus(showing.panel));
+    fn tab(focused: Option<PanelId>, editors: Vec<OpenEditor>, recent: Vec<PanelId>) -> TabEditors {
+        TabEditors { focused, editors, recent }
     }
 
     #[test]
-    fn a_clean_last_focused_editor_is_reused() {
-        let last = editor("/r/b.rs", false);
-        let tab = tab(vec![editor("/r/c.rs", false), last.clone()], Some(last.panel));
+    fn a_document_already_open_in_the_tab_is_activated() {
+        let other = editor(&["/r/b.rs"]);
+        let showing = editor(&["/r/c.rs", "/r/a.rs"]);
+        let tab = tab(Some(other.panel), vec![other.clone(), showing.clone()], vec![other.panel]);
 
-        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::Replace(last.panel));
+        let target = choose_editor_target(&tab, Path::new("/r/a.rs"));
+        assert_eq!(target, OpenTarget::Activate { panel: showing.panel, index: 1 });
     }
 
     #[test]
-    fn a_dirty_last_focused_editor_forces_a_split() {
-        let last = editor("/r/b.rs", true);
-        let tab = tab(vec![editor("/r/c.rs", false), last.clone()], Some(last.panel));
+    fn a_new_file_joins_the_focused_editor_pane() {
+        let first = editor(&["/r/b.rs"]);
+        let focused = editor(&["/r/c.rs"]);
+        let tab = tab(Some(focused.panel), vec![first.clone(), focused.clone()], vec![first.panel]);
 
-        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::SplitRightOf(tab.tree));
+        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::AddTo(focused.panel));
     }
 
     #[test]
-    fn no_editor_in_the_tab_forces_a_split() {
-        let tab = tab(Vec::new(), Some(PanelId::new()));
+    fn without_a_focused_editor_the_most_recent_editor_in_the_tab_hosts_the_file() {
+        let first = editor(&["/r/b.rs"]);
+        let recent = editor(&["/r/c.rs"]);
+        let tab = tab(Some(PanelId::new()), vec![first.clone(), recent.clone()], vec![recent.panel, first.panel]);
 
-        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::SplitRightOf(tab.tree));
+        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::AddTo(recent.panel));
+    }
+
+    #[test]
+    fn recent_editors_from_other_tabs_are_skipped_for_the_first_in_layout_order() {
+        let first = editor(&["/r/b.rs"]);
+        let second = editor(&["/r/c.rs"]);
+        let elsewhere = PanelId::new();
+        let tab = tab(None, vec![first.clone(), second], vec![elsewhere]);
+
+        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::AddTo(first.panel));
+    }
+
+    #[test]
+    fn a_new_pane_is_created_only_when_the_tab_has_no_editor() {
+        let tab = tab(None, Vec::new(), vec![PanelId::new()]);
+
+        assert_eq!(choose_editor_target(&tab, Path::new("/r/a.rs")), OpenTarget::NewPane);
+    }
+
+    #[test]
+    fn a_closed_editor_is_forgotten_by_the_recent_list() {
+        let mut recent = RecentEditors::default();
+        let closed = PanelId::new();
+        let kept = PanelId::new();
+        recent.touch(kept);
+        recent.touch(closed);
+        recent.forget(closed);
+
+        assert_eq!(recent.order(), vec![kept]);
+    }
+
+    #[test]
+    fn touching_moves_an_editor_to_the_front() {
+        let mut recent = RecentEditors::default();
+        let (first, second) = (PanelId::new(), PanelId::new());
+        recent.touch(first);
+        recent.touch(second);
+        recent.touch(first);
+
+        assert_eq!(recent.order(), vec![first, second]);
     }
 }

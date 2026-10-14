@@ -13,7 +13,7 @@ pub struct PaneMenuItem {
 
 impl PaneMenuItem {
     pub fn is_destructive(&self) -> bool {
-        self.command == CommandId::CloseActive
+        self.command == CommandId::ClosePane
     }
 }
 
@@ -37,7 +37,7 @@ pub fn pane_menu_entries(is_maximized: bool, keymap: &Keymap) -> Vec<PaneMenuEnt
         item(CommandId::RenamePane, "Rename Pane\u{2026}"),
         item(CommandId::MoveToNewTab, "Move to New Tab"),
         PaneMenuEntry::Divider,
-        item(CommandId::CloseActive, "Close Pane"),
+        item(CommandId::ClosePane, "Close Pane"),
     ]
 }
 

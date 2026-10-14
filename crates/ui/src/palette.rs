@@ -7,7 +7,10 @@ use crate::theme::icons::Icon;
 use crate::text_field::TextField;
 use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme};
-use gpui::{div, prelude::*, px, uniform_list, Div, Hsla, SharedString, UniformListScrollHandle};
+use gpui::{div, prelude::*, px, uniform_list, App, Div, Hsla, MouseButton, SharedString, UniformListScrollHandle, Window};
+use std::rc::Rc;
+
+pub type PaletteSelect = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 pub const CHOICE_CATEGORY: &str = "Workspaces";
 const QUERY_PLACEHOLDER: &str = "Search commands";
@@ -49,12 +52,13 @@ pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
         .collect()
 }
 
-pub fn build_overlay(state: &AppState, theme: &Theme, scroll: &UniformListScrollHandle) -> Div {
+pub fn build_overlay(state: &AppState, theme: &Theme, scroll: &UniformListScrollHandle, on_select: PaletteSelect) -> Div {
     let palette = theme.palette;
-    div().absolute().inset_0().flex().flex_col().items_center().pt(px(palette.top_px)).child(
+    div().absolute().inset_0().flex().flex_col().items_center().px(px(16.0)).pt(px(palette.top_px)).child(
         div()
-            .w(px(palette.width_px))
+            .w(px(palette.width_px)).max_w_full()
             .occlude()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
             .font_family(SharedString::from(theme.ui_font.family.clone()))
             .bg(theme.chrome.palette_fill)
             .border(px(palette.border_px))
@@ -65,7 +69,7 @@ pub fn build_overlay(state: &AppState, theme: &Theme, scroll: &UniformListScroll
             .flex()
             .flex_col()
             .child(search_row(&state.palette_query, theme))
-            .child(results(palette_entries(state), state.palette_selection, theme, scroll))
+            .child(results(palette_entries(state), state.palette_selection, theme, scroll, on_select))
             .child(footer(theme)),
     )
 }
@@ -87,7 +91,7 @@ fn search_row(query: &TextField, theme: &Theme) -> Div {
         .child(field_text(query, QUERY_PLACEHOLDER, theme))
 }
 
-fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &UniformListScrollHandle) -> Div {
+fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &UniformListScrollHandle, on_select: PaletteSelect) -> Div {
     let list = div().p(px(RESULTS_PADDING_PX)).flex().flex_col();
     if rows.is_empty() {
         return list.child(
@@ -105,17 +109,25 @@ fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &Unifo
     let row_theme = theme.clone();
     let count = rows.len();
     let scrolling_rows = uniform_list(RESULTS_ID, count, move |range, _window, _cx| {
-        range.map(|index| result_row(&rows[index], index == selected, &row_theme)).collect::<Vec<_>>()
+        range.map(|index| {
+            let on_select = on_select.clone();
+            result_row(&rows[index], index == selected, &row_theme)
+                .id(("palette-command", index)).cursor_pointer()
+                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                    cx.stop_propagation(); on_select(index, window, cx);
+                })
+        }).collect::<Vec<_>>()
     });
-    list.child(scrolling_rows.h(px(height)).track_scroll(scroll.clone()))
+    list.child(scrolling_rows.w_full().h(px(height)).track_scroll(scroll.clone()))
 }
 
 fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
     let (fill, title_color, label_color) = match is_selected {
-        true => (theme.accent.primary, theme.text.inverse, theme.chrome.selected_shortcut),
+        true => (theme.accent.primary, theme.text.inverse, theme.text.inverse),
         false => (gpui::transparent_black(), theme.text.default, theme.text.subtle),
     };
     div()
+        .w_full()
         .h(px(theme.palette.row_height_px))
         .px(px(ROW_PADDING_X_PX))
         .flex()
@@ -124,10 +136,9 @@ fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
         .rounded(px(theme.palette.row_radius_px))
         .bg(fill)
         .text_size(px(theme.ui_font.menu_px))
-        .child(div().flex_none().text_color(title_color).child(row.title.clone()))
+        .child(div().flex_1().min_w(px(0.0)).truncate().text_color(title_color).child(row.title.clone()))
         .child(label(row.category, label_color, theme).ml(px(CATEGORY_GAP_PX)))
-        .child(div().flex_1())
-        .children(row.shortcut.clone().map(|shortcut| label(shortcut, label_color, theme)))
+        .children(row.shortcut.clone().map(|shortcut| label(shortcut, label_color, theme).ml(px(CATEGORY_GAP_PX))))
 }
 
 fn label(text: impl Into<SharedString>, color: Hsla, theme: &Theme) -> Div {

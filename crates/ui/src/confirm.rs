@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use domain::{PanelId, TabId, WorkspaceId};
+use domain::{DocumentId, PanelId, TabId, WorkspaceId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confirmation {
@@ -9,6 +9,7 @@ pub enum Confirmation {
     CloseTab(TabId),
     DeleteWorkspace(WorkspaceId),
     DiscardPane(PanelId),
+    DiscardDocument(PanelId, DocumentId),
     DiscardTab(TabId),
     Quit { sessions: usize, unsaved: usize },
 }
@@ -44,6 +45,15 @@ pub fn discard_pane_copy(name: &str) -> ConfirmCopy {
         title: "Discard unsaved changes?".to_string(),
         body: format!("{name} has changes that haven't been saved."),
         action: "Discard",
+        is_destructive: true,
+    }
+}
+
+pub fn discard_documents_copy(unsaved: usize) -> ConfirmCopy {
+    ConfirmCopy {
+        title: "Discard unsaved changes?".to_string(),
+        body: format!("This pane has {}.", unsaved_files(unsaved)),
+        action: "Close pane",
         is_destructive: true,
     }
 }

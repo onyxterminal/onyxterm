@@ -1,9 +1,10 @@
 use super::Shell;
-use crate::document::{document_title, load_error_text, DocumentPane, EditorPane, EditorState};
+use crate::document::{document_title, DocumentPane};
+use crate::editor_pane::{EditorPane, OpenDocument};
 use crate::editor_keys::{key_input, should_defer_to_input_handler};
 use crate::editor_view::{scroll_to_reveal, HorizontalViewport, PointerEvent, PointerHandler};
-use domain::PanelId;
-use editor_core::{io, standard_action, Buffer, ClickMode, Editor, EditorAction};
+use domain::{DocumentId, PanelId};
+use editor_core::{io, standard_action, Buffer, ClickMode, EditorAction};
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -12,13 +13,25 @@ use std::time::Instant;
 const DEFAULT_PAGE_LINES: usize = 30;
 const SAVE_FAILED_PREFIX: &str = "Couldn't save";
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DocumentRef {
+    pub(super) panel: PanelId,
+    pub(super) id: DocumentId,
+}
+
+struct SavedVersion {
+    document: DocumentRef,
+    version: u64,
+}
+
 impl Shell {
-    pub(super) fn load_editor(&mut self, panel: PanelId, path: PathBuf, cx: &mut Context<Self>) {
-        let task = cx.background_executor().spawn(async move { io::load(&path) });
+    pub(super) fn load_document(&mut self, document: DocumentRef, path: PathBuf, cx: &mut Context<Self>) {
+        let loaded_path = path.clone();
+        let task = cx.background_executor().spawn(async move { io::load(&loaded_path) });
         cx.spawn(async move |shell, cx| {
             let loaded = task.await;
             let updated = shell.update(cx, |shell, cx| {
-                shell.finish_load(panel, loaded);
+                shell.finish_load(document, &path, loaded);
                 cx.notify();
             });
             if let Err(err) = updated {
@@ -28,32 +41,38 @@ impl Shell {
         .detach();
     }
 
-    fn finish_load(&mut self, panel: PanelId, loaded: Result<Buffer, io::LoadError>) {
-        let Some(DocumentPane::Editor(pane)) = self.documents.get_mut(&panel) else {
-            return;
-        };
-        pane.state = match loaded {
-            Ok(buffer) => EditorState::Ready(Editor::new(buffer)),
-            Err(err) => EditorState::Failed(load_error_text(&err)),
-        };
+    fn finish_load(&mut self, document: DocumentRef, path: &std::path::Path, loaded: Result<Buffer, io::LoadError>) {
+        if let Some(pane) = self.editor_pane_mut(document.panel) {
+            pane.apply_load(document.id, path, loaded);
+        }
     }
 
-    pub(super) fn focused_editor_mut(&mut self) -> Option<(PanelId, &mut EditorPane)> {
+    pub(super) fn editor_pane(&self, panel: PanelId) -> Option<&EditorPane> {
+        match self.documents.get(&panel) {
+            Some(DocumentPane::Editor(pane)) => Some(pane),
+            _ => None,
+        }
+    }
+
+    pub(super) fn editor_pane_mut(&mut self, panel: PanelId) -> Option<&mut EditorPane> {
+        match self.documents.get_mut(&panel) {
+            Some(DocumentPane::Editor(pane)) => Some(pane),
+            _ => None,
+        }
+    }
+
+    pub(super) fn focused_editor_pane(&self) -> Option<(PanelId, &EditorPane)> {
         let panel = self.model.focused_document()?;
-        let Some(DocumentPane::Editor(pane)) = self.documents.get_mut(&panel) else {
-            return None;
-        };
-        Some((panel, pane))
+        self.editor_pane(panel).map(|pane| (panel, pane))
+    }
+
+    pub(super) fn focused_editor_mut(&mut self) -> Option<(PanelId, &mut OpenDocument)> {
+        let panel = self.model.focused_document()?;
+        self.editor_pane_mut(panel).map(|pane| (panel, pane.active_mut()))
     }
 
     pub(super) fn has_focused_editor(&self) -> bool {
-        let Some(panel) = self.model.focused_document() else {
-            return false;
-        };
-        let Some(DocumentPane::Editor(pane)) = self.documents.get(&panel) else {
-            return false;
-        };
-        pane.ready().is_some()
+        self.focused_editor_pane().is_some_and(|(_, pane)| pane.active().ready().is_some())
     }
 
     pub(super) fn send_key_to_document(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
@@ -160,18 +179,18 @@ impl Shell {
     }
 
     pub(super) fn save_focused_editor(&mut self, cx: &mut Context<Self>) {
-        let Some((panel, pane)) = self.focused_editor_mut() else {
+        let Some((panel, document)) = self.focused_editor_mut() else {
             return;
         };
-        let path = pane.path.clone();
-        let Some(buffer) = pane.ready().map(|editor| editor.buffer().clone()) else {
+        let path = document.path.clone();
+        let Some(buffer) = document.ready().map(|editor| editor.buffer().clone()) else {
             return;
         };
-        let version = buffer.version();
+        let saved = SavedVersion { document: DocumentRef { panel, id: document.id }, version: buffer.version() };
         let task = cx.background_executor().spawn(async move { io::save(&path, &buffer) });
         cx.spawn(async move |shell, cx| {
             let result = task.await;
-            let updated = shell.update(cx, |shell, cx| shell.finish_save(panel, version, result, cx));
+            let updated = shell.update(cx, |shell, cx| shell.finish_save(saved, result, cx));
             if let Err(err) = updated {
                 tracing::debug!(?err, "shell dropped before save finished");
             }
@@ -179,24 +198,15 @@ impl Shell {
         .detach();
     }
 
-    fn finish_save(
-        &mut self,
-        panel: PanelId,
-        version: u64,
-        result: std::io::Result<()>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(DocumentPane::Editor(pane)) = self.documents.get_mut(&panel) else {
+    fn finish_save(&mut self, saved: SavedVersion, result: std::io::Result<()>, cx: &mut Context<Self>) {
+        let DocumentRef { panel, id } = saved.document;
+        let Some(pane) = self.editor_pane_mut(panel) else {
             return;
         };
         match result {
-            Ok(()) => {
-                if let Some(editor) = pane.ready_mut() {
-                    editor.mark_saved_at(version);
-                }
-            }
+            Ok(()) => pane.mark_saved(id, saved.version),
             Err(err) => {
-                let name = document_title(&pane.path);
+                let name = pane.find(id).map(|document| document_title(&document.path)).unwrap_or_default();
                 tracing::warn!(%err, "save failed");
                 self.notice = Some(format!("{SAVE_FAILED_PREFIX} {name}: {err}"));
             }

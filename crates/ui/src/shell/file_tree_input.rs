@@ -1,9 +1,8 @@
 use super::Shell;
-use crate::document::{document_cwd, document_title, DocumentPane, EditorPane, FileTreePane};
+use crate::document::{document_title, DocumentPane, FileTreePane};
 use crate::file_tree::TreeAction;
 use crate::file_tree_view::{tree_list, tree_row};
-use crate::open_target::{choose_editor_target, OpenEditor, OpenTarget, TabEditors};
-use domain::{Panel, PanelId, PanelKind};
+use domain::{Panel, PanelId};
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton,
     MouseDownEvent, MouseUpEvent, ScrollStrategy, SharedString,
@@ -147,7 +146,7 @@ impl Shell {
         match action {
             TreeAction::None => {}
             TreeAction::Load(dir) => self.load_tree_dir(panel, dir, cx),
-            TreeAction::Open(path) => self.open_from_tree(panel, path, cx),
+            TreeAction::Open(path) => self.open_from_tree(path, cx),
         }
     }
 
@@ -159,43 +158,8 @@ impl Shell {
         cx.write_to_clipboard(ClipboardItem::new_string(path.to_string_lossy().into_owned()));
     }
 
-    fn open_from_tree(&mut self, tree: PanelId, path: PathBuf, cx: &mut Context<Self>) {
-        match choose_editor_target(&self.tab_editors(tree), &path) {
-            OpenTarget::Focus(editor) => self.focus_pane(editor),
-            OpenTarget::Replace(editor) => self.replace_editor_file(editor, path, cx),
-            OpenTarget::SplitRightOf(beside) => {
-                self.focus_pane(beside);
-                let panel = Panel::new_editor(PanelId::new(), document_title(&path));
-                self.open_document(panel, path, cx);
-            }
-        }
-    }
-
-    fn tab_editors(&self, tree: PanelId) -> TabEditors {
-        let leaves = self.model.tabs().active().map(|tab| tab.layout().leaves()).unwrap_or_default();
-        let editors = leaves
-            .into_iter()
-            .filter_map(|panel| match self.documents.get(&panel) {
-                Some(document @ DocumentPane::Editor(editor)) => {
-                    Some(OpenEditor { panel, path: editor.path.clone(), is_dirty: document.is_dirty() })
-                }
-                _ => None,
-            })
-            .collect();
-        TabEditors { tree, editors, last_editor: self.last_editor }
-    }
-
-    fn replace_editor_file(&mut self, panel: PanelId, path: PathBuf, cx: &mut Context<Self>) {
-        let fallback = self.model.active_root();
-        let Some(record) = self.model.panel_mut(panel) else {
-            return;
-        };
-        record.path = Some(path.clone());
-        record.cwd = document_cwd(PanelKind::Editor, &path, fallback);
-        record.panel.title = document_title(&path);
-        self.documents.insert(panel, DocumentPane::Editor(EditorPane::loading(path.clone())));
-        self.load_editor(panel, path, cx);
-        self.focus_pane(panel);
+    fn open_from_tree(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.open_file(path, cx);
     }
 
     fn select_tree_row(&mut self, panel: PanelId, index: usize) {
