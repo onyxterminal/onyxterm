@@ -1,4 +1,5 @@
 use super::settings_view::{SettingAction, CAPTION_PX, SYSTEM_MONOSPACE, SYSTEM_MONOSPACE_LABEL, TITLE_PX};
+use super::theme_editor::{preview_line, preview_span};
 use super::Shell;
 use crate::settings::SettingsPane;
 use crate::theme::{Theme, ThemeKind};
@@ -20,6 +21,11 @@ const PREVIEW_TEXT_OPACITY: f32 = 0.55;
 const SWATCH_PX: f32 = 8.0;
 const DARK_SURFACE_LIGHTNESS: f32 = 0.5;
 const FONT_POPUP_MAX_WIDTH_PX: f32 = 180.0;
+const LIVE_PREVIEW_MIN_HEIGHT_PX: f32 = 150.0;
+const LIVE_PREVIEW_MIN_FONT_PX: f32 = 11.0;
+const LIVE_PREVIEW_MAX_FONT_PX: f32 = 20.0;
+const CURSOR_WIDTH_EM: f32 = 0.6;
+const CURSOR_HEIGHT_EM: f32 = 1.25;
 
 fn swatches(theme: &Theme) -> [Hsla; 6] {
     let ansi = theme.ansi;
@@ -130,12 +136,36 @@ impl Shell {
     fn render_terminal_pane(&self, cx: &mut Context<Self>) -> Div {
         let scale = self.state.settings.ui_scale;
         div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
+            .child(self.terminal_live_preview())
             .child(self.settings_group([
                 self.settings_row("Font", "Used in terminals and the editor.", self.font_popup_button(cx)),
                 self.settings_row("Text size", "Terminal and editor text.",
                     self.setting_stepper("text-size", format!("{} pt", self.state.settings.font_size as u32),
                         SettingAction::FontSmaller, SettingAction::FontLarger, cx)),
             ]))
+    }
+
+    fn terminal_live_preview(&self) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let (text, muted, ansi) = (theme.text.default, theme.text.muted, theme.ansi);
+        let font_px = self.state.settings.font_size.clamp(LIVE_PREVIEW_MIN_FONT_PX, LIVE_PREVIEW_MAX_FONT_PX);
+        let prompt = || preview_line().items_center()
+            .child(preview_span("~/onyxterm", ansi.green)).child(preview_span(" main", ansi.blue))
+            .child(preview_span(" \u{276F} ", muted));
+        let status = |code: &'static str, color: Hsla, path: &'static str| preview_line()
+            .child(preview_span(code, color)).child(preview_span(path, text));
+        let cursor = div().w(px(font_px * CURSOR_WIDTH_EM)).h(px(font_px * CURSOR_HEIGHT_EM)).bg(theme.accent.primary);
+        div().min_h(px(LIVE_PREVIEW_MIN_HEIGHT_PX * scale)).px(px(18.0 * scale)).py(px(16.0 * scale))
+            .rounded(px(GROUP_RADIUS_PX * scale)).bg(theme.surface.canvas)
+            .border_1().border_color(theme.border.muted)
+            .font_family(self.style.font_family.clone()).text_size(px(font_px)).text_color(text)
+            .flex().flex_col().gap(px(3.0 * scale))
+            .child(prompt().child(preview_span("git status --short", text)))
+            .child(status(" M", ansi.yellow, " crates/ui/src/shell/settings_view.rs"))
+            .child(status(" D", ansi.red, " crates/ui/src/legacy_prefs.rs"))
+            .child(status("??", ansi.green, " crates/ui/src/editor_pane.rs"))
+            .child(prompt().child(cursor))
     }
 
     fn font_popup_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
