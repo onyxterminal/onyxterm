@@ -87,7 +87,8 @@ pub fn search_settings(query: &str, registry: &CommandRegistry) -> Vec<SearchRes
         label: row.label(),
         caption: format!("{} {BREADCRUMB} {}", row.pane().label(), row.label()),
     });
-    let shortcuts = registry.list().into_iter().filter(|command| command.matches(&needle)).map(|command| SearchResult {
+    let rebindable = registry.list().into_iter().filter(|command| command.id.is_rebindable());
+    let shortcuts = rebindable.filter(|command| command.matches(&needle)).map(|command| SearchResult {
         target: SearchTarget::Shortcut(command.id),
         label: command.title,
         caption: format!("{} {BREADCRUMB} {}", SettingsPane::Keyboard.label(), command.category),
@@ -124,6 +125,11 @@ mod tests {
         assert_eq!(results[0].caption, "Editor \u{203A} Editor size");
         assert_eq!(results[1].target, SearchTarget::Shortcut(CommandId::SplitRight));
         assert_eq!(results[1].caption, "Keyboard \u{203A} Panes");
+    }
+
+    #[test]
+    fn context_only_commands_are_not_offered() {
+        assert_eq!(labels("palette"), ["Customize Colors", "Open Palette"]);
     }
 
     #[test]

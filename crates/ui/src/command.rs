@@ -121,6 +121,10 @@ impl CommandId {
         COMMAND_KEYS.iter().find(|(_, candidate)| *candidate == key).map(|(id, _)| *id)
     }
 
+    pub fn is_rebindable(self) -> bool {
+        self != CommandId::ClosePalette
+    }
+
     pub fn is_structural(self) -> bool {
         use CommandId::*;
         matches!(

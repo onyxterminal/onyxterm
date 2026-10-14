@@ -314,7 +314,8 @@ pub struct ShortcutGroup {
 
 pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap, query: &str) -> Vec<ShortcutGroup> {
     let mut groups: Vec<ShortcutGroup> = Vec::new();
-    for command in registry.list().into_iter().filter(|command| command.matches(query)) {
+    let listed = registry.list().into_iter().filter(|command| command.id.is_rebindable() && command.matches(query));
+    for command in listed {
         let combo = keymap.combo_for(command.id).cloned();
         let shortcut = Shortcut { command: command.id, title: command.title, combo };
         match groups.iter_mut().find(|group| group.category == command.category) {

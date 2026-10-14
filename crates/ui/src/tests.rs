@@ -1415,7 +1415,8 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     let categories: Vec<&str> = groups.iter().map(|group| group.category).collect();
     assert_eq!(categories, ["Tabs", "Panes", "Palette", "Application", "Files", "Workspaces", "Edit", "Window"]);
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
-    assert_eq!(listed, registry.list().len());
+    assert_eq!(listed, registry.list().len() - 1);
+    assert!(groups.iter().flat_map(|group| &group.shortcuts).all(|shortcut| shortcut.command != CommandId::ClosePalette));
     let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
     assert_eq!(tab_titles[..7], ["New Tab", "Move Tab Left", "Move Tab Right", "Next Tab", "Rename Tab",
         "Previous Tab", "Close Tab"]);
