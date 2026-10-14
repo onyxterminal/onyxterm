@@ -3,7 +3,7 @@
 
 use crate::editor_view::EditorView;
 use domain::DocumentId;
-use editor_core::{io::LoadError, Buffer, Editor};
+use editor_core::{io::LoadError, Buffer, Editor, Rope};
 use gpui::ScrollHandle;
 use std::cell::RefCell;
 use std::path::{Component, Path, PathBuf};
@@ -176,9 +176,9 @@ impl EditorPane {
         };
     }
 
-    pub fn mark_saved(&mut self, id: DocumentId, version: u64) {
+    pub fn mark_saved(&mut self, id: DocumentId, version: u64, saved_rope: Rope) {
         if let Some(editor) = self.find_mut(id).and_then(OpenDocument::ready_mut) {
-            editor.mark_saved_at(version);
+            editor.mark_saved_at(version, saved_rope);
         }
     }
 
@@ -367,9 +367,9 @@ mod tests {
         let mut pane = pane(&["/r/a.rs", "/r/b.rs"]);
         make_dirty(&mut pane, 0);
         let id = pane.documents()[0].id;
-        let version = pane.documents()[0].ready().expect("ready").buffer().version();
+        let buffer = pane.documents()[0].ready().expect("ready").buffer().clone();
         pane.activate(1);
-        pane.mark_saved(id, version);
+        pane.mark_saved(id, buffer.version(), buffer.rope().clone());
 
         assert!(!pane.documents()[0].is_dirty());
     }

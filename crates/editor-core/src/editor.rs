@@ -79,8 +79,8 @@ impl Editor {
         self.buffer.mark_saved();
     }
 
-    pub fn mark_saved_at(&mut self, version: u64) {
-        self.buffer.mark_saved_at(version);
+    pub fn mark_saved_at(&mut self, version: u64, saved_rope: Rope) {
+        self.buffer.mark_saved_at(version, saved_rope);
     }
 
     pub fn click(&mut self, offset: usize, mode: ClickMode) {
@@ -574,10 +574,12 @@ mod tests {
         let mut editor = editor_with("a", &[1]);
         editor.apply(EditorAction::InsertText("b".into()), Instant::now());
         let saved_version = editor.buffer().version();
+        let saved_rope = editor.buffer().rope().clone();
         editor.apply(EditorAction::InsertText("c".into()), Instant::now() + std::time::Duration::from_secs(1));
-        editor.mark_saved_at(saved_version);
+        editor.mark_saved_at(saved_version, saved_rope);
         assert!(editor.buffer().is_dirty());
-        editor.mark_saved_at(editor.buffer().version());
+        assert_eq!(editor.buffer().saved_rope().to_string(), "ab");
+        editor.mark_saved_at(editor.buffer().version(), editor.buffer().rope().clone());
         assert!(!editor.buffer().is_dirty());
     }
 

@@ -1,5 +1,5 @@
 use editor_core::syntax::{HighlightSource, Language, LineStates};
-use editor_core::{Buffer, Editor, EditorAction, Rope, Selection, Selections};
+use editor_core::{diff_lines, Buffer, Editor, EditorAction, Rope, Selection, Selections};
 use std::time::{Duration, Instant};
 
 const TARGET_BYTES: usize = 10 * 1024 * 1024;
@@ -11,6 +11,8 @@ const HIGHLIGHTED_LINES: usize = 20_000;
 const HIGHLIGHT_BUDGET: Duration = Duration::from_millis(100);
 const REHIGHLIGHT_BUDGET: Duration = Duration::from_millis(5);
 const LINES_FROM_END: usize = 10;
+const DIFFED_LINES: usize = 20_000;
+const DIFF_BUDGET: Duration = Duration::from_millis(5);
 const RUST_SAMPLE: &str = r#"/// Documented item with a block comment below.
 /* multi-line
    block comment */
@@ -65,4 +67,17 @@ fn highlighting_twenty_thousand_rust_lines_stays_within_budget() {
     states.update(rust_source(&rope, 1), last_line);
     let edit_time = edit_started.elapsed();
     assert!(edit_time < REHIGHLIGHT_BUDGET, "rehighlight after an edit took {edit_time:?}");
+}
+
+#[test]
+#[ignore]
+fn diffing_twenty_thousand_lines_after_a_small_edit_stays_within_budget() {
+    let saved = Rope::from_str(&SAMPLE_LINE.repeat(DIFFED_LINES));
+    let mut current = saved.clone();
+    current.insert(current.line_to_char(DIFFED_LINES / 2), "x");
+    let started = Instant::now();
+    let hunks = diff_lines(&saved, &current);
+    let diff_time = started.elapsed();
+    assert_eq!(hunks.len(), 1);
+    assert!(diff_time < DIFF_BUDGET, "diff took {diff_time:?}");
 }

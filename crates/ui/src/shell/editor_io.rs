@@ -4,7 +4,7 @@ use crate::editor_pane::{EditorPane, OpenDocument};
 use crate::editor_keys::{key_input, should_defer_to_input_handler};
 use crate::editor_view::{scroll_to_reveal, HorizontalViewport, PointerEvent, PointerHandler};
 use domain::{DocumentId, PanelId};
-use editor_core::{io, standard_action, Buffer, ClickMode, EditorAction};
+use editor_core::{io, standard_action, Buffer, ClickMode, EditorAction, Rope};
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -22,6 +22,7 @@ pub(super) struct DocumentRef {
 struct SavedVersion {
     document: DocumentRef,
     version: u64,
+    rope: Rope,
 }
 
 impl Shell {
@@ -186,7 +187,8 @@ impl Shell {
         let Some(buffer) = document.ready().map(|editor| editor.buffer().clone()) else {
             return;
         };
-        let saved = SavedVersion { document: DocumentRef { panel, id: document.id }, version: buffer.version() };
+        let document = DocumentRef { panel, id: document.id };
+        let saved = SavedVersion { document, version: buffer.version(), rope: buffer.rope().clone() };
         let task = cx.background_executor().spawn(async move { io::save(&path, &buffer) });
         cx.spawn(async move |shell, cx| {
             let result = task.await;
@@ -204,7 +206,7 @@ impl Shell {
             return;
         };
         match result {
-            Ok(()) => pane.mark_saved(id, saved.version),
+            Ok(()) => pane.mark_saved(id, saved.version, saved.rope),
             Err(err) => {
                 let name = pane.find(id).map(|document| document_title(&document.path)).unwrap_or_default();
                 tracing::warn!(%err, "save failed");

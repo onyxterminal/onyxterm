@@ -2,16 +2,19 @@
 #![forbid(unsafe_code)]
 
 mod buffer;
+mod diff;
 mod edit;
 mod editor;
 mod history;
 mod keys;
 mod motion;
+mod rope_compare;
 mod selection;
 pub mod io;
 pub mod syntax;
 
 pub use buffer::{line_len, Buffer, LineEnding};
+pub use diff::{diff_lines, line_marks, DiffSource, Hunk, HunkKind, LineDiff, LineMark};
 pub use edit::{Bias, Change, Edit};
 pub use editor::{ClickMode, Editor, EditorAction, Granularity};
 pub use keys::{standard_action, KeyInput};

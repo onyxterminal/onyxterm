@@ -13,6 +13,7 @@ pub enum LineEnding {
 #[derive(Debug, Clone)]
 pub struct Buffer {
     rope: Rope,
+    saved_rope: Rope,
     version: u64,
     saved_version: u64,
     line_ending: LineEnding,
@@ -21,15 +22,24 @@ pub struct Buffer {
 impl Buffer {
     pub fn from_text(text: &str) -> Self {
         let line_ending = if text.contains(CRLF) { LineEnding::CrLf } else { LineEnding::Lf };
-        Self { rope: Rope::from_str(&text.replace(CRLF, LF)), version: 0, saved_version: 0, line_ending }
+        let rope = Rope::from_str(&text.replace(CRLF, LF));
+        Self { saved_rope: rope.clone(), rope, version: 0, saved_version: 0, line_ending }
     }
 
     pub fn rope(&self) -> &Rope {
         &self.rope
     }
 
+    pub fn saved_rope(&self) -> &Rope {
+        &self.saved_rope
+    }
+
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    pub fn saved_version(&self) -> u64 {
+        self.saved_version
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -38,10 +48,12 @@ impl Buffer {
 
     pub fn mark_saved(&mut self) {
         self.saved_version = self.version;
+        self.saved_rope = self.rope.clone();
     }
 
-    pub(crate) fn mark_saved_at(&mut self, version: u64) {
+    pub(crate) fn mark_saved_at(&mut self, version: u64, saved_rope: Rope) {
         self.saved_version = version;
+        self.saved_rope = saved_rope;
     }
 
     pub fn line_ending(&self) -> LineEnding {
@@ -109,6 +121,14 @@ mod tests {
         assert!(buffer.is_dirty());
         buffer.mark_saved();
         assert!(!buffer.is_dirty());
+        assert_eq!(buffer.saved_rope().to_string(), "aXYc");
+    }
+
+    #[test]
+    fn saved_text_starts_as_the_loaded_text() {
+        let mut buffer = Buffer::from_text("a\r\nb");
+        buffer.replace(0..1, "z");
+        assert_eq!(buffer.saved_rope().to_string(), "a\nb");
     }
 
     #[test]

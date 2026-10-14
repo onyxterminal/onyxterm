@@ -1,4 +1,5 @@
 use super::{Language, LineState, Span};
+use crate::rope_compare::common_prefix_bytes;
 use ropey::{Rope, RopeSlice};
 use std::borrow::Cow;
 
@@ -39,7 +40,7 @@ impl LineStates {
         if self.language != source.language || self.starts.is_empty() {
             self.starts = vec![LineState::Normal];
         } else if self.version != source.version {
-            let first_changed = source.rope.byte_to_line(first_difference(&self.rope, source.rope));
+            let first_changed = source.rope.byte_to_line(common_prefix_bytes(&self.rope, source.rope));
             self.starts.truncate(first_changed + 1);
         }
         self.language = source.language;
@@ -73,45 +74,6 @@ fn lexable_text(slice: RopeSlice<'_>) -> Option<Cow<'_, str>> {
         None => Cow::Owned(slice.to_string().trim_end_matches('\n').to_string()),
     };
     Some(text)
-}
-
-fn first_difference(old: &Rope, new: &Rope) -> usize {
-    let mut old_chunks = old.chunks();
-    let mut new_chunks = new.chunks();
-    let mut old_bytes: &[u8] = &[];
-    let mut new_bytes: &[u8] = &[];
-    let mut offset = 0;
-    loop {
-        if old_bytes.is_empty() {
-            let Some(chunk) = old_chunks.next() else {
-                return offset;
-            };
-            old_bytes = chunk.as_bytes();
-            continue;
-        }
-        if new_bytes.is_empty() {
-            let Some(chunk) = new_chunks.next() else {
-                return offset;
-            };
-            new_bytes = chunk.as_bytes();
-            continue;
-        }
-        let shared = old_bytes.len().min(new_bytes.len());
-        let common = common_prefix_len(&old_bytes[..shared], &new_bytes[..shared]);
-        offset += common;
-        if common < shared {
-            return offset;
-        }
-        old_bytes = &old_bytes[shared..];
-        new_bytes = &new_bytes[shared..];
-    }
-}
-
-fn common_prefix_len(old: &[u8], new: &[u8]) -> usize {
-    if old == new {
-        return old.len();
-    }
-    old.iter().zip(new).position(|(old, new)| old != new).unwrap_or(old.len())
 }
 
 #[cfg(test)]
@@ -183,15 +145,5 @@ mod tests {
         states.update(source(&rope, 0), 1);
         assert!(states.highlight(0).is_empty());
         assert_eq!(states.starts[1], LineState::Normal);
-    }
-
-    #[test]
-    fn first_difference_walks_across_chunk_boundaries() {
-        let text = "abc\n".repeat(5000);
-        let old = Rope::from_str(&text);
-        let mut new = old.clone();
-        new.insert(15_000, "Z");
-        assert_eq!(first_difference(&old, &new), 15_000);
-        assert_eq!(first_difference(&old, &old.clone()), old.len_bytes());
     }
 }
