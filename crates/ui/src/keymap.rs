@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use crate::command::CommandId;
+use crate::command::{CommandId, CommandRegistry};
 use domain::Direction;
 use gpui::{Keystroke, Modifiers};
 use std::collections::HashMap;
@@ -154,6 +154,29 @@ impl Keymap {
     pub fn iter(&self) -> impl Iterator<Item = (&Combo, &CommandId)> {
         self.bindings.iter()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShortcutGroup {
+    pub category: &'static str,
+    pub shortcuts: Vec<(&'static str, Combo)>,
+}
+
+pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap) -> Vec<ShortcutGroup> {
+    let mut groups: Vec<ShortcutGroup> = Vec::new();
+    for command in registry.list() {
+        if !groups.iter().any(|group| group.category == command.category) {
+            groups.push(ShortcutGroup { category: command.category, shortcuts: Vec::new() });
+        }
+        let Some(combo) = keymap.combo_for(command.id) else {
+            continue;
+        };
+        if let Some(group) = groups.iter_mut().find(|group| group.category == command.category) {
+            group.shortcuts.push((command.title, combo.clone()));
+        }
+    }
+    groups.retain(|group| !group.shortcuts.is_empty());
+    groups
 }
 
 const INDEXED_SLOTS: usize = 9;

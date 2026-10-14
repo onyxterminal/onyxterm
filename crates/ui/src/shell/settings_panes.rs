@@ -2,7 +2,7 @@ use super::settings_view::{SettingAction, CAPTION_PX, SYSTEM_MONOSPACE, SYSTEM_M
 use super::theme_editor::{preview_line, preview_span};
 use super::Shell;
 use crate::command::CommandId;
-use crate::keymap::Combo;
+use crate::keymap::{shortcut_groups, Combo};
 use crate::settings::{BundleSide, SettingsPane};
 use crate::theme::{box_shadows, Theme, ThemeKind};
 use gpui::{div, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful};
@@ -37,6 +37,8 @@ const DIAGRAM_HEIGHT_PX: f32 = 180.0;
 const DIAGRAM_BLOCK_GAP_PX: f32 = 3.0;
 const EDITOR_BLOCK_TINT: f32 = 0.08;
 const KEYCAP_PX: f32 = 20.0;
+const GROUP_TITLE_PX: f32 = 11.0;
+const SHORTCUT_ROW_MIN_HEIGHT_PX: f32 = 36.0;
 
 fn swatches(theme: &Theme) -> [Hsla; 6] {
     let ansi = theme.ansi;
@@ -49,7 +51,7 @@ impl Shell {
             SettingsPane::Appearance => self.render_appearance_pane(cx),
             SettingsPane::Terminal => self.render_terminal_pane(cx),
             SettingsPane::Editor => self.render_editor_pane(cx),
-            SettingsPane::Keyboard => div(),
+            SettingsPane::Keyboard => self.render_keyboard_pane(),
         }
     }
 
@@ -278,5 +280,22 @@ impl Shell {
                 .px(px(5.0 * scale)).flex().items_center().justify_center()
                 .rounded(px(4.0 * scale)).bg(theme.chrome.control_fill).border_1().border_color(theme.border.muted)
                 .text_size(px(theme.ui_font.shortcut_px)).text_color(theme.text.muted).child(cap)))
+    }
+
+    fn render_keyboard_pane(&self) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
+            .child(div().text_size(px(CAPTION_PX * scale)).text_color(theme.text.muted)
+                .child("Shortcuts for every command."))
+            .children(shortcut_groups(&self.state.registry, &self.state.keymap).into_iter().map(|group| {
+                div().flex().flex_col().gap(px(6.0 * scale))
+                    .child(div().px(px(4.0 * scale)).text_size(px(GROUP_TITLE_PX * scale))
+                        .font_weight(FontWeight::SEMIBOLD).text_color(theme.text.muted).child(group.category))
+                    .child(self.settings_group(group.shortcuts.iter().map(|(title, combo)| {
+                        self.shortcut_line(title, combo).min_h(px(SHORTCUT_ROW_MIN_HEIGHT_PX * scale))
+                            .px(px(ROW_INSET_PX * scale))
+                    })))
+            }))
     }
 }
