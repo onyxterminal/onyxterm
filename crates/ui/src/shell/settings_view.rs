@@ -1,8 +1,7 @@
 use super::theme_editor::{ButtonTone, EditorButton};
 use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
-use crate::settings::{filtered_fonts, step_bundle_size, BundleSide, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY,
-    DIM_UNFOCUSED_KEY, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY, FONT_KEY, FONT_SIZE_KEY, THEME_KEY,
-    UI_SCALE_KEY};
+use crate::settings::{filtered_fonts, BundleSide, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
+    EDITOR_BUNDLE_SIDE_KEY, FONT_KEY, FONT_SIZE_KEY, THEME_KEY};
 use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
@@ -39,8 +38,7 @@ pub(super) const CAPTION_PX: f32 = 11.5;
 
 #[derive(Clone, Copy)]
 pub(super) enum SettingAction {
-    Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, EditorSmaller, EditorLarger,
-    EditorSide(BundleSide), Close,
+    Customize, FontPicker, FontSmaller, FontLarger, DimPanes, EditorSide(BundleSide), Close,
 }
 
 impl Shell {
@@ -75,25 +73,9 @@ impl Shell {
                 settings.font_size = (settings.font_size + 1.0).min(28.0);
                 (FONT_SIZE_KEY, settings.font_size.to_string())
             }
-            SettingAction::UiSmaller => {
-                settings.ui_scale = ((settings.ui_scale * 100.0).round() - 10.0).max(75.0) / 100.0;
-                (UI_SCALE_KEY, settings.ui_scale.to_string())
-            }
-            SettingAction::UiLarger => {
-                settings.ui_scale = ((settings.ui_scale * 100.0).round() + 10.0).min(150.0) / 100.0;
-                (UI_SCALE_KEY, settings.ui_scale.to_string())
-            }
             SettingAction::DimPanes => {
                 settings.dim_unfocused_panes = !settings.dim_unfocused_panes;
                 (DIM_UNFOCUSED_KEY, settings.dim_unfocused_panes.to_string())
-            }
-            SettingAction::EditorSmaller => {
-                settings.editor_bundle_size = step_bundle_size(settings.editor_bundle_size, -1.0);
-                (EDITOR_BUNDLE_SIZE_KEY, settings.editor_bundle_size.to_string())
-            }
-            SettingAction::EditorLarger => {
-                settings.editor_bundle_size = step_bundle_size(settings.editor_bundle_size, 1.0);
-                (EDITOR_BUNDLE_SIZE_KEY, settings.editor_bundle_size.to_string())
             }
             SettingAction::EditorSide(side) => {
                 settings.editor_bundle_side = side;
@@ -292,6 +274,7 @@ impl Shell {
                 .w(px(SETTINGS_WIDTH_PX * scale)).h(px(SETTINGS_HEIGHT_PX * scale)).overflow_hidden()
         };
         let picker_drag_listener = self.picker_drag_listener(cx);
+        let slider_drag_listener = self.slider_drag_listener(cx);
         div().absolute().inset_0().flex().items_center().justify_center()
             .bg(theme.chrome.backdrop).occlude()
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
@@ -311,6 +294,7 @@ impl Shell {
                 .capture_any_mouse_down(cx.listener(|shell, _event, _window, _cx| shell.reset_settings_interaction()))
                 .on_mouse_down(MouseButton::Left, |_event, _window, cx| cx.stop_propagation()))
             .children(picker_drag_listener)
+            .children(slider_drag_listener)
     }
 
     fn render_settings_subcard(&self, content: Div, id: &'static str, width_px: f32) -> Stateful<Div> {

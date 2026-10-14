@@ -24,7 +24,7 @@ const THUMB_SHADOW_ALPHA: f32 = 0.35;
 const GRADIENT_RIGHT_DEGREES: f32 = 90.0;
 const GRADIENT_DOWN_DEGREES: f32 = 180.0;
 
-fn picker_thumb(center: Point<Pixels>, fill: Hsla, diameter: Pixels) -> Div {
+pub(super) fn picker_thumb(center: Point<Pixels>, fill: Hsla, diameter: Pixels) -> Div {
     let shadow = BoxShadow {
         color: black().opacity(THUMB_SHADOW_ALPHA),
         offset: point(px(0.0), px(1.0)),

@@ -1,6 +1,7 @@
 #![deny(warnings)]
 
 use crate::keymap::ShortcutOverrides;
+use crate::slider::SliderRange;
 use crate::theme::custom::{ColorField, CustomColors};
 use crate::theme::{Theme, ThemeKind};
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,8 @@ pub const EDITOR_BUNDLE_SIZE_KEY: &str = "editor.bundle_size";
 pub const SHORTCUTS_KEY: &str = "keyboard.bindings";
 pub const BUNDLE_SIZE_MIN: f32 = 0.1;
 pub const BUNDLE_SIZE_MAX: f32 = 0.9;
-const BUNDLE_SIZE_STEPS: f32 = 10.0;
+pub const UI_SCALE_PERCENT: SliderRange = SliderRange { min: 75.0, max: 150.0, step: 5.0 };
+pub const BUNDLE_SIZE_PERCENT: SliderRange = SliderRange { min: 10.0, max: 90.0, step: 5.0 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BundleSide {
@@ -192,10 +194,6 @@ fn bounded(value: &str, min: f32, max: f32, fallback: f32) -> f32 {
     value.parse::<f32>().ok().filter(|number| number.is_finite() && (min..=max).contains(number)).unwrap_or(fallback)
 }
 
-pub fn step_bundle_size(size: f32, steps: f32) -> f32 {
-    (((size * BUNDLE_SIZE_STEPS).round() + steps) / BUNDLE_SIZE_STEPS).clamp(BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX)
-}
-
 pub fn filtered_fonts(installed: &[String], query: &str) -> Vec<String> {
     let needle = query.trim().to_lowercase();
     let mut fonts: Vec<String> = installed.iter()
@@ -257,15 +255,19 @@ mod tests {
     }
 
     #[test]
-    fn bundle_size_steps_by_tenths_within_bounds() {
-        assert_eq!(step_bundle_size(0.4, 1.0), 0.5);
-        assert_eq!(step_bundle_size(0.4, -1.0), 0.3);
-        assert_eq!(step_bundle_size(0.9, 1.0), BUNDLE_SIZE_MAX);
-        assert_eq!(step_bundle_size(0.1, -1.0), BUNDLE_SIZE_MIN);
-        assert_eq!(step_bundle_size(0.62, 1.0), 0.7);
-        let stepped = step_bundle_size(0.5, 1.0);
-        let restored = Settings::from_pairs(&[(EDITOR_BUNDLE_SIZE_KEY.into(), stepped.to_string())]);
-        assert_eq!(restored.editor_bundle_size, 0.6);
+    fn every_slider_position_persists_within_bounds() {
+        for position in 0..=100 {
+            let fraction = position as f32 / 100.0;
+            let ui_scale = UI_SCALE_PERCENT.value_at(fraction) / 100.0;
+            let bundle_size = BUNDLE_SIZE_PERCENT.value_at(fraction) / 100.0;
+            let restored = Settings::from_pairs(&[
+                (UI_SCALE_KEY.into(), ui_scale.to_string()),
+                (EDITOR_BUNDLE_SIZE_KEY.into(), bundle_size.to_string()),
+            ]);
+            assert_eq!((restored.ui_scale, restored.editor_bundle_size), (ui_scale, bundle_size));
+        }
+        assert_eq!(BUNDLE_SIZE_PERCENT.value_at(BUNDLE_SIZE_PERCENT.fraction_of(62.0)), 60.0);
+        assert_eq!(UI_SCALE_PERCENT.fraction_of(Settings::default().ui_scale * 100.0), 1.0 / 3.0);
     }
 
     #[test]

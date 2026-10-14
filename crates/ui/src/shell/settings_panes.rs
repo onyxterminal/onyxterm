@@ -1,5 +1,6 @@
 use super::settings_view::{SettingAction, CAPTION_PX, SYSTEM_MONOSPACE, SYSTEM_MONOSPACE_LABEL, TITLE_PX};
 use super::theme_editor::{preview_line, preview_span};
+use super::settings_slider::SettingSlider;
 use super::Shell;
 use crate::command::CommandId;
 use crate::keymap::Combo;
@@ -104,8 +105,7 @@ impl Shell {
                     |el| el.child(self.highlight_ring(THEME_RING_OUTSET_PX))))
             .child(self.settings_group([
                 self.settings_row(SettingsRow::InterfaceSize, "Tabs, menus, and controls.",
-                    self.setting_stepper("ui-size", format!("{}%", (scale * 100.0).round() as u32),
-                        SettingAction::UiSmaller, SettingAction::UiLarger, cx)),
+                    self.interface_size_slider(cx)),
                 self.settings_row(SettingsRow::DimPanes, "Keep your active pane in focus.", self.setting_switch(cx)),
             ]))
     }
@@ -214,14 +214,12 @@ impl Shell {
 
     fn render_editor_pane(&self, cx: &mut Context<Self>) -> Div {
         let scale = self.state.settings.ui_scale;
-        let size_percent = (self.state.settings.editor_bundle_size * 100.0).round() as u32;
         div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
             .child(self.settings_group([
                 self.settings_row(SettingsRow::EditorPosition, "Where files open beside the active terminal.",
                     self.editor_side_control(cx)),
                 self.settings_row(SettingsRow::EditorSize, "Share of the window the editor takes.",
-                    self.setting_stepper("editor-size", format!("{size_percent}%"),
-                        SettingAction::EditorSmaller, SettingAction::EditorLarger, cx)),
+                    self.setting_slider(SettingSlider::EditorSize, cx)),
             ]))
             .child(div().flex().items_start().gap(px(20.0 * scale))
                 .child(self.editor_layout_diagram())

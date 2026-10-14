@@ -53,6 +53,7 @@ mod splits;
 mod settings_keyboard;
 mod settings_panes;
 mod settings_search_view;
+mod settings_slider;
 mod settings_view;
 mod color_picker_view;
 mod copy_mode;
@@ -140,6 +141,8 @@ pub struct Shell {
     gear_bounds: pane_options::GearBounds,
     picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
     settings_focus: Option<FieldTarget>,
+    slider_bounds: pane_drag::BoundsMap<settings_slider::SettingSlider>,
+    slider_drag: Option<settings_slider::SettingSlider>,
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
     _quit_hook: Subscription,
@@ -185,6 +188,8 @@ impl Shell {
             gear_bounds: pane_options::GearBounds::default(),
             picker_bounds: pane_drag::BoundsMap::default(),
             settings_focus: None,
+            slider_bounds: pane_drag::BoundsMap::default(),
+            slider_drag: None,
             palette_scroll: UniformListScrollHandle::new(),
             font_list_scroll: UniformListScrollHandle::new(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
