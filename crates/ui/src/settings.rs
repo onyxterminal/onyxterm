@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+use crate::keymap::ShortcutOverrides;
 use crate::theme::custom::{ColorField, CustomColors};
 use crate::theme::{Theme, ThemeKind};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ pub const CUSTOM_BASE_KEY: &str = "theme.custom.base";
 pub const CUSTOM_COLORS_KEY: &str = "theme.custom.colors";
 pub const EDITOR_BUNDLE_SIDE_KEY: &str = "editor.bundle_side";
 pub const EDITOR_BUNDLE_SIZE_KEY: &str = "editor.bundle_size";
+pub const SHORTCUTS_KEY: &str = "keyboard.bindings";
 pub const BUNDLE_SIZE_MIN: f32 = 0.1;
 pub const BUNDLE_SIZE_MAX: f32 = 0.9;
 const BUNDLE_SIZE_STEPS: f32 = 10.0;
@@ -94,6 +96,7 @@ pub struct Settings {
     pub dim_unfocused_panes: bool,
     pub editor_bundle_side: BundleSide,
     pub editor_bundle_size: f32,
+    pub shortcut_overrides: ShortcutOverrides,
 }
 
 impl Default for Settings {
@@ -102,7 +105,8 @@ impl Default for Settings {
             custom_colors: CustomColors::from_theme(&Theme::load(ThemeKind::Dark).expect("built-in dark theme")),
             font_family: "JetBrains Mono".into(), font_size: 13.0,
             ui_scale: 1.0, dim_unfocused_panes: true,
-            editor_bundle_side: BundleSide::Right, editor_bundle_size: 0.4 }
+            editor_bundle_side: BundleSide::Right, editor_bundle_size: 0.4,
+            shortcut_overrides: ShortcutOverrides::default() }
     }
 }
 
@@ -135,6 +139,7 @@ impl Settings {
             EDITOR_BUNDLE_SIZE_KEY => {
                 self.editor_bundle_size = bounded(value, BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX, self.editor_bundle_size);
             }
+            SHORTCUTS_KEY => self.shortcut_overrides = ShortcutOverrides::parse(value),
             _ => {}
         }
     }
@@ -148,6 +153,7 @@ impl Settings {
             DIM_UNFOCUSED_KEY => Some(self.dim_unfocused_panes.to_string()),
             EDITOR_BUNDLE_SIDE_KEY => Some(self.editor_bundle_side.key().to_string()),
             EDITOR_BUNDLE_SIZE_KEY => Some(self.editor_bundle_size.to_string()),
+            SHORTCUTS_KEY => Some(self.shortcut_overrides.to_json()),
             _ => None,
         }
     }
@@ -296,6 +302,20 @@ mod tests {
             }
         }
         assert_eq!(settings, Settings::default());
+    }
+
+    #[test]
+    fn restored_shortcut_overrides_drive_the_startup_keymap() {
+        use crate::command::CommandId;
+        use crate::keymap::Combo;
+        use gpui::Modifiers;
+        let settings = Settings::from_pairs(&[(SHORTCUTS_KEY.into(), r#"{"save":"alt-cmd-s","copy":null}"#.into())]);
+        let state = crate::app::AppState::with_settings(settings);
+        let save = Combo::new(Modifiers::command() | Modifiers::alt(), "s");
+        assert_eq!(state.keymap.resolve(&save), Some(CommandId::Save));
+        assert_eq!(state.keymap.resolve(&Combo::new(Modifiers::command(), "s")), None);
+        assert_eq!(state.keymap.combo_for(CommandId::Copy), None);
+        assert_eq!(state.settings.persisted_value(SHORTCUTS_KEY).unwrap(), r#"{"copy":null,"save":"alt-cmd-s"}"#);
     }
 
     #[test]

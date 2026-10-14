@@ -4,9 +4,13 @@
 use crate::command::{CommandId, CommandRegistry};
 use domain::Direction;
 use gpui::{Keystroke, Modifiers};
-use std::collections::HashMap;
+use serde_json::{Map, Value};
+use std::collections::{BTreeMap, HashMap};
 
 pub type KeyCode = String;
+
+const MAX_OVERRIDES_BYTES: usize = 16 * 1024;
+const MAX_FUNCTION_KEY: u8 = 24;
 
 const US_KEY_FOR_LAYOUT_CHAR: [(char, &str); 43] = [
     ('\u{0634}', "a"), ('\u{0632}', "b"), ('\u{0630}', "c"), ('\u{064a}', "d"), ('\u{062b}', "e"), ('\u{0628}', "f"),
@@ -89,6 +93,24 @@ impl Combo {
         let prefix: String = flags.iter().filter(|(is_held, _)| *is_held).map(|(_, text)| *text).collect();
         format!("{prefix}{}", self.key)
     }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        let keystroke = Keystroke::parse(text).ok()?;
+        let combo = Self::new(keystroke.modifiers, keystroke.key);
+        (combo.is_shortcut() && combo.binding_text() == text).then_some(combo)
+    }
+
+    pub fn is_shortcut(&self) -> bool {
+        let modifiers = self.modifiers;
+        let has_command_modifier = modifiers.platform || modifiers.control || modifiers.alt;
+        !self.key.is_empty() && (has_command_modifier || is_function_key(&self.key))
+    }
+}
+
+fn is_function_key(key: &str) -> bool {
+    key.strip_prefix('f')
+        .and_then(|number| number.parse::<u8>().ok())
+        .is_some_and(|number| (1..=MAX_FUNCTION_KEY).contains(&number))
 }
 
 #[derive(Debug)]
@@ -142,6 +164,27 @@ impl Keymap {
         self.order.iter().find(|combo| self.bindings.get(*combo) == Some(&command))
     }
 
+    pub fn combos_for(&self, command: CommandId) -> Vec<&Combo> {
+        self.order.iter().filter(|combo| self.bindings.get(*combo) == Some(&command)).collect()
+    }
+
+    pub fn with_overrides(overrides: &ShortcutOverrides) -> Self {
+        let mut map = Self::default();
+        for (command, _) in overrides.iter() {
+            let replaced: Vec<Combo> = map.combos_for(command).into_iter().cloned().collect();
+            for combo in &replaced {
+                map.unbind(combo);
+            }
+        }
+        for (command, combo) in overrides.iter() {
+            if let Some(combo) = combo {
+                map.unbind(combo);
+                map.bind(combo.clone(), command);
+            }
+        }
+        map
+    }
+
     pub fn resolve_keystroke(&self, keystroke: &Keystroke) -> Option<CommandId> {
         let typed = Combo::new(keystroke.modifiers, keystroke.key.as_str());
         self.resolve(&typed).or_else(|| self.resolve(&physical_combo(keystroke)?))
@@ -153,6 +196,59 @@ impl Keymap {
 
     pub fn iter(&self) -> impl Iterator<Item = (&Combo, &CommandId)> {
         self.bindings.iter()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShortcutOverrides {
+    entries: BTreeMap<&'static str, Option<Combo>>,
+}
+
+impl ShortcutOverrides {
+    pub fn parse(text: &str) -> Self {
+        let mut overrides = Self::default();
+        if text.len() > MAX_OVERRIDES_BYTES {
+            return overrides;
+        }
+        let Ok(Value::Object(entries)) = serde_json::from_str::<Value>(text) else {
+            return overrides;
+        };
+        for (key, value) in entries {
+            let Some(command) = CommandId::from_key(&key) else {
+                continue;
+            };
+            match value {
+                Value::Null => overrides.set(command, None),
+                Value::String(text) => {
+                    if let Some(combo) = Combo::parse(&text) {
+                        overrides.set(command, Some(combo));
+                    }
+                }
+                _ => {}
+            }
+        }
+        overrides
+    }
+
+    pub fn to_json(&self) -> String {
+        let entries: Map<String, Value> = self.entries.iter()
+            .map(|(key, combo)| (key.to_string(), combo.as_ref().map_or(Value::Null, |c| Value::String(c.binding_text()))))
+            .collect();
+        Value::Object(entries).to_string()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (CommandId, Option<&Combo>)> {
+        self.entries.iter().filter_map(|(key, combo)| CommandId::from_key(key).map(|command| (command, combo.as_ref())))
+    }
+
+    pub fn set(&mut self, command: CommandId, combo: Option<Combo>) {
+        if let Some(key) = command.key() {
+            self.entries.insert(key, combo);
+        }
     }
 }
 
@@ -277,4 +373,98 @@ fn bind_workspaces(map: &mut Keymap) {
 
 fn slot_key(index: usize) -> String {
     (index + 1).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::CommandRegistry;
+
+    fn cmd(key: &str) -> Combo {
+        Combo::new(Modifiers::command(), key)
+    }
+
+    #[test]
+    fn every_registry_command_has_a_unique_stable_key() {
+        let registry = CommandRegistry::with_defaults();
+        let mut keys: Vec<&str> = registry.list().iter().map(|command| command.id.key().expect("keyed")).collect();
+        for command in registry.list() {
+            assert_eq!(CommandId::from_key(command.id.key().unwrap()), Some(command.id));
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), registry.list().len());
+        assert_eq!(CommandId::SelectTab(0).key(), None);
+    }
+
+    #[test]
+    fn combo_text_parses_only_valid_shortcuts() {
+        assert_eq!(Combo::parse("shift-cmd-k"), Some(Combo::new(Modifiers::command_shift(), "k")));
+        assert_eq!(Combo::parse("ctrl-tab"), Some(Combo::new(Modifiers::control(), "tab")));
+        assert_eq!(Combo::parse("f5"), Some(Combo::new(Modifiers::none(), "f5")));
+        for invalid in ["", "k", "cmd-", "cmd-x-y", "shift-k", "cmd-K", "f99"] {
+            assert_eq!(Combo::parse(invalid), None, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn overrides_parse_bindings_and_unbound_markers() {
+        let overrides = ShortcutOverrides::parse(r#"{"split_right":"alt-cmd-d","copy":null}"#);
+        let entries: Vec<(CommandId, Option<&Combo>)> = overrides.iter().collect();
+        let split = Combo::new(Modifiers::command() | Modifiers::alt(), "d");
+        assert_eq!(entries, [(CommandId::Copy, None), (CommandId::SplitRight, Some(&split))]);
+        assert_eq!(ShortcutOverrides::parse(&overrides.to_json()), overrides);
+    }
+
+    #[test]
+    fn overrides_ignore_untrusted_entries() {
+        for payload in ["not json", "[1,2]", "\"cmd-d\"", r#"{"unknown_command":"cmd-d"}"#,
+            r#"{"split_right":"cmd-"}"#, r#"{"split_right":"d"}"#, r#"{"split_right":42}"#] {
+            assert!(ShortcutOverrides::parse(payload).is_empty(), "{payload}");
+        }
+        let oversized = format!(r#"{{"copy":null,"pad":"{}"}}"#, "x".repeat(MAX_OVERRIDES_BYTES));
+        assert!(ShortcutOverrides::parse(&oversized).is_empty());
+        let mixed = ShortcutOverrides::parse(r#"{"copy":"cmd-y","paste":"???","bogus":null}"#);
+        assert_eq!(mixed.iter().collect::<Vec<_>>(), [(CommandId::Copy, Some(&cmd("y")))]);
+    }
+
+    #[test]
+    fn override_replaces_every_default_combo_of_its_command() {
+        let mut overrides = ShortcutOverrides::default();
+        let new_combo = Combo::new(Modifiers::command() | Modifiers::alt(), "y");
+        overrides.set(CommandId::FocusPane(Direction::Left), Some(new_combo.clone()));
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.combos_for(CommandId::FocusPane(Direction::Left)), [&new_combo]);
+        assert_eq!(map.resolve(&cmd("h")), None);
+        assert_eq!(map.resolve(&Combo::new(Modifiers::command() | Modifiers::alt(), "left")), None);
+        assert!(map.conflicts().is_empty());
+    }
+
+    #[test]
+    fn unbound_override_removes_the_command_and_keeps_the_rest() {
+        let mut overrides = ShortcutOverrides::default();
+        overrides.set(CommandId::Copy, None);
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.combo_for(CommandId::Copy), None);
+        assert_eq!(map.resolve(&cmd("v")), Some(CommandId::Paste));
+        assert_eq!(map.len(), Keymap::default().len() - 1);
+    }
+
+    #[test]
+    fn override_takes_a_combo_from_a_command_without_overrides() {
+        let mut overrides = ShortcutOverrides::default();
+        overrides.set(CommandId::Save, Some(cmd("m")));
+        let map = Keymap::with_overrides(&overrides);
+        assert_eq!(map.resolve(&cmd("m")), Some(CommandId::Save));
+        assert_eq!(map.combo_for(CommandId::Minimize), None);
+        assert!(map.conflicts().is_empty());
+    }
+
+    #[test]
+    fn empty_overrides_match_the_default_keymap() {
+        let map = Keymap::with_overrides(&ShortcutOverrides::default());
+        let defaults = Keymap::default();
+        assert_eq!(map.len(), defaults.len());
+        assert!(defaults.iter().all(|(combo, id)| map.resolve(combo) == Some(*id)));
+    }
 }

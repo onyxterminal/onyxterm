@@ -44,6 +44,7 @@ impl AppState {
     pub fn with_settings(settings: Settings) -> Self {
         Self {
             theme: settings.theme_tokens(),
+            keymap: Keymap::with_overrides(&settings.shortcut_overrides),
             settings,
             settings_visible: false,
             settings_pane: SettingsPane::default(),
@@ -56,7 +57,6 @@ impl AppState {
             theme_color_input: TextField::default(),
             settings_error: None,
             registry: CommandRegistry::with_defaults(),
-            keymap: Keymap::default(),
             palette_visible: false,
             palette_query: TextField::default(),
             palette_selection: 0,

@@ -61,7 +61,40 @@ pub enum CommandId {
     CloseDocument,
 }
 
+const COMMAND_KEYS: [(CommandId, &str); 48] = [
+    (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
+    (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
+    (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
+    (CommandId::ClosePalette, "close_palette"), (CommandId::NextTab, "next_tab"), (CommandId::RenameTab, "rename_tab"),
+    (CommandId::PrevTab, "previous_tab"), (CommandId::SplitRight, "split_right"), (CommandId::SplitDown, "split_down"),
+    (CommandId::FocusAdjacent, "focus_next_pane"), (CommandId::FocusPane(Direction::Left), "focus_pane_left"),
+    (CommandId::FocusPane(Direction::Right), "focus_pane_right"), (CommandId::FocusPane(Direction::Up), "focus_pane_up"),
+    (CommandId::FocusPane(Direction::Down), "focus_pane_down"), (CommandId::SwapPane(Direction::Left), "swap_pane_left"),
+    (CommandId::SwapPane(Direction::Right), "swap_pane_right"), (CommandId::SwapPane(Direction::Up), "swap_pane_up"),
+    (CommandId::SwapPane(Direction::Down), "swap_pane_down"), (CommandId::MaximizePane, "maximize_pane"),
+    (CommandId::GridLayout, "grid_layout"), (CommandId::EqualizePanes, "equalize_panes"),
+    (CommandId::RenamePane, "rename_pane"), (CommandId::MoveToNewTab, "move_pane_to_new_tab"),
+    (CommandId::OpenFile, "open_file"), (CommandId::OpenFolder, "open_folder"),
+    (CommandId::OpenEditorHere, "open_editor_here"), (CommandId::ToggleFileTree, "toggle_file_tree"),
+    (CommandId::ToggleEditorBundle, "toggle_editor_bundle"), (CommandId::Save, "save"),
+    (CommandId::NextDocument, "next_document"), (CommandId::PrevDocument, "previous_document"),
+    (CommandId::CloseDocument, "close_document"), (CommandId::SwitchWorkspace, "switch_workspace"),
+    (CommandId::NewWorkspace, "new_workspace"), (CommandId::RenameWorkspace, "rename_workspace"),
+    (CommandId::NextWorkspace, "next_workspace"), (CommandId::PrevWorkspace, "previous_workspace"),
+    (CommandId::CloseTab, "close_tab"), (CommandId::Copy, "copy"), (CommandId::SelectAll, "select_all"),
+    (CommandId::ToggleCopyMode, "toggle_copy_mode"), (CommandId::Paste, "paste"),
+    (CommandId::ToggleFullScreen, "toggle_full_screen"), (CommandId::Quit, "quit"),
+];
+
 impl CommandId {
+    pub fn key(self) -> Option<&'static str> {
+        COMMAND_KEYS.iter().find(|(id, _)| *id == self).map(|(_, key)| *key)
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        COMMAND_KEYS.iter().find(|(_, candidate)| *candidate == key).map(|(id, _)| *id)
+    }
+
     pub fn is_structural(self) -> bool {
         use CommandId::*;
         matches!(
