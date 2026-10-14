@@ -34,11 +34,11 @@ fn ansi_palette(theme: &Theme) -> [Hsla; 8] {
     [ansi.black, ansi.red, ansi.green, ansi.yellow, ansi.blue, ansi.magenta, ansi.cyan, ansi.white]
 }
 
-fn preview_line() -> Div {
+pub(super) fn preview_line() -> Div {
     div().flex().flex_row().whitespace_nowrap()
 }
 
-fn preview_span(text: &'static str, color: Hsla) -> Div {
+pub(super) fn preview_span(text: &'static str, color: Hsla) -> Div {
     div().text_color(color).child(text)
 }
 

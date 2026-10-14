@@ -42,6 +42,28 @@ impl BundleSide {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsPane {
+    #[default]
+    Appearance,
+    Terminal,
+    Editor,
+    Keyboard,
+}
+
+impl SettingsPane {
+    pub const ALL: [Self; 4] = [Self::Appearance, Self::Terminal, Self::Editor, Self::Keyboard];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Appearance => "Appearance",
+            Self::Terminal => "Terminal",
+            Self::Editor => "Editor",
+            Self::Keyboard => "Keyboard",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub theme: ThemeKind,
@@ -176,6 +198,14 @@ mod tests {
         ]);
         assert_eq!(settings.editor_bundle_side, BundleSide::Bottom);
         assert_eq!(settings.editor_bundle_size, 0.9);
+    }
+
+    #[test]
+    fn settings_open_on_the_appearance_pane_by_default() {
+        assert_eq!(SettingsPane::default(), SettingsPane::Appearance);
+        assert_eq!(crate::app::AppState::new().settings_pane, SettingsPane::Appearance);
+        let labels: Vec<&str> = SettingsPane::ALL.iter().map(|pane| pane.label()).collect();
+        assert_eq!(labels, ["Appearance", "Terminal", "Editor", "Keyboard"]);
     }
 
     #[test]

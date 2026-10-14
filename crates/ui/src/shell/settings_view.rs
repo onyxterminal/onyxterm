@@ -1,7 +1,8 @@
 use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
-use crate::settings::{filtered_fonts, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
+use crate::settings::{filtered_fonts, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
     FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
+use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme, ThemeKind};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, FontWeight, Keystroke, MouseButton, ScrollStrategy, SharedString,
@@ -13,23 +14,26 @@ const FONT_ROW_PX: f32 = 34.0;
 const CARD_WINDOW_MARGIN_PX: f32 = 24.0;
 const CARD_WIDTH_PX: f32 = 520.0;
 const THEME_EDITOR_WIDTH_PX: f32 = 600.0;
-const SYSTEM_MONOSPACE: &str = "ui-monospace";
-const SYSTEM_MONOSPACE_LABEL: &str = "System monospace";
+pub(super) const SYSTEM_MONOSPACE: &str = "ui-monospace";
+pub(super) const SYSTEM_MONOSPACE_LABEL: &str = "System monospace";
 const FONT_SEARCH_PLACEHOLDER: &str = "Search installed fonts\u{2026}";
+const SETTINGS_WIDTH_PX: f32 = 800.0;
+const SETTINGS_HEIGHT_PX: f32 = 640.0;
+const CONTENT_PADDING_X_PX: f32 = 28.0;
+const CONTENT_PADDING_Y_PX: f32 = 22.0;
+const FOOTER_HEIGHT_PX: f32 = 44.0;
+const TOOLBAR_BUTTON_WIDTH_PX: f32 = 76.0;
+const TOOLBAR_ICON_PX: f32 = 22.0;
+const TOOLBAR_LABEL_PX: f32 = 11.0;
+pub(super) const TITLE_PX: f32 = 13.0;
+pub(super) const CAPTION_PX: f32 = 11.5;
 
 #[derive(Clone, Copy)]
-enum SettingAction { ThemePicker, Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, Close }
+pub(super) enum SettingAction { Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, Close }
 
 impl Shell {
-    fn change_setting(&mut self, action: SettingAction, cx: &mut Context<Self>) {
+    pub(super) fn change_setting(&mut self, action: SettingAction, cx: &mut Context<Self>) {
         self.state.settings_error = None;
-        if matches!(action, SettingAction::ThemePicker) {
-            self.state.theme_picker_visible = true;
-            self.state.theme_picker_selection = ThemeKind::ALL.iter()
-                .position(|kind| *kind == self.state.settings.theme).unwrap_or(0);
-            cx.notify();
-            return;
-        }
         if matches!(action, SettingAction::Customize) {
             self.start_customize(cx);
             return;
@@ -71,10 +75,15 @@ impl Shell {
                 settings.dim_unfocused_panes = !settings.dim_unfocused_panes;
                 (DIM_UNFOCUSED_KEY, settings.dim_unfocused_panes.to_string())
             }
-            SettingAction::ThemePicker | SettingAction::Customize | SettingAction::FontPicker | SettingAction::Close => unreachable!(),
+            SettingAction::Customize | SettingAction::FontPicker | SettingAction::Close => unreachable!(),
         };
         self.apply_settings(cx);
         self.save_setting(key, &value);
+        cx.notify();
+    }
+
+    pub(super) fn show_settings_pane(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
+        self.state.settings_pane = pane;
         cx.notify();
     }
 
@@ -108,9 +117,8 @@ impl Shell {
         cx.notify();
     }
 
-    fn select_theme(&mut self, kind: ThemeKind, cx: &mut Context<Self>) {
+    pub(super) fn select_theme(&mut self, kind: ThemeKind, cx: &mut Context<Self>) {
         self.state.settings.theme = kind;
-        self.state.theme_picker_visible = false;
         self.state.settings_error = None;
         self.apply_settings(cx);
         self.save_setting(THEME_KEY, kind.key());
@@ -120,7 +128,6 @@ impl Shell {
     fn start_customize(&mut self, cx: &mut Context<Self>) {
         let was_custom = self.state.settings.theme == ThemeKind::Custom;
         self.state.settings.customize_current_theme();
-        self.state.theme_picker_visible = false;
         self.state.theme_editor_visible = true;
         self.state.theme_editor_terminal_colors = false;
         self.state.color_picker = None;
@@ -145,19 +152,12 @@ impl Shell {
         if self.state.theme_editor_visible {
             return self.state.color_picker.as_ref().map(|_| FieldTarget::HexColor);
         }
-        if self.state.theme_picker_visible {
-            return None;
-        }
         self.state.font_picker_visible.then_some(FieldTarget::FontQuery)
     }
 
     pub(super) fn handle_settings_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
         if self.state.theme_editor_visible {
             return self.handle_theme_editor_key(key, cx);
-        }
-        if self.state.theme_picker_visible {
-            self.handle_theme_picker_key(key, cx);
-            return true;
         }
         if self.state.font_picker_visible {
             return self.handle_font_picker_key(key, cx);
@@ -166,18 +166,6 @@ impl Shell {
             self.state.settings_visible = false;
         }
         true
-    }
-
-    fn handle_theme_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
-        match key.key.as_str() {
-            ESCAPE_KEY => self.state.theme_picker_visible = false,
-            UP_KEY => self.state.theme_picker_selection =
-                (self.state.theme_picker_selection + ThemeKind::ALL.len() - 1) % ThemeKind::ALL.len(),
-            DOWN_KEY => self.state.theme_picker_selection =
-                (self.state.theme_picker_selection + 1) % ThemeKind::ALL.len(),
-            ENTER_KEY => self.select_theme(ThemeKind::ALL[self.state.theme_picker_selection], cx),
-            _ => {}
-        }
     }
 
     fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
@@ -204,7 +192,7 @@ impl Shell {
         true
     }
 
-    fn settings_button(&self, label: &'static str, action: SettingAction, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn settings_button(&self, label: &'static str, action: SettingAction, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         div().id(label).h(px(30.0 * scale)).min_w(px(35.0 * scale))
@@ -219,12 +207,15 @@ impl Shell {
     pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        let (card_id, card) = if self.state.theme_editor_visible { ("theme-editor-card", self.render_theme_editor(cx)) }
-            else if self.state.theme_picker_visible { ("theme-picker-card", self.render_theme_picker(cx)) }
-            else if self.state.font_picker_visible { ("font-picker-card", self.render_font_picker(cx)) }
-            else { ("settings-card", self.render_settings_card(cx)) };
-        let max_height = window.viewport_size().height - px(CARD_WINDOW_MARGIN_PX * 2.0);
-        let card_width = if self.state.theme_editor_visible { THEME_EDITOR_WIDTH_PX } else { CARD_WIDTH_PX };
+        let viewport = window.viewport_size();
+        let card = if self.state.theme_editor_visible {
+            self.render_settings_subcard(self.render_theme_editor(cx), "theme-editor-card", THEME_EDITOR_WIDTH_PX)
+        } else if self.state.font_picker_visible {
+            self.render_settings_subcard(self.render_font_picker(cx), "font-picker-card", CARD_WIDTH_PX)
+        } else {
+            self.render_settings_window(cx).id("settings-card")
+                .w(px(SETTINGS_WIDTH_PX * scale)).h(px(SETTINGS_HEIGHT_PX * scale)).overflow_hidden()
+        };
         let picker_drag_listener = self.picker_drag_listener(cx);
         div().absolute().inset_0().flex().items_center().justify_center()
             .bg(theme.chrome.backdrop).occlude()
@@ -232,12 +223,11 @@ impl Shell {
                 shell.finish_color_picker(cx);
                 shell.state.settings_visible = false;
                 shell.state.font_picker_visible = false;
-                shell.state.theme_picker_visible = false;
                 shell.state.theme_editor_visible = false;
                 cx.notify();
             }))
-            .child(card.id(card_id).max_h(max_height).overflow_y_scroll()
-                .w(px(card_width * scale)).max_w(window.viewport_size().width - px(CARD_WINDOW_MARGIN_PX * 2.0)).p(px(24.0 * scale))
+            .child(card.max_h(viewport.height - px(CARD_WINDOW_MARGIN_PX * 2.0))
+                .max_w(viewport.width - px(CARD_WINDOW_MARGIN_PX * 2.0))
                 .rounded(px(16.0 * scale)).bg(theme.surface.raised)
                 .shadow(box_shadows(&theme.shadow.palette))
                 .border_1().border_color(theme.border.default).occlude()
@@ -247,7 +237,65 @@ impl Shell {
             .children(picker_drag_listener)
     }
 
-    fn setting_stepper(&self, id: &'static str, value: String, smaller: SettingAction, larger: SettingAction, cx: &mut Context<Self>) -> Div {
+    fn render_settings_subcard(&self, content: Div, id: &'static str, width_px: f32) -> Stateful<Div> {
+        let scale = self.state.settings.ui_scale;
+        content.id(id).overflow_y_scroll().w(px(width_px * scale)).p(px(24.0 * scale))
+    }
+
+    fn render_settings_window(&self, cx: &mut Context<Self>) -> Div {
+        let scale = self.state.settings.ui_scale;
+        div().flex().flex_col()
+            .child(self.render_settings_toolbar(cx))
+            .child(self.render_settings_pane(cx).id("settings-content").flex_1().min_h(px(0.0)).overflow_y_scroll()
+                .px(px(CONTENT_PADDING_X_PX * scale)).py(px(CONTENT_PADDING_Y_PX * scale)))
+            .child(self.render_settings_footer())
+    }
+
+    fn render_settings_toolbar(&self, cx: &mut Context<Self>) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        div().flex_none().relative().pt(px(12.0 * scale)).pb(px(8.0 * scale))
+            .flex().flex_col().items_center().gap(px(8.0 * scale))
+            .border_b_1().border_color(theme.border.muted)
+            .child(div().text_size(px(TITLE_PX * scale)).font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text.default).child(self.state.settings_pane.label()))
+            .child(div().flex().gap(px(4.0 * scale))
+                .children(SettingsPane::ALL.map(|pane| self.settings_toolbar_button(pane, cx))))
+            .child(div().absolute().top(px(10.0 * scale)).right(px(12.0 * scale))
+                .child(self.settings_button("Done", SettingAction::Close, cx)))
+    }
+
+    fn settings_toolbar_button(&self, pane: SettingsPane, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let is_selected = self.state.settings_pane == pane;
+        let hover_fill = theme.chrome.control_fill;
+        div().id(("settings-pane", pane as usize)).w(px(TOOLBAR_BUTTON_WIDTH_PX * scale)).py(px(5.0 * scale))
+            .flex().flex_col().items_center().gap(px(3.0 * scale))
+            .rounded(px(7.0 * scale)).cursor_pointer()
+            .text_size(px(TOOLBAR_LABEL_PX * scale))
+            .text_color(if is_selected { theme.accent.primary } else { theme.text.muted })
+            .when(is_selected, |button| button.bg(hover_fill))
+            .hover(move |style| style.bg(hover_fill))
+            .child(pane_icon(pane).sized(TOOLBAR_ICON_PX * scale))
+            .child(pane.label())
+            .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
+                cx.stop_propagation(); shell.show_settings_pane(pane, cx);
+            }))
+    }
+
+    fn render_settings_footer(&self) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        div().flex_none().h(px(FOOTER_HEIGHT_PX * scale)).px(px(16.0 * scale))
+            .flex().items_center().justify_between()
+            .border_t_1().border_color(theme.border.muted)
+            .child(div().text_size(px(CAPTION_PX * scale))
+                .text_color(if self.state.settings_error.is_some() { theme.chrome.destructive } else { theme.text.muted })
+                .child(self.state.settings_error.clone().unwrap_or_else(|| "Saved automatically".into())))
+    }
+
+    pub(super) fn setting_stepper(&self, id: &'static str, value: String, smaller: SettingAction, larger: SettingAction, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         let button = |suffix: &'static str, glyph: &'static str, action, cx: &mut Context<Self>| {
@@ -268,7 +316,7 @@ impl Shell {
             .child(button("more", "+", larger, cx))
     }
 
-    fn setting_switch(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn setting_switch(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         let enabled = self.state.settings.dim_unfocused_panes;
@@ -282,47 +330,6 @@ impl Shell {
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                 cx.stop_propagation(); shell.change_setting(SettingAction::DimPanes, cx);
             }))
-    }
-
-    fn render_settings_card(&self, cx: &mut Context<Self>) -> Div {
-        let theme = &self.state.theme;
-        let settings = &self.state.settings;
-        let scale = settings.ui_scale;
-        let row = |title: &'static str, detail: &'static str, control: Div| {
-            div().min_h(px(66.0 * scale)).py(px(12.0 * scale))
-                .flex().items_center().justify_between().gap(px(16.0 * scale))
-                .border_b_1().border_color(theme.border.muted)
-                .child(div().flex_1().min_w(px(0.0))
-                    .child(div().font_weight(FontWeight::MEDIUM).child(title))
-                    .child(div().mt(px(3.0 * scale)).text_size(px(theme.ui_font.hint_px))
-                        .text_color(theme.text.muted).child(detail)))
-                .child(control)
-        };
-        let font = if settings.font_family == SYSTEM_MONOSPACE { SYSTEM_MONOSPACE_LABEL.into() }
-            else { settings.font_family.clone() };
-        div().child(div().flex().items_center().justify_between().mb(px(18.0 * scale))
-                .child(div().child(div().text_size(px(20.0 * scale)).font_weight(FontWeight::SEMIBOLD).child("Appearance"))
-                    .child(div().mt(px(4.0 * scale)).text_color(theme.text.muted).child("A comfortable space to focus.")))
-                .child(self.settings_button("Done", SettingAction::Close, cx)))
-            .child(row("Theme", "Set the mood of your workspace.",
-                div().flex().items_center().gap(px(6.0 * scale))
-                    .child(self.settings_button(settings.theme.label(), SettingAction::ThemePicker, cx))
-                    .child(self.settings_button("Customize", SettingAction::Customize, cx))))
-            .child(row("Terminal font", "Choose a font that's easy to read.",
-                div().flex().items_center().gap(px(8.0 * scale))
-                    .child(div().max_w(px(130.0 * scale)).truncate().text_color(theme.text.muted).child(font))
-                    .child(self.settings_button("Choose", SettingAction::FontPicker, cx))))
-            .child(row("Text size", "Terminal and editor text.",
-                self.setting_stepper("text-size", format!("{} px", settings.font_size as u32),
-                    SettingAction::FontSmaller, SettingAction::FontLarger, cx)))
-            .child(row("Interface size", "Tabs, menus, and controls.",
-                self.setting_stepper("ui-size", format!("{}%", (scale * 100.0).round() as u32),
-                    SettingAction::UiSmaller, SettingAction::UiLarger, cx)))
-            .child(row("Dim inactive panes", "Keep your active pane in focus.",
-                div().child(self.setting_switch(cx))))
-            .child(div().pt(px(16.0 * scale)).text_size(px(theme.ui_font.hint_px))
-                .text_color(if self.state.settings_error.is_some() { theme.chrome.destructive } else { theme.text.muted })
-                .child(self.state.settings_error.clone().unwrap_or_else(|| "Saved automatically".into())))
     }
 
     fn render_font_picker(&self, cx: &mut Context<Self>) -> Div {
@@ -361,6 +368,7 @@ impl Shell {
                 .rounded(px(5.0 * scale)).cursor_pointer()
                 .bg(if selected { theme.accent.primary } else { theme.surface.raised })
                 .text_color(if selected { theme.text.inverse } else { theme.text.default })
+                .when(name != SYSTEM_MONOSPACE, |row| row.font_family(SharedString::from(name.clone())))
                 .child(label)
                 .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
                     cx.stop_propagation(); shell.select_font(name.clone(), cx);
@@ -368,7 +376,7 @@ impl Shell {
         }).collect()
     }
 
-    fn theme_preview(&self, kind: ThemeKind) -> Theme {
+    pub(super) fn theme_preview(&self, kind: ThemeKind) -> Theme {
         if kind == ThemeKind::Custom {
             let mut theme = Theme::load(self.state.settings.custom_base).expect("built-in theme");
             self.state.settings.custom_colors.apply(&mut theme);
@@ -377,37 +385,13 @@ impl Shell {
             Theme::load(kind).expect("built-in theme")
         }
     }
+}
 
-    fn render_theme_picker(&self, cx: &mut Context<Self>) -> Div {
-        let theme = &self.state.theme;
-        let scale = self.state.settings.ui_scale;
-        div().child(div().flex().items_center().justify_between().mb(px(14.0 * scale))
-                .child(div().text_size(px(theme.ui_font.palette_input_px)).child("Choose theme"))
-                .child(div().id("theme-back").cursor_pointer().child("Back")
-                    .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
-                        cx.stop_propagation(); shell.state.theme_picker_visible = false; cx.notify();
-                    }))))
-            .children(ThemeKind::ALL.into_iter().enumerate().map(|(index, kind)| {
-                let preview = self.theme_preview(kind);
-                let is_selected = index == self.state.theme_picker_selection;
-                let is_current = kind == self.state.settings.theme;
-                div().id(("theme-option", index)).h(px(43.0 * scale))
-                    .px(px(10.0 * scale)).flex().items_center().gap(px(11.0 * scale))
-                    .rounded(px(6.0 * scale)).cursor_pointer()
-                    .bg(if is_selected { theme.chrome.control_fill } else { theme.surface.raised })
-                    .child(div().w(px(30.0 * scale)).h(px(22.0 * scale))
-                        .rounded(px(5.0 * scale)).bg(preview.surface.canvas)
-                        .border_1().border_color(preview.border.default)
-                        .child(div().ml(px(17.0 * scale)).mt(px(8.0 * scale))
-                            .w(px(8.0 * scale)).h(px(8.0 * scale))
-                            .rounded_full().bg(preview.accent.primary)))
-                    .child(div().flex_1().child(kind.label()))
-                    .when(is_current, |el| el.child(div().text_color(theme.accent.primary).child("Selected")))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
-                        cx.stop_propagation(); shell.select_theme(kind, cx);
-                    }))
-            }))
-            .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
-                .child("Choose a preset, then use Customize to make it your own."))
+fn pane_icon(pane: SettingsPane) -> Icon {
+    match pane {
+        SettingsPane::Appearance => Icon::Appearance,
+        SettingsPane::Terminal => Icon::Terminal,
+        SettingsPane::Editor => Icon::Editor,
+        SettingsPane::Keyboard => Icon::Keyboard,
     }
 }

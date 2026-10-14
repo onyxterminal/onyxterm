@@ -5,7 +5,7 @@ use crate::color_picker::ColorPicker;
 use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
 use crate::theme::Theme;
-use crate::settings::Settings;
+use crate::settings::{Settings, SettingsPane};
 use crate::text_field::TextField;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +19,10 @@ pub struct AppState {
     pub theme: Theme,
     pub settings: Settings,
     pub settings_visible: bool,
+    pub settings_pane: SettingsPane,
     pub font_picker_visible: bool,
     pub font_picker_query: TextField,
     pub font_picker_selection: usize,
-    pub theme_picker_visible: bool,
-    pub theme_picker_selection: usize,
     pub theme_editor_visible: bool,
     pub theme_editor_terminal_colors: bool,
     pub color_picker: Option<ColorPicker>,
@@ -47,11 +46,10 @@ impl AppState {
             theme: settings.theme_tokens(),
             settings,
             settings_visible: false,
+            settings_pane: SettingsPane::default(),
             font_picker_visible: false,
             font_picker_query: TextField::default(),
             font_picker_selection: 0,
-            theme_picker_visible: false,
-            theme_picker_selection: 0,
             theme_editor_visible: false,
             theme_editor_terminal_colors: false,
             color_picker: None,
