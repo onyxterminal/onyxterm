@@ -160,9 +160,12 @@ impl Settings {
         }
     }
 
+    pub fn base_theme(&self) -> ThemeKind {
+        if self.theme == ThemeKind::Custom { self.custom_base } else { self.theme }
+    }
+
     pub fn theme_tokens(&self) -> Theme {
-        let base = if self.theme == ThemeKind::Custom { self.custom_base } else { self.theme };
-        let mut theme = Theme::load(base).expect("built-in theme must load");
+        let mut theme = Theme::load(self.base_theme()).expect("built-in theme must load");
         if self.theme == ThemeKind::Custom { self.custom_colors.apply(&mut theme); }
         theme.font.family = self.font_family.clone();
         theme.font.size_px = self.font_size;

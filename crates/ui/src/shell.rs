@@ -501,6 +501,7 @@ impl Shell {
             CommandId::OpenEditorHere => self.open_editor_here(cx),
             CommandId::ToggleFileTree => self.toggle_file_tree(cx),
             CommandId::ToggleEditorBundle => self.toggle_editor_bundle(cx),
+            CommandId::ToggleAppearance => self.toggle_appearance(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         self.remember_focused_editor();

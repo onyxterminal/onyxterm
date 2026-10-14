@@ -163,6 +163,11 @@ impl Shell {
         cx.notify();
     }
 
+    pub(super) fn toggle_appearance(&mut self, cx: &mut Context<Self>) {
+        let target = self.state.settings.base_theme().counterpart(self.state.theme.appearance);
+        self.select_theme(target, cx);
+    }
+
     fn start_customize(&mut self, cx: &mut Context<Self>) {
         let was_custom = self.state.settings.theme == ThemeKind::Custom;
         self.state.settings.customize_current_theme();
