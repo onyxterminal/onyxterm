@@ -4,8 +4,8 @@ use crate::pane_drop::{has_left_dead_zone, pane_drop_target, tab_drop_target, Dr
 use crate::pane_motion::{duration_from_ms, ease_out_cubic, progress};
 use domain::{DropZone, PanelId};
 use gpui::{
-    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, MouseMoveEvent, Pixels, Point, SharedString,
-    Window,
+    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, DispatchPhase, MouseButton, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, SharedString, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -47,6 +47,36 @@ pub(super) struct PaneDrag {
 pub(super) struct DroppedGhost {
     drag: PaneDrag,
     started: Instant,
+}
+
+pub(super) fn fraction(offset: Pixels, extent: Pixels) -> f32 {
+    if extent <= px(0.0) {
+        return 0.0;
+    }
+    f32::from(offset) / f32::from(extent)
+}
+
+pub(super) type DragMove = fn(&mut Shell, &MouseMoveEvent, &mut Context<Shell>);
+pub(super) type DragRelease = fn(&mut Shell, &mut Context<Shell>);
+
+pub(super) fn window_drag_listener(cx: &mut Context<Shell>, on_move: DragMove, on_release: DragRelease)
+    -> impl IntoElement {
+    let mover = cx.entity().downgrade();
+    let releaser = mover.clone();
+    canvas(|_bounds, _window, _cx| {}, move |_bounds, (), window, _cx| {
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Bubble {
+                mover.update(cx, |shell, cx| on_move(shell, event, cx)).ok();
+            }
+        });
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                releaser.update(cx, on_release).ok();
+            }
+        });
+    })
+    .absolute()
+    .size_full()
 }
 
 pub(super) fn bounds_probe<K>(sink: &BoundsMap<K>, key: K) -> impl IntoElement

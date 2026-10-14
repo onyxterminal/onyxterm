@@ -1,4 +1,4 @@
-use super::pane_drag::bounds_probe;
+use super::pane_drag::{bounds_probe, fraction, window_drag_listener};
 use super::theme_editor::{ButtonTone, EditorButton};
 use super::Shell;
 use crate::color_picker::{ColorPicker, PickerDrag};
@@ -6,9 +6,8 @@ use crate::theme::custom::preset_colors;
 use crate::theme::hsv::{Hsv, FULL_TURN_DEGREES};
 use crate::theme::menu_chrome::{field_text, focused_field};
 use gpui::{
-    black, canvas, div, linear_color_stop, linear_gradient, point, prelude::*, px, white, BoxShadow, Context,
-    CursorStyle, DispatchPhase, Div, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, Stateful,
+    black, div, linear_color_stop, linear_gradient, point, prelude::*, px, white, BoxShadow, Context, CursorStyle, Div,
+    Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Stateful,
 };
 
 const HEX_PLACEHOLDER: &str = "#RRGGBB";
@@ -24,13 +23,6 @@ const HEX_FIELD_HEIGHT_PX: f32 = 32.0;
 const THUMB_SHADOW_ALPHA: f32 = 0.35;
 const GRADIENT_RIGHT_DEGREES: f32 = 90.0;
 const GRADIENT_DOWN_DEGREES: f32 = 180.0;
-
-fn fraction(offset: Pixels, extent: Pixels) -> f32 {
-    if extent <= px(0.0) {
-        return 0.0;
-    }
-    f32::from(offset) / f32::from(extent)
-}
 
 fn picker_thumb(center: Point<Pixels>, fill: Hsla, diameter: Pixels) -> Div {
     let shadow = BoxShadow {
@@ -90,21 +82,7 @@ impl Shell {
 
     pub(super) fn picker_drag_listener(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         self.state.color_picker.as_ref().and_then(ColorPicker::drag)?;
-        let mover = cx.entity().downgrade();
-        let releaser = mover.clone();
-        let listener = canvas(|_bounds, _window, _cx| {}, move |_bounds, (), window, _cx| {
-            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
-                if phase == DispatchPhase::Bubble {
-                    mover.update(cx, |shell, cx| shell.move_picker_drag(event, cx)).ok();
-                }
-            });
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
-                if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
-                    releaser.update(cx, |shell, cx| shell.release_picker_drag(cx)).ok();
-                }
-            });
-        });
-        Some(listener.absolute().size_full())
+        Some(window_drag_listener(cx, Shell::move_picker_drag, Shell::release_picker_drag))
     }
 
     pub(super) fn render_color_picker(&self, picker: &ColorPicker, cx: &mut Context<Self>) -> Div {
