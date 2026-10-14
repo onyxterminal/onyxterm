@@ -56,13 +56,16 @@ impl Combo {
     }
 
     pub fn glyphs(&self) -> String {
+        self.keycaps().concat()
+    }
+
+    pub fn keycaps(&self) -> Vec<String> {
         let flags = [
             (self.modifiers.control, "\u{2303}"),
             (self.modifiers.alt, "\u{2325}"),
             (self.modifiers.shift, "\u{21e7}"),
             (self.modifiers.platform, "\u{2318}"),
         ];
-        let prefix: String = flags.iter().filter(|(is_held, _)| *is_held).map(|(_, glyph)| *glyph).collect();
         let key = match self.key.as_str() {
             "right" => "\u{2192}".to_string(),
             "left" => "\u{2190}".to_string(),
@@ -72,7 +75,7 @@ impl Combo {
             "tab" => "\u{21e5}".to_string(),
             other => other.to_uppercase(),
         };
-        format!("{prefix}{key}")
+        flags.iter().filter(|(is_held, _)| *is_held).map(|(_, glyph)| glyph.to_string()).chain([key]).collect()
     }
 
     pub fn binding_text(&self) -> String {

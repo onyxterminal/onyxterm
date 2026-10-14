@@ -1382,3 +1382,13 @@ fn closing_both_pair_panels_collapses_back_to_focused() {
     assert_eq!(tab.layout(), &LayoutNode::leaf(focused));
     assert_eq!(tab.focused(), focused);
 }
+
+#[test]
+fn keycaps_split_modifier_glyphs_from_the_key() {
+    let map = Keymap::default();
+    let next_document = map.combo_for(CommandId::NextDocument).expect("next document is bound");
+    assert_eq!(next_document.keycaps(), ["\u{2303}", "\u{21e5}"]);
+    let new_workspace = map.combo_for(CommandId::NewWorkspace).expect("new workspace is bound");
+    assert_eq!(new_workspace.keycaps(), ["\u{21e7}", "\u{2318}", "N"]);
+    assert_eq!(new_workspace.glyphs(), new_workspace.keycaps().concat());
+}

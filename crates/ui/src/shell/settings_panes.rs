@@ -1,8 +1,10 @@
 use super::settings_view::{SettingAction, CAPTION_PX, SYSTEM_MONOSPACE, SYSTEM_MONOSPACE_LABEL, TITLE_PX};
 use super::theme_editor::{preview_line, preview_span};
 use super::Shell;
-use crate::settings::SettingsPane;
-use crate::theme::{Theme, ThemeKind};
+use crate::command::CommandId;
+use crate::keymap::Combo;
+use crate::settings::{BundleSide, SettingsPane};
+use crate::theme::{box_shadows, Theme, ThemeKind};
 use gpui::{div, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful};
 
 const GROUP_RADIUS_PX: f32 = 10.0;
@@ -26,6 +28,15 @@ const LIVE_PREVIEW_MIN_FONT_PX: f32 = 11.0;
 const LIVE_PREVIEW_MAX_FONT_PX: f32 = 20.0;
 const CURSOR_WIDTH_EM: f32 = 0.6;
 const CURSOR_HEIGHT_EM: f32 = 1.25;
+const EDITOR_SIDES: [(BundleSide, &str); 3] =
+    [(BundleSide::Left, "Left"), (BundleSide::Right, "Right"), (BundleSide::Bottom, "Bottom")];
+const EDITOR_SHORTCUTS: [(CommandId, &str); 3] = [(CommandId::OpenEditorHere, "Edit here"),
+    (CommandId::ToggleEditorBundle, "Show or hide editor"), (CommandId::NextDocument, "Next document")];
+const DIAGRAM_WIDTH_PX: f32 = 300.0;
+const DIAGRAM_HEIGHT_PX: f32 = 180.0;
+const DIAGRAM_BLOCK_GAP_PX: f32 = 3.0;
+const EDITOR_BLOCK_TINT: f32 = 0.08;
+const KEYCAP_PX: f32 = 20.0;
 
 fn swatches(theme: &Theme) -> [Hsla; 6] {
     let ansi = theme.ansi;
@@ -37,7 +48,8 @@ impl Shell {
         match self.state.settings_pane {
             SettingsPane::Appearance => self.render_appearance_pane(cx),
             SettingsPane::Terminal => self.render_terminal_pane(cx),
-            SettingsPane::Editor | SettingsPane::Keyboard => div(),
+            SettingsPane::Editor => self.render_editor_pane(cx),
+            SettingsPane::Keyboard => div(),
         }
     }
 
@@ -184,5 +196,87 @@ impl Shell {
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                 cx.stop_propagation(); shell.change_setting(SettingAction::FontPicker, cx);
             }))
+    }
+
+    fn render_editor_pane(&self, cx: &mut Context<Self>) -> Div {
+        let scale = self.state.settings.ui_scale;
+        let size_percent = (self.state.settings.editor_bundle_size * 100.0).round() as u32;
+        div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
+            .child(self.settings_group([
+                self.settings_row("Editor position", "Where files open beside the active terminal.",
+                    self.editor_side_control(cx)),
+                self.settings_row("Editor size", "Share of the window the editor takes.",
+                    self.setting_stepper("editor-size", format!("{size_percent}%"),
+                        SettingAction::EditorSmaller, SettingAction::EditorLarger, cx)),
+            ]))
+            .child(div().flex().items_start().gap(px(20.0 * scale))
+                .child(self.editor_layout_diagram())
+                .child(div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(10.0 * scale))
+                    .children(EDITOR_SHORTCUTS.into_iter().filter_map(|(command, label)| {
+                        self.state.keymap.combo_for(command).map(|combo| self.shortcut_line(label, combo))
+                    }))))
+    }
+
+    fn editor_side_control(&self, cx: &mut Context<Self>) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let current = self.state.settings.editor_bundle_side;
+        div().flex_none().flex().p(px(2.0 * scale)).gap(px(2.0 * scale))
+            .rounded(px(7.0 * scale)).bg(theme.chrome.control_fill)
+            .children(EDITOR_SIDES.into_iter().enumerate().map(|(index, (side, label))| {
+                let is_selected = side == current;
+                div().id(("editor-side", index)).h(px(24.0 * scale)).px(px(12.0 * scale))
+                    .flex().items_center().rounded(px(5.0 * scale)).cursor_pointer()
+                    .text_color(if is_selected { theme.text.default } else { theme.text.muted })
+                    .when(is_selected, |segment| segment.bg(theme.surface.raised)
+                        .font_weight(FontWeight::SEMIBOLD).shadow(box_shadows(&theme.shadow.tab)))
+                    .child(label)
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
+                        cx.stop_propagation(); shell.change_setting(SettingAction::EditorSide(side), cx);
+                    }))
+            }))
+    }
+
+    fn editor_layout_diagram(&self) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let side = self.state.settings.editor_bundle_side;
+        let editor_share = self.state.settings.editor_bundle_size;
+        let is_stacked = matches!(side, BundleSide::Top | BundleSide::Bottom);
+        let block = |label: &'static str, share: f32, fill: Hsla, outline: Hsla| {
+            let slot = div().p(px(DIAGRAM_BLOCK_GAP_PX * scale));
+            let slot = if is_stacked { slot.w_full().h(relative(share)) } else { slot.h_full().w(relative(share)) };
+            slot.child(div().size_full().rounded(px(6.0 * scale)).bg(fill).border_1().border_color(outline)
+                .flex().items_center().justify_center()
+                .text_size(px(CAPTION_PX * scale)).text_color(theme.text.muted).child(label))
+        };
+        let terminal = block("Terminal", 1.0 - editor_share, theme.surface.canvas, theme.border.muted);
+        let editor = block("Editor", editor_share, theme.accent.primary.opacity(EDITOR_BLOCK_TINT), theme.accent.primary);
+        let (first, second) = match side {
+            BundleSide::Left | BundleSide::Top => (editor, terminal),
+            BundleSide::Right | BundleSide::Bottom => (terminal, editor),
+        };
+        div().flex_none().w(px(DIAGRAM_WIDTH_PX * scale)).h(px(DIAGRAM_HEIGHT_PX * scale)).p(px(4.0 * scale))
+            .rounded(px(GROUP_RADIUS_PX * scale)).bg(theme.surface.subtle).border_1().border_color(theme.border.muted)
+            .flex().when(is_stacked, |diagram| diagram.flex_col())
+            .child(first).child(second)
+    }
+
+    fn shortcut_line(&self, label: &'static str, combo: &Combo) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        div().flex().items_center().justify_between().gap(px(12.0 * scale))
+            .child(div().text_size(px(TITLE_PX * scale)).text_color(theme.text.default).child(label))
+            .child(self.keycaps(combo))
+    }
+
+    fn keycaps(&self, combo: &Combo) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        div().flex_none().flex().gap(px(3.0 * scale))
+            .children(combo.keycaps().into_iter().map(|cap| div().min_w(px(KEYCAP_PX * scale)).h(px(KEYCAP_PX * scale))
+                .px(px(5.0 * scale)).flex().items_center().justify_center()
+                .rounded(px(4.0 * scale)).bg(theme.chrome.control_fill).border_1().border_color(theme.border.muted)
+                .text_size(px(theme.ui_font.shortcut_px)).text_color(theme.text.muted).child(cap)))
     }
 }

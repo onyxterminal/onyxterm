@@ -1,6 +1,6 @@
 use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
-use crate::settings::{filtered_fonts, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UNFOCUSED_KEY,
-    FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
+use crate::settings::{filtered_fonts, step_bundle_size, BundleSide, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY,
+    DIM_UNFOCUSED_KEY, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY, FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
@@ -29,7 +29,10 @@ pub(super) const TITLE_PX: f32 = 13.0;
 pub(super) const CAPTION_PX: f32 = 11.5;
 
 #[derive(Clone, Copy)]
-pub(super) enum SettingAction { Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, Close }
+pub(super) enum SettingAction {
+    Customize, FontPicker, FontSmaller, FontLarger, UiSmaller, UiLarger, DimPanes, EditorSmaller, EditorLarger,
+    EditorSide(BundleSide), Close,
+}
 
 impl Shell {
     pub(super) fn change_setting(&mut self, action: SettingAction, cx: &mut Context<Self>) {
@@ -74,6 +77,18 @@ impl Shell {
             SettingAction::DimPanes => {
                 settings.dim_unfocused_panes = !settings.dim_unfocused_panes;
                 (DIM_UNFOCUSED_KEY, settings.dim_unfocused_panes.to_string())
+            }
+            SettingAction::EditorSmaller => {
+                settings.editor_bundle_size = step_bundle_size(settings.editor_bundle_size, -1.0);
+                (EDITOR_BUNDLE_SIZE_KEY, settings.editor_bundle_size.to_string())
+            }
+            SettingAction::EditorLarger => {
+                settings.editor_bundle_size = step_bundle_size(settings.editor_bundle_size, 1.0);
+                (EDITOR_BUNDLE_SIZE_KEY, settings.editor_bundle_size.to_string())
+            }
+            SettingAction::EditorSide(side) => {
+                settings.editor_bundle_side = side;
+                (EDITOR_BUNDLE_SIDE_KEY, side.key().to_string())
             }
             SettingAction::Customize | SettingAction::FontPicker | SettingAction::Close => unreachable!(),
         };

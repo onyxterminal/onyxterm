@@ -13,6 +13,9 @@ pub const CUSTOM_BASE_KEY: &str = "theme.custom.base";
 pub const CUSTOM_COLORS_KEY: &str = "theme.custom.colors";
 pub const EDITOR_BUNDLE_SIDE_KEY: &str = "editor.bundle_side";
 pub const EDITOR_BUNDLE_SIZE_KEY: &str = "editor.bundle_size";
+pub const BUNDLE_SIZE_MIN: f32 = 0.1;
+pub const BUNDLE_SIZE_MAX: f32 = 0.9;
+const BUNDLE_SIZE_STEPS: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BundleSide {
@@ -107,7 +110,7 @@ impl Settings {
                 UI_SCALE_KEY => settings.ui_scale = bounded(value, 0.75, 1.5, settings.ui_scale),
                 DIM_UNFOCUSED_KEY => settings.dim_unfocused_panes = value != "false",
                 EDITOR_BUNDLE_SIDE_KEY => settings.editor_bundle_side = BundleSide::from_key(value),
-                EDITOR_BUNDLE_SIZE_KEY => settings.editor_bundle_size = bounded(value, 0.1, 0.9, settings.editor_bundle_size),
+                EDITOR_BUNDLE_SIZE_KEY => settings.editor_bundle_size = bounded(value, BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX, settings.editor_bundle_size),
                 _ => {}
             }
         }
@@ -146,6 +149,10 @@ impl Settings {
 
 fn bounded(value: &str, min: f32, max: f32, fallback: f32) -> f32 {
     value.parse::<f32>().ok().filter(|number| number.is_finite() && (min..=max).contains(number)).unwrap_or(fallback)
+}
+
+pub fn step_bundle_size(size: f32, steps: f32) -> f32 {
+    (((size * BUNDLE_SIZE_STEPS).round() + steps) / BUNDLE_SIZE_STEPS).clamp(BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX)
 }
 
 pub fn filtered_fonts(installed: &[String], query: &str) -> Vec<String> {
@@ -206,6 +213,17 @@ mod tests {
         assert_eq!(crate::app::AppState::new().settings_pane, SettingsPane::Appearance);
         let labels: Vec<&str> = SettingsPane::ALL.iter().map(|pane| pane.label()).collect();
         assert_eq!(labels, ["Appearance", "Terminal", "Editor", "Keyboard"]);
+    }
+
+    #[test]
+    fn bundle_size_steps_by_tenths_within_bounds() {
+        assert_eq!(step_bundle_size(0.4, 1.0), 0.5);
+        assert_eq!(step_bundle_size(0.4, -1.0), 0.3);
+        assert_eq!(step_bundle_size(0.9, 1.0), BUNDLE_SIZE_MAX);
+        assert_eq!(step_bundle_size(0.1, -1.0), BUNDLE_SIZE_MIN);
+        assert_eq!(step_bundle_size(0.62, 1.0), 0.7);
+        let stepped = step_bundle_size(0.5, 1.0);
+        assert_eq!(Settings::from_pairs(&[(EDITOR_BUNDLE_SIZE_KEY.into(), stepped.to_string())]).editor_bundle_size, 0.6);
     }
 
     #[test]
