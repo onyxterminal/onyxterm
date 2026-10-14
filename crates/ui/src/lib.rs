@@ -26,6 +26,7 @@ pub mod pane_motion;
 pub mod pane_title;
 pub mod pixel_grid;
 pub mod shell;
+pub mod slider;
 pub mod settings;
 pub mod settings_search;
 pub mod tabs;
