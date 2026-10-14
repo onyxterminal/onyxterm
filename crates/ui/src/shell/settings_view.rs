@@ -7,8 +7,8 @@ use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme, ThemeKind};
-use gpui::{div, prelude::*, px, uniform_list, Context, Div, FontWeight, Keystroke, MouseButton, ScrollStrategy, SharedString,
-    Stateful, Window};
+use gpui::{div, prelude::*, px, uniform_list, Context, CursorStyle, Div, FontWeight, Keystroke, MouseButton,
+    ScrollStrategy, SharedString, Stateful, Window};
 use std::ops::Range;
 
 const FONT_ROWS: usize = 9;
@@ -27,6 +27,9 @@ const FOOTER_HEIGHT_PX: f32 = 44.0;
 const TOOLBAR_BUTTON_WIDTH_PX: f32 = 76.0;
 const TOOLBAR_ICON_PX: f32 = 22.0;
 const TOOLBAR_LABEL_PX: f32 = 11.0;
+const SEARCH_FIELD_WIDTH_PX: f32 = 180.0;
+const SEARCH_FIELD_HEIGHT_PX: f32 = 26.0;
+const SEARCH_ICON_PX: f32 = 12.0;
 pub(super) const TITLE_PX: f32 = 13.0;
 pub(super) const CAPTION_PX: f32 = 11.5;
 
@@ -119,11 +122,18 @@ impl Shell {
     pub(super) fn close_settings(&mut self) {
         self.state.settings_visible = false;
         self.state.shortcut_replaced = None;
+        self.state.shortcut_filter.clear();
         self.reset_settings_interaction();
     }
 
     fn reset_settings_interaction(&mut self) {
         self.state.shortcut_recording = None;
+        self.settings_focus = None;
+    }
+
+    pub(super) fn focus_settings_field(&mut self, target: FieldTarget, cx: &mut Context<Self>) {
+        self.settings_focus = Some(target);
+        cx.notify();
     }
 
     pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
@@ -191,7 +201,10 @@ impl Shell {
         if self.state.theme_editor_visible {
             return self.state.color_picker.as_ref().map(|_| FieldTarget::HexColor);
         }
-        self.state.font_picker_visible.then_some(FieldTarget::FontQuery)
+        if self.state.font_picker_visible {
+            return Some(FieldTarget::FontQuery);
+        }
+        self.settings_focus
     }
 
     pub(super) fn handle_settings_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
@@ -207,8 +220,12 @@ impl Shell {
         }
         if key.key == ESCAPE_KEY {
             self.close_settings();
+            return true;
         }
-        true
+        match self.settings_focus {
+            Some(target) => self.type_into_field(target, key, cx),
+            None => true,
+        }
     }
 
     fn handle_font_picker_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) -> bool {
@@ -345,6 +362,31 @@ impl Shell {
                 .child(self.state.settings_error.clone().unwrap_or_else(|| "Saved automatically".into())))
             .when(has_defaults, |footer| footer
                 .child(self.editor_button(restore, |shell, cx| shell.restore_pane_defaults(cx), cx)))
+    }
+
+    pub(super) fn settings_search_field(&self, target: FieldTarget, placeholder: &'static str, cx: &mut Context<Self>)
+        -> Stateful<Div> {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let is_focused = self.settings_focus == Some(target);
+        let text = match self.field(target) {
+            Some(field) if is_focused => field_text(field, placeholder, theme),
+            Some(field) if !field.is_empty() => {
+                div().truncate().text_color(theme.text.default).child(field.text().to_string())
+            }
+            _ => div().truncate().text_color(theme.text.subtle).child(placeholder),
+        };
+        div().id(("settings-search-field", target as usize)).flex_none()
+            .w(px(SEARCH_FIELD_WIDTH_PX * scale)).h(px(SEARCH_FIELD_HEIGHT_PX * scale)).px(px(8.0 * scale))
+            .flex().items_center().gap(px(6.0 * scale))
+            .rounded(px(7.0 * scale)).bg(theme.chrome.control_fill).border_1()
+            .border_color(if is_focused { theme.accent.primary } else { gpui::transparent_black() })
+            .cursor(CursorStyle::IBeam).text_size(px(CAPTION_PX * scale))
+            .child(Icon::Magnifier.sized(SEARCH_ICON_PX * scale))
+            .child(div().flex_1().min_w(px(0.0)).overflow_hidden().child(text))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
+                cx.stop_propagation(); shell.focus_settings_field(target, cx);
+            }))
     }
 
     pub(super) fn setting_stepper(&self, id: &'static str, value: String, smaller: SettingAction, larger: SettingAction, cx: &mut Context<Self>) -> Div {

@@ -234,7 +234,10 @@ impl ShortcutOverrides {
 
     pub fn to_json(&self) -> String {
         let entries: Map<String, Value> = self.entries.iter()
-            .map(|(key, combo)| (key.to_string(), combo.as_ref().map_or(Value::Null, |c| Value::String(c.binding_text()))))
+            .map(|(key, combo)| {
+                let binding = combo.as_ref().map_or(Value::Null, |combo| Value::String(combo.binding_text()));
+                (key.to_string(), binding)
+            })
             .collect();
         Value::Object(entries).to_string()
     }
@@ -309,10 +312,11 @@ pub struct ShortcutGroup {
     pub shortcuts: Vec<Shortcut>,
 }
 
-pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap) -> Vec<ShortcutGroup> {
+pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap, query: &str) -> Vec<ShortcutGroup> {
     let mut groups: Vec<ShortcutGroup> = Vec::new();
-    for command in registry.list() {
-        let shortcut = Shortcut { command: command.id, title: command.title, combo: keymap.combo_for(command.id).cloned() };
+    for command in registry.list().into_iter().filter(|command| command.matches(query)) {
+        let combo = keymap.combo_for(command.id).cloned();
+        let shortcut = Shortcut { command: command.id, title: command.title, combo };
         match groups.iter_mut().find(|group| group.category == command.category) {
             Some(group) => group.shortcuts.push(shortcut),
             None => groups.push(ShortcutGroup { category: command.category, shortcuts: vec![shortcut] }),

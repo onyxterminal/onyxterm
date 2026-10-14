@@ -1,6 +1,6 @@
 use super::settings_panes::{KEYCAP_PX, ROW_INSET_PX, SECTION_GAP_PX};
 use super::settings_view::{CAPTION_PX, TITLE_PX};
-use super::Shell;
+use super::{FieldTarget, Shell};
 use crate::command::CommandId;
 use crate::keymap::{capture_shortcut, shortcut_groups, Capture, Combo, Keymap, Shortcut, ShortcutOverrides};
 use crate::menus::install_menus;
@@ -13,6 +13,8 @@ const BINDING_PAD_PX: f32 = 3.0;
 const RECORDING_PROMPT: &str = "Type shortcut\u{2026}";
 const UNASSIGNED_LABEL: &str = "Unassigned";
 const KEYBOARD_HINT: &str = "Click a shortcut, then press the new keys. Esc cancels.";
+const FILTER_PLACEHOLDER: &str = "Filter shortcuts";
+const NO_MATCHES: &str = "No shortcuts match.";
 
 impl Shell {
     pub(super) fn apply_shortcuts(&mut self, cx: &mut Context<Self>) {
@@ -57,9 +59,15 @@ impl Shell {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         let defaults = Keymap::default();
+        let groups = shortcut_groups(&self.state.registry, &self.state.keymap, self.state.shortcut_filter.text());
         div().flex().flex_col().gap(px(SECTION_GAP_PX * scale))
-            .child(div().text_size(px(CAPTION_PX * scale)).text_color(theme.text.muted).child(KEYBOARD_HINT))
-            .children(shortcut_groups(&self.state.registry, &self.state.keymap).into_iter().map(|group| {
+            .child(div().flex().items_center().justify_between().gap(px(16.0 * scale))
+                .child(div().flex_1().min_w(px(0.0)).text_size(px(CAPTION_PX * scale)).text_color(theme.text.muted)
+                    .child(KEYBOARD_HINT))
+                .child(self.settings_search_field(FieldTarget::ShortcutFilter, FILTER_PLACEHOLDER, cx)))
+            .when(groups.is_empty(), |pane| pane.child(div().py(px(16.0 * scale)).flex().justify_center()
+                .text_color(theme.text.muted).child(NO_MATCHES)))
+            .children(groups.into_iter().map(|group| {
                 div().flex().flex_col().gap(px(6.0 * scale))
                     .child(div().px(px(4.0 * scale)).text_size(px(GROUP_TITLE_PX * scale))
                         .font_weight(FontWeight::SEMIBOLD).text_color(theme.text.muted).child(group.category))

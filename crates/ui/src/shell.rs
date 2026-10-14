@@ -138,6 +138,7 @@ pub struct Shell {
     is_copy_top_pending: bool,
     gear_bounds: pane_options::GearBounds,
     picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
+    settings_focus: Option<FieldTarget>,
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
     _quit_hook: Subscription,
@@ -182,6 +183,7 @@ impl Shell {
             is_copy_top_pending: false,
             gear_bounds: pane_options::GearBounds::default(),
             picker_bounds: pane_drag::BoundsMap::default(),
+            settings_focus: None,
             palette_scroll: UniformListScrollHandle::new(),
             font_list_scroll: UniformListScrollHandle::new(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {

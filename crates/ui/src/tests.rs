@@ -1411,7 +1411,7 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     let mut map = Keymap::new();
     map.bind(Combo::new(Modifiers::command(), "s"), CommandId::Save);
     map.bind(Combo::new(Modifiers::command_shift(), "left"), CommandId::MoveTabLeft);
-    let groups = shortcut_groups(&registry, &map);
+    let groups = shortcut_groups(&registry, &map, "");
     let categories: Vec<&str> = groups.iter().map(|group| group.category).collect();
     assert_eq!(categories, ["Tabs", "Panes", "Palette", "Application", "Files", "Workspaces", "Edit", "Window"]);
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
@@ -1425,3 +1425,19 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     assert_eq!(save.combo, Some(Combo::new(Modifiers::command(), "s")));
 }
 
+#[test]
+fn shortcut_filter_matches_title_or_category_ignoring_case() {
+    use crate::keymap::shortcut_groups;
+    let registry = CommandRegistry::with_defaults();
+    let map = Keymap::default();
+    let titles = |query: &str| -> Vec<&str> {
+        shortcut_groups(&registry, &map, query).iter()
+            .flat_map(|group| group.shortcuts.iter().map(|shortcut| shortcut.title)).collect()
+    };
+    assert_eq!(titles("SPLIT"), ["Split Right", "Split Down"]);
+    assert_eq!(titles("  workspaces "), ["Switch Workspace", "New Workspace", "Rename Workspace\u{2026}",
+        "Next Workspace", "Previous Workspace"]);
+    assert!(titles("no such command").is_empty());
+    let categories: Vec<&str> = shortcut_groups(&registry, &map, "copy").iter().map(|group| group.category).collect();
+    assert_eq!(categories, ["Edit"]);
+}
