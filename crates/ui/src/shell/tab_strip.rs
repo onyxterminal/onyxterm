@@ -6,7 +6,7 @@ use crate::tabs::numbered_tab_label;
 use crate::theme::icons::Icon;
 use crate::text_field::TextField;
 use crate::theme::menu_chrome::field_text;
-use crate::theme::Theme;
+use crate::theme::{Appearance, Theme};
 use crate::workspace_menu::workspace_button_label;
 use gpui::{
     div, prelude::*, px, AnyElement, Bounds, BoxShadow, Context, Div, FontWeight, Keystroke,
@@ -24,6 +24,7 @@ const NEW_TAB_GLYPH_PX: f32 = 17.0;
 const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const PALETTE_BUTTON_GAP_PX: f32 = 5.0;
 const PALETTE_ICON_PX: f32 = 12.0;
+const APPEARANCE_ICON_PX: f32 = 14.0;
 const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
@@ -102,6 +103,7 @@ impl Shell {
             )
             .child(self.render_new_tab_button(cx))
             .child(self.render_palette_button(cx))
+            .child(self.render_appearance_button(cx))
     }
 
     fn tab_pills(&self) -> Vec<TabPill> {
@@ -222,6 +224,27 @@ impl Shell {
             .tooltip(self.tooltip_builder("Search commands".into()))
             .child(Icon::Magnifier.sized(PALETTE_ICON_PX * self.state.settings.ui_scale))
             .children(shortcut)
+    }
+
+    fn render_appearance_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let (icon, tooltip) = match theme.appearance {
+            Appearance::Dark => (Icon::Sun, "Switch to Light Appearance"),
+            Appearance::Light => (Icon::Moon, "Switch to Dark Appearance"),
+        };
+        strip_button("appearance-button", theme)
+            .w(px(theme.top_bar.control_height_px))
+            .justify_center()
+            .ml(px(theme.top_bar.tab_gap_px))
+            .tooltip(self.tooltip_builder(tooltip.into()))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|shell, _event, window, cx| {
+                    cx.stop_propagation();
+                    shell.run_command(CommandId::ToggleAppearance, window, cx);
+                }),
+            )
+            .child(icon.sized(APPEARANCE_ICON_PX * self.state.settings.ui_scale))
     }
 
     fn press_tab_pill(&mut self, index: usize, press: Point<Pixels>, cx: &mut Context<Self>) {

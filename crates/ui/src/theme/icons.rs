@@ -13,6 +13,8 @@ pub enum Icon {
     Terminal,
     Editor,
     Keyboard,
+    Sun,
+    Moon,
 }
 
 const GEAR_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/gear.svg");
@@ -25,6 +27,8 @@ const APPEARANCE_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/appear
 const TERMINAL_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/terminal.svg");
 const EDITOR_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/editor.svg");
 const KEYBOARD_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/keyboard.svg");
+const SUN_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/sun.svg");
+const MOON_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/moon.svg");
 
 fn svg_image(bytes: &[u8]) -> Arc<Image> {
     Arc::new(Image::from_bytes(ImageFormat::Svg, bytes.to_vec()))
@@ -40,6 +44,8 @@ static APPEARANCE: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(APPEARANCE_
 static TERMINAL: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(TERMINAL_SVG));
 static EDITOR: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(EDITOR_SVG));
 static KEYBOARD: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(KEYBOARD_SVG));
+static SUN: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(SUN_SVG));
+static MOON: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(MOON_SVG));
 
 impl Icon {
     fn image(self) -> Arc<Image> {
@@ -54,6 +60,8 @@ impl Icon {
             Icon::Terminal => &TERMINAL,
             Icon::Editor => &EDITOR,
             Icon::Keyboard => &KEYBOARD,
+            Icon::Sun => &SUN,
+            Icon::Moon => &MOON,
         };
         Arc::clone(image)
     }
