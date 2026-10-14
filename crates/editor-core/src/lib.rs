@@ -9,6 +9,7 @@ mod keys;
 mod motion;
 mod selection;
 pub mod io;
+pub mod syntax;
 
 pub use buffer::{line_len, Buffer, LineEnding};
 pub use edit::{Bias, Change, Edit};
