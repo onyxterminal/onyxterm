@@ -44,6 +44,10 @@ impl ThemeKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance { Light, Dark }
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum ThemeError {
     #[error("missing key {0}")]
@@ -82,6 +86,7 @@ struct RawTheme {
 #[derive(Debug, Clone, Deserialize)]
 struct RawMeta {
     name: String,
+    kind: Appearance,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -244,6 +249,7 @@ pub struct AnsiTokens {
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub name: String,
+    pub appearance: Appearance,
     pub surface: SurfaceTokens,
     pub text: TextTokens,
     pub border: BorderTokens,
@@ -311,6 +317,7 @@ impl Theme {
     fn from_raw(raw: RawTheme) -> Result<Self, ThemeError> {
         Ok(Self {
             name: raw.meta.name,
+            appearance: raw.meta.kind,
             surface: SurfaceTokens {
                 canvas: parse_color(&raw.surface.canvas, "surface.canvas")?,
                 subtle: parse_color(&raw.surface.subtle, "surface.subtle")?,

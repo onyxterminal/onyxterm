@@ -7,7 +7,7 @@ use crate::command::{
 };
 use crate::input::{page_scroll_lines, wheel_bytes};
 use crate::keymap::{Combo, Keymap};
-use crate::theme::{hex_to_hsla, Theme, ThemeKind};
+use crate::theme::{hex_to_hsla, Appearance, Theme, ThemeKind};
 use crate::tabs::Tabs;
 use crate::terminal_view::{
     grid_point_at, grid_size_for, selection_kind_for, split_scroll, xterm_indexed_rgb, TerminalColors,
@@ -1061,6 +1061,26 @@ fn every_builtin_theme_has_editor_tokens() {
         assert!(theme.editor.gutter_padding_px > 0.0);
         assert!(theme.editor.selection.a > 0.0);
     }
+}
+
+#[test]
+fn every_builtin_theme_reports_its_appearance() {
+    let expected = [
+        (ThemeKind::Light, Appearance::Light), (ThemeKind::Dark, Appearance::Dark),
+        (ThemeKind::Nord, Appearance::Dark), (ThemeKind::Dracula, Appearance::Dark),
+        (ThemeKind::SolarizedDark, Appearance::Dark), (ThemeKind::SolarizedLight, Appearance::Light),
+    ];
+    for (kind, appearance) in expected {
+        assert_eq!(Theme::load(kind).unwrap().appearance, appearance, "{kind:?}");
+    }
+}
+
+#[test]
+fn custom_theme_inherits_its_base_appearance() {
+    let mut settings = crate::settings::Settings { theme: ThemeKind::SolarizedLight, ..Default::default() };
+    settings.customize_current_theme();
+    assert_eq!(settings.theme, ThemeKind::Custom);
+    assert_eq!(settings.theme_tokens().appearance, Appearance::Light);
 }
 
 #[test]
