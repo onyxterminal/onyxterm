@@ -3,7 +3,8 @@
 
 use crate::pixel_grid::{baseline_offset, glyph_aligned_origin, snap_bounds, snap_point};
 use crate::terminal_view::{content_bounds, ContentInsets, PaneFocus};
-use crate::theme::{EditorTokens, Theme};
+use crate::theme::{EditorTokens, SyntaxTokens, Theme};
+use editor_core::syntax::{HighlightSource, Language, LineStates, Span, TokenKind};
 use editor_core::{line_len, Rope, Selections, Selection, TAB_WIDTH};
 use gpui::{
     canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font, Hitbox, HitboxBehavior,
@@ -34,6 +35,7 @@ pub struct EditorView {
     pub scroll_left: f32,
     pub layout: Option<Rc<FrameLayout>>,
     pub is_selecting: bool,
+    pub line_states: LineStates,
 }
 
 #[derive(Debug)]
@@ -375,6 +377,28 @@ pub fn selection_span_on_line(sel: Range<usize>, line_start: usize, line_len: us
     Some((start - line_start, end - line_start, covers_newline))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxRun {
+    pub len: usize,
+    pub kind: Option<TokenKind>,
+}
+
+pub fn syntax_runs(display: &DisplayLine, first_char: usize, spans: &[Span]) -> Vec<SyntaxRun> {
+    let mut runs: Vec<SyntaxRun> = Vec::new();
+    let mut remaining = spans.iter().peekable();
+    for (index, bytes) in display.byte_of_char.windows(2).enumerate() {
+        let char = first_char + index;
+        while remaining.next_if(|span| span.range.end <= char).is_some() {}
+        let kind = remaining.peek().filter(|span| span.range.start <= char).map(|span| span.kind);
+        let len = bytes[1] - bytes[0];
+        match runs.last_mut() {
+            Some(last) if last.kind == kind => last.len += len,
+            _ => runs.push(SyntaxRun { len, kind }),
+        }
+    }
+    runs
+}
+
 pub fn display_line(line: &str) -> DisplayLine {
     let mut builder = DisplayLineBuilder::starting_at(0);
     line.chars().take_while(|ch| *ch != '\n').for_each(|ch| builder.push(ch));
@@ -461,6 +485,7 @@ pub struct EditorStyle {
     pub line_height: Pixels,
     pub text: Hsla,
     pub tokens: EditorTokens,
+    pub syntax: SyntaxTokens,
     pub insets: ContentInsets,
 }
 
@@ -472,12 +497,41 @@ impl EditorStyle {
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
             text: theme.text.default,
             tokens: theme.editor,
+            syntax: theme.syntax,
             insets: ContentInsets::from_theme(theme),
         }
     }
 
     fn font(&self) -> Font {
         font(self.font_family.clone())
+    }
+
+    fn color_of(&self, kind: Option<TokenKind>) -> Hsla {
+        let Some(kind) = kind else {
+            return self.text;
+        };
+        match kind {
+            TokenKind::Keyword => self.syntax.keyword,
+            TokenKind::String => self.syntax.string,
+            TokenKind::Number | TokenKind::Constant => self.syntax.number,
+            TokenKind::Type => self.syntax.type_name,
+            TokenKind::Function => self.syntax.function,
+            TokenKind::Macro => self.syntax.macro_name,
+            TokenKind::Comment => self.syntax.comment,
+            TokenKind::Punctuation => self.syntax.punctuation,
+            TokenKind::Heading => self.syntax.heading,
+        }
+    }
+
+    fn text_run(&self, len: usize, kind: Option<TokenKind>) -> TextRun {
+        TextRun {
+            len,
+            font: self.font(),
+            color: self.color_of(kind),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }
     }
 
     pub fn cell_size(&self, window: &Window) -> Size<Pixels> {
@@ -494,6 +548,8 @@ impl EditorStyle {
 #[derive(Clone)]
 pub struct EditorFrame {
     pub rope: Arc<Rope>,
+    pub version: u64,
+    pub language: Option<Language>,
     pub selections: Arc<Selections>,
     pub is_focused: bool,
     pub marked_text: Option<String>,
@@ -676,10 +732,13 @@ fn prepare_state(
     view_ref.scroll_top = view_ref.scroll_top.clamp(0.0, max_scroll);
     let range = visible_range(view_ref.scroll_top, viewport_height, line_height_f, line_count);
     let first_line = range.start;
+    let source = HighlightSource { rope: &frame.rope, version: frame.version, language: frame.language };
+    view_ref.line_states.update(source, range.end.saturating_sub(1));
+    let highlights: Vec<Vec<Span>> = range.clone().map(|line| view_ref.line_states.highlight(line)).collect();
     let text_width = f32::from(text_rect.size.width);
     let shaper = LineShaper { rope: &frame.rope, style, cell_width: cell.width, window };
     let visible = visible_columns(view_ref.scroll_left, text_width, f32::from(cell.width));
-    let mut lines: Vec<_> = range.clone().map(|line| shaper.lay(line, visible)).collect();
+    let mut lines: Vec<_> = range.clone().zip(&highlights).map(|(line, spans)| shaper.lay(line, visible, spans)).collect();
     let widest = lines.iter().map(|laid| f32::from(laid.width())).fold(0.0, f32::max);
     let max_left = max_scroll_left(widest, f32::from(cell.width), text_width);
     let clamped_left = view_ref.scroll_left.clamp(0.0, max_left);
@@ -687,7 +746,7 @@ fn prepare_state(
         view_ref.scroll_left = clamped_left;
         let visible = visible_columns(clamped_left, text_width, f32::from(cell.width));
         for laid in lines.iter_mut().filter(|laid| laid.is_windowed()) {
-            *laid = shaper.lay(laid.line, visible);
+            *laid = shaper.lay(laid.line, visible, &highlights[laid.line - first_line]);
         }
     }
     let text_offset_x = -view_ref.scroll_left;
@@ -735,19 +794,12 @@ struct LineShaper<'a> {
 }
 
 impl LineShaper<'_> {
-    fn lay(&self, line: usize, visible: VisibleColumns) -> LaidLine {
+    fn lay(&self, line: usize, visible: VisibleColumns, spans: &[Span]) -> LaidLine {
         let len_chars = line_len(self.rope, line);
         let shaped_window = line_window(self.rope.line(line).chunks(), len_chars, visible);
-        let run = TextRun {
-            len: shaped_window.display.text.len(),
-            font: self.style.font(),
-            color: self.style.text,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let runs = self.text_runs(&shaped_window, spans);
         let text: SharedString = shaped_window.display.text.clone().into();
-        let shaped = self.window.text_system().shape_line(text, self.style.font_size, &[run], None);
+        let shaped = self.window.text_system().shape_line(text, self.style.font_size, &runs, None);
         LaidLine {
             line,
             start_char: self.rope.line_to_char(line),
@@ -758,6 +810,16 @@ impl LineShaper<'_> {
             shaped,
             display: shaped_window.display,
         }
+    }
+
+    fn text_runs(&self, shaped_window: &LineWindow, spans: &[Span]) -> Vec<TextRun> {
+        if spans.is_empty() {
+            return vec![self.style.text_run(shaped_window.display.text.len(), None)];
+        }
+        syntax_runs(&shaped_window.display, shaped_window.chars.start, spans)
+            .into_iter()
+            .map(|run| self.style.text_run(run.len, run.kind))
+            .collect()
     }
 }
 
@@ -1015,6 +1077,49 @@ mod tests {
     fn window_of(text: &str, first: usize, count: usize) -> LineWindow {
         let len = text.trim_end_matches('\n').chars().count();
         line_window(std::iter::once(text), len, VisibleColumns { first, count })
+    }
+
+    fn rust_spans(text: &str) -> Vec<Span> {
+        Language::Rust.highlight_line(text, editor_core::syntax::LineState::Normal)
+    }
+
+    fn run(len: usize, kind: Option<TokenKind>) -> SyntaxRun {
+        SyntaxRun { len, kind }
+    }
+
+    #[test]
+    fn syntax_runs_cover_tab_expanded_display_bytes() {
+        let text = "\tlet x = 1;";
+        let runs = syntax_runs(&display_line(text), 0, &rust_spans(text));
+        assert_eq!(runs, vec![
+            run(TAB_WIDTH, None), run(3, Some(TokenKind::Keyword)), run(3, None),
+            run(1, Some(TokenKind::Punctuation)), run(1, None), run(1, Some(TokenKind::Number)),
+            run(1, Some(TokenKind::Punctuation)),
+        ]);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), display_line(text).text.len());
+    }
+
+    #[test]
+    fn syntax_runs_map_spans_onto_a_windowed_line() {
+        let prefix_chars = WHOLE_LINE_MAX_CHARS + 100;
+        let text = format!("{} // note {}", "a".repeat(prefix_chars), "b".repeat(WHOLE_LINE_MAX_CHARS));
+        let window = window_of(&text, prefix_chars - 10, 20);
+        let comment_start = prefix_chars + 1;
+        assert!(window.chars.start < comment_start && window.chars.end > comment_start);
+        let runs = syntax_runs(&window.display, window.chars.start, &rust_spans(&text));
+        assert_eq!(runs, vec![
+            run(comment_start - window.chars.start, None),
+            run(window.chars.end - comment_start, Some(TokenKind::Comment)),
+        ]);
+    }
+
+    #[test]
+    fn syntax_runs_count_multibyte_chars_in_display_bytes() {
+        let text = "let é = \"ü\";";
+        let runs = syntax_runs(&display_line(text), 0, &rust_spans(text));
+        assert_eq!(runs[2], run(1, Some(TokenKind::Punctuation)));
+        assert_eq!(runs[4], run("\"ü\"".len(), Some(TokenKind::String)));
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
     }
 
     #[test]

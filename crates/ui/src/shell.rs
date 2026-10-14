@@ -26,6 +26,7 @@ use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
 use domain::{Axis, Direction, LayoutNode, Panel, PanelId, PanelKind, TabId, TerminalSessionId, WorkspaceId};
+use editor_core::syntax::Language;
 use gpui::{
     canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
     FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
@@ -1175,6 +1176,8 @@ impl Shell {
     ) -> AnyElement {
         let frame = EditorFrame {
             rope: Arc::new(editor.buffer().rope().clone()),
+            version: editor.buffer().version(),
+            language: Language::from_path(&document.path),
             selections: Arc::new(editor.selections().clone()),
             is_focused,
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
