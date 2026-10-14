@@ -1,6 +1,8 @@
+use super::theme_editor::{ButtonTone, EditorButton};
 use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::settings::{filtered_fonts, step_bundle_size, BundleSide, SettingsPane, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY,
-    DIM_UNFOCUSED_KEY, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY, FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
+    DIM_UNFOCUSED_KEY, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY, FONT_KEY, FONT_SIZE_KEY, THEME_KEY,
+    UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
@@ -95,6 +97,15 @@ impl Shell {
         self.apply_settings(cx);
         self.save_setting(key, &value);
         cx.notify();
+    }
+
+    fn restore_pane_defaults(&mut self, cx: &mut Context<Self>) {
+        self.state.settings_error = None;
+        for (key, value) in self.state.settings_pane.default_pairs() {
+            self.state.settings.apply_pair(key, &value);
+            self.save_setting(key, &value);
+        }
+        self.apply_settings(cx);
     }
 
     pub(super) fn show_settings_pane(&mut self, pane: SettingsPane, cx: &mut Context<Self>) {
@@ -207,7 +218,8 @@ impl Shell {
         true
     }
 
-    pub(super) fn settings_button(&self, label: &'static str, action: SettingAction, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn settings_button(&self, label: &'static str, action: SettingAction, cx: &mut Context<Self>)
+        -> Stateful<Div> {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         div().id(label).h(px(30.0 * scale)).min_w(px(35.0 * scale))
@@ -263,7 +275,7 @@ impl Shell {
             .child(self.render_settings_toolbar(cx))
             .child(self.render_settings_pane(cx).id("settings-content").flex_1().min_h(px(0.0)).overflow_y_scroll()
                 .px(px(CONTENT_PADDING_X_PX * scale)).py(px(CONTENT_PADDING_Y_PX * scale)))
-            .child(self.render_settings_footer())
+            .child(self.render_settings_footer(cx))
     }
 
     fn render_settings_toolbar(&self, cx: &mut Context<Self>) -> Div {
@@ -299,15 +311,22 @@ impl Shell {
             }))
     }
 
-    fn render_settings_footer(&self) -> Div {
+    fn render_settings_footer(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
+        let has_defaults = !self.state.settings_pane.setting_keys().is_empty();
+        let restore = EditorButton {
+            id: "restore-defaults", label: "Restore Defaults".into(), tone: ButtonTone::Quiet,
+        };
         div().flex_none().h(px(FOOTER_HEIGHT_PX * scale)).px(px(16.0 * scale))
             .flex().items_center().justify_between()
             .border_t_1().border_color(theme.border.muted)
             .child(div().text_size(px(CAPTION_PX * scale))
-                .text_color(if self.state.settings_error.is_some() { theme.chrome.destructive } else { theme.text.muted })
+                .text_color(if self.state.settings_error.is_some() { theme.chrome.destructive }
+                    else { theme.text.muted })
                 .child(self.state.settings_error.clone().unwrap_or_else(|| "Saved automatically".into())))
+            .when(has_defaults, |footer| footer
+                .child(self.editor_button(restore, |shell, cx| shell.restore_pane_defaults(cx), cx)))
     }
 
     pub(super) fn setting_stepper(&self, id: &'static str, value: String, smaller: SettingAction, larger: SettingAction, cx: &mut Context<Self>) -> Div {

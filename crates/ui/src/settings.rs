@@ -65,6 +65,22 @@ impl SettingsPane {
             Self::Keyboard => "Keyboard",
         }
     }
+
+    pub fn setting_keys(self) -> &'static [&'static str] {
+        match self {
+            Self::Appearance => &[THEME_KEY, UI_SCALE_KEY, DIM_UNFOCUSED_KEY],
+            Self::Terminal => &[FONT_KEY, FONT_SIZE_KEY],
+            Self::Editor => &[EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY],
+            Self::Keyboard => &[],
+        }
+    }
+
+    pub fn default_pairs(self) -> Vec<(&'static str, String)> {
+        let defaults = Settings::default();
+        self.setting_keys().iter()
+            .filter_map(|key| defaults.persisted_value(key).map(|value| (*key, value)))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,27 +110,46 @@ impl Settings {
     pub fn from_pairs(pairs: &[(String, String)]) -> Self {
         let mut settings = Self::default();
         for (key, value) in pairs {
-            match key.as_str() {
-                THEME_KEY => settings.theme = ThemeKind::from_key(value),
-                CUSTOM_BASE_KEY => {
-                    let base = ThemeKind::from_key(value);
-                    settings.custom_base = if base == ThemeKind::Custom { ThemeKind::Dark } else { base };
-                }
-                CUSTOM_COLORS_KEY => {
-                    if let Ok(colors) = serde_json::from_str::<CustomColors>(value) {
-                        if colors.is_valid() { settings.custom_colors = colors; }
-                    }
-                }
-                FONT_KEY if !value.trim().is_empty() && value.len() <= 128 => settings.font_family = value.clone(),
-                FONT_SIZE_KEY => settings.font_size = bounded(value, 10.0, 28.0, settings.font_size),
-                UI_SCALE_KEY => settings.ui_scale = bounded(value, 0.75, 1.5, settings.ui_scale),
-                DIM_UNFOCUSED_KEY => settings.dim_unfocused_panes = value != "false",
-                EDITOR_BUNDLE_SIDE_KEY => settings.editor_bundle_side = BundleSide::from_key(value),
-                EDITOR_BUNDLE_SIZE_KEY => settings.editor_bundle_size = bounded(value, BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX, settings.editor_bundle_size),
-                _ => {}
-            }
+            settings.apply_pair(key, value);
         }
         settings
+    }
+
+    pub fn apply_pair(&mut self, key: &str, value: &str) {
+        match key {
+            THEME_KEY => self.theme = ThemeKind::from_key(value),
+            CUSTOM_BASE_KEY => {
+                let base = ThemeKind::from_key(value);
+                self.custom_base = if base == ThemeKind::Custom { ThemeKind::Dark } else { base };
+            }
+            CUSTOM_COLORS_KEY => {
+                if let Ok(colors) = serde_json::from_str::<CustomColors>(value) {
+                    if colors.is_valid() { self.custom_colors = colors; }
+                }
+            }
+            FONT_KEY if !value.trim().is_empty() && value.len() <= 128 => self.font_family = value.to_string(),
+            FONT_SIZE_KEY => self.font_size = bounded(value, 10.0, 28.0, self.font_size),
+            UI_SCALE_KEY => self.ui_scale = bounded(value, 0.75, 1.5, self.ui_scale),
+            DIM_UNFOCUSED_KEY => self.dim_unfocused_panes = value != "false",
+            EDITOR_BUNDLE_SIDE_KEY => self.editor_bundle_side = BundleSide::from_key(value),
+            EDITOR_BUNDLE_SIZE_KEY => {
+                self.editor_bundle_size = bounded(value, BUNDLE_SIZE_MIN, BUNDLE_SIZE_MAX, self.editor_bundle_size);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn persisted_value(&self, key: &str) -> Option<String> {
+        match key {
+            THEME_KEY => Some(self.theme.key().to_string()),
+            FONT_KEY => Some(self.font_family.clone()),
+            FONT_SIZE_KEY => Some(self.font_size.to_string()),
+            UI_SCALE_KEY => Some(self.ui_scale.to_string()),
+            DIM_UNFOCUSED_KEY => Some(self.dim_unfocused_panes.to_string()),
+            EDITOR_BUNDLE_SIDE_KEY => Some(self.editor_bundle_side.key().to_string()),
+            EDITOR_BUNDLE_SIZE_KEY => Some(self.editor_bundle_size.to_string()),
+            _ => None,
+        }
     }
 
     pub fn theme_tokens(&self) -> Theme {
@@ -223,7 +258,44 @@ mod tests {
         assert_eq!(step_bundle_size(0.1, -1.0), BUNDLE_SIZE_MIN);
         assert_eq!(step_bundle_size(0.62, 1.0), 0.7);
         let stepped = step_bundle_size(0.5, 1.0);
-        assert_eq!(Settings::from_pairs(&[(EDITOR_BUNDLE_SIZE_KEY.into(), stepped.to_string())]).editor_bundle_size, 0.6);
+        let restored = Settings::from_pairs(&[(EDITOR_BUNDLE_SIZE_KEY.into(), stepped.to_string())]);
+        assert_eq!(restored.editor_bundle_size, 0.6);
+    }
+
+    #[test]
+    fn pane_default_pairs_cover_only_that_panes_settings() {
+        let pairs = |pane: SettingsPane| -> Vec<(&str, String)> { pane.default_pairs() };
+        assert_eq!(pairs(SettingsPane::Appearance), [
+            (THEME_KEY, "light".to_string()), (UI_SCALE_KEY, "1".to_string()), (DIM_UNFOCUSED_KEY, "true".to_string()),
+        ]);
+        assert_eq!(pairs(SettingsPane::Terminal), [
+            (FONT_KEY, "JetBrains Mono".to_string()), (FONT_SIZE_KEY, "13".to_string()),
+        ]);
+        assert_eq!(pairs(SettingsPane::Editor), [
+            (EDITOR_BUNDLE_SIDE_KEY, "right".to_string()), (EDITOR_BUNDLE_SIZE_KEY, "0.4".to_string()),
+        ]);
+        assert!(pairs(SettingsPane::Keyboard).is_empty());
+    }
+
+    #[test]
+    fn restoring_a_pane_resets_its_settings_and_keeps_the_rest() {
+        let mut settings = Settings {
+            theme: ThemeKind::Nord, ui_scale: 1.3, dim_unfocused_panes: false, font_family: "Menlo".into(),
+            font_size: 18.0, editor_bundle_side: BundleSide::Left, editor_bundle_size: 0.7, ..Default::default()
+        };
+        for (key, value) in SettingsPane::Editor.default_pairs() {
+            settings.apply_pair(key, &value);
+        }
+        assert_eq!(settings.editor_bundle_side, BundleSide::Right);
+        assert_eq!(settings.editor_bundle_size, 0.4);
+        assert_eq!(settings.font_family, "Menlo");
+        assert_eq!(settings.theme, ThemeKind::Nord);
+        for pane in [SettingsPane::Appearance, SettingsPane::Terminal] {
+            for (key, value) in pane.default_pairs() {
+                settings.apply_pair(key, &value);
+            }
+        }
+        assert_eq!(settings, Settings::default());
     }
 
     #[test]

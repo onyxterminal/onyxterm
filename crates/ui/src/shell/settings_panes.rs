@@ -5,7 +5,8 @@ use crate::command::CommandId;
 use crate::keymap::{shortcut_groups, Combo};
 use crate::settings::{BundleSide, SettingsPane};
 use crate::theme::{box_shadows, Theme, ThemeKind};
-use gpui::{div, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful};
+use gpui::{div, prelude::*, px, relative, BoxShadow, Context, Div, FontWeight, Hsla, MouseButton, SharedString,
+    Stateful};
 
 const GROUP_RADIUS_PX: f32 = 10.0;
 const ROW_MIN_HEIGHT_PX: f32 = 56.0;
@@ -253,7 +254,8 @@ impl Shell {
                 .text_size(px(CAPTION_PX * scale)).text_color(theme.text.muted).child(label))
         };
         let terminal = block("Terminal", 1.0 - editor_share, theme.surface.canvas, theme.border.muted);
-        let editor = block("Editor", editor_share, theme.accent.primary.opacity(EDITOR_BLOCK_TINT), theme.accent.primary);
+        let accent = theme.accent.primary;
+        let editor = block("Editor", editor_share, accent.opacity(EDITOR_BLOCK_TINT), accent);
         let (first, second) = match side {
             BundleSide::Left | BundleSide::Top => (editor, terminal),
             BundleSide::Right | BundleSide::Bottom => (terminal, editor),
