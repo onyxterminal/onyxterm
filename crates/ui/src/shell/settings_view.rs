@@ -3,8 +3,8 @@ use crate::settings::{filtered_fonts, CUSTOM_BASE_KEY, CUSTOM_COLORS_KEY, DIM_UN
     FONT_KEY, FONT_SIZE_KEY, THEME_KEY, UI_SCALE_KEY};
 use crate::terminal_view::TerminalStyle;
 use crate::theme::menu_chrome::field_text;
-use crate::theme::{Theme, ThemeKind};
-use gpui::{div, prelude::*, px, uniform_list, Context, Div, Keystroke, MouseButton, ScrollStrategy, SharedString,
+use crate::theme::{box_shadows, Theme, ThemeKind};
+use gpui::{div, prelude::*, px, uniform_list, Context, Div, FontWeight, Keystroke, MouseButton, ScrollStrategy, SharedString,
     Stateful, Window};
 use std::ops::Range;
 
@@ -210,7 +210,7 @@ impl Shell {
         div().id(label).h(px(30.0 * scale)).min_w(px(35.0 * scale))
             .px(px(9.0 * scale)).flex().items_center().justify_center()
             .rounded(px(6.0 * scale)).bg(theme.chrome.control_fill)
-            .cursor_pointer().child(label)
+            .cursor_pointer().hover(|style| style.bg(theme.chrome.icon_hover_fill)).child(label)
             .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
                 cx.stop_propagation(); shell.change_setting(action, cx);
             }))
@@ -237,8 +237,9 @@ impl Shell {
                 cx.notify();
             }))
             .child(card.id(card_id).max_h(max_height).overflow_y_scroll()
-                .w(px(card_width * scale)).p(px(22.0 * scale))
-                .rounded(px(12.0 * scale)).bg(theme.surface.raised)
+                .w(px(card_width * scale)).max_w(window.viewport_size().width - px(CARD_WINDOW_MARGIN_PX * 2.0)).p(px(24.0 * scale))
+                .rounded(px(16.0 * scale)).bg(theme.surface.raised)
+                .shadow(box_shadows(&theme.shadow.palette))
                 .border_1().border_color(theme.border.default).occlude()
                 .font_family(SharedString::from(theme.ui_font.family.clone()))
                 .text_size(px(theme.ui_font.dialog_body_px))
@@ -246,38 +247,82 @@ impl Shell {
             .children(picker_drag_listener)
     }
 
+    fn setting_stepper(&self, id: &'static str, value: String, smaller: SettingAction, larger: SettingAction, cx: &mut Context<Self>) -> Div {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let button = |suffix: &'static str, glyph: &'static str, action, cx: &mut Context<Self>| {
+            div().id(SharedString::from(format!("{id}-{suffix}")))
+                .size(px(30.0 * scale)).flex().items_center().justify_center()
+                .rounded(px(6.0 * scale)).cursor_pointer()
+                .hover(|style| style.bg(theme.chrome.icon_hover_fill))
+                .child(glyph)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
+                    cx.stop_propagation(); shell.change_setting(action, cx);
+                }))
+        };
+        div().flex_none().flex().items_center().rounded(px(8.0 * scale))
+            .bg(theme.chrome.control_fill).p(px(2.0 * scale))
+            .child(button("less", "−", smaller, cx))
+            .child(div().min_w(px(60.0 * scale)).flex().justify_center()
+                .text_color(theme.text.default).child(value))
+            .child(button("more", "+", larger, cx))
+    }
+
+    fn setting_switch(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let enabled = self.state.settings.dim_unfocused_panes;
+        div().id("dim-panes-switch").flex_none()
+            .w(px(36.0 * scale)).h(px(22.0 * scale)).p(px(3.0 * scale))
+            .flex().items_center().rounded_full().cursor_pointer()
+            .bg(if enabled { theme.accent.primary } else { theme.chrome.icon_hover_fill })
+            .when(enabled, |el| el.justify_end())
+            .tooltip(self.tooltip_builder(if enabled { "Dim inactive panes: On" } else { "Dim inactive panes: Off" }.into()))
+            .child(div().size(px(16.0 * scale)).rounded_full().bg(gpui::white()))
+            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
+                cx.stop_propagation(); shell.change_setting(SettingAction::DimPanes, cx);
+            }))
+    }
+
     fn render_settings_card(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let settings = &self.state.settings;
         let scale = settings.ui_scale;
-        let row = |title: &'static str, value: String, controls: Vec<Stateful<Div>>| {
-            div().h(px(52.0 * scale)).flex().items_center().justify_between()
+        let row = |title: &'static str, detail: &'static str, control: Div| {
+            div().min_h(px(66.0 * scale)).py(px(12.0 * scale))
+                .flex().items_center().justify_between().gap(px(16.0 * scale))
                 .border_b_1().border_color(theme.border.muted)
-                .child(div().text_color(theme.text.default).child(title))
-                .child(div().flex().items_center().gap(px(8.0 * scale))
-                    .child(div().text_color(theme.text.muted).child(value))
-                    .children(controls))
+                .child(div().flex_1().min_w(px(0.0))
+                    .child(div().font_weight(FontWeight::MEDIUM).child(title))
+                    .child(div().mt(px(3.0 * scale)).text_size(px(theme.ui_font.hint_px))
+                        .text_color(theme.text.muted).child(detail)))
+                .child(control)
         };
-        div().child(div().flex().items_center().justify_between()
-                .mb(px(14.0 * scale))
-                .child(div().text_size(px(theme.ui_font.palette_input_px)).child("Settings"))
+        let font = if settings.font_family == SYSTEM_MONOSPACE { SYSTEM_MONOSPACE_LABEL.into() }
+            else { settings.font_family.clone() };
+        div().child(div().flex().items_center().justify_between().mb(px(18.0 * scale))
+                .child(div().child(div().text_size(px(20.0 * scale)).font_weight(FontWeight::SEMIBOLD).child("Appearance"))
+                    .child(div().mt(px(4.0 * scale)).text_color(theme.text.muted).child("A comfortable space to focus.")))
                 .child(self.settings_button("Done", SettingAction::Close, cx)))
-            .child(row("Theme", settings.theme.label().into(), vec![
-                self.settings_button("Choose theme", SettingAction::ThemePicker, cx),
-                self.settings_button("Customize", SettingAction::Customize, cx)]))
-            .child(row("Terminal font", if settings.font_family == SYSTEM_MONOSPACE { SYSTEM_MONOSPACE_LABEL.into() }
-                else { settings.font_family.clone() }, vec![self.settings_button("Choose", SettingAction::FontPicker, cx)]))
-            .child(row("Terminal text size", format!("{} px", settings.font_size as u32), vec![
-                self.settings_button("−", SettingAction::FontSmaller, cx),
-                self.settings_button("+", SettingAction::FontLarger, cx)]))
-            .child(row("UI size", format!("{}%", (scale * 100.0).round() as u32), vec![
-                self.settings_button("− UI", SettingAction::UiSmaller, cx),
-                self.settings_button("+ UI", SettingAction::UiLarger, cx)]))
-            .child(row("Dim unfocused panes", if settings.dim_unfocused_panes { "On" } else { "Off" }.into(),
-                vec![self.settings_button("Toggle", SettingAction::DimPanes, cx)]))
-            .child(div().pt(px(12.0 * scale)).text_color(theme.text.subtle)
-                .child(self.state.settings_error.clone().unwrap_or_else(||
-                    "Changes apply immediately and are saved automatically.".into())))
+            .child(row("Theme", "Set the mood of your workspace.",
+                div().flex().items_center().gap(px(6.0 * scale))
+                    .child(self.settings_button(settings.theme.label(), SettingAction::ThemePicker, cx))
+                    .child(self.settings_button("Customize", SettingAction::Customize, cx))))
+            .child(row("Terminal font", "Choose a font that's easy to read.",
+                div().flex().items_center().gap(px(8.0 * scale))
+                    .child(div().max_w(px(130.0 * scale)).truncate().text_color(theme.text.muted).child(font))
+                    .child(self.settings_button("Choose", SettingAction::FontPicker, cx))))
+            .child(row("Text size", "Terminal and editor text.",
+                self.setting_stepper("text-size", format!("{} px", settings.font_size as u32),
+                    SettingAction::FontSmaller, SettingAction::FontLarger, cx)))
+            .child(row("Interface size", "Tabs, menus, and controls.",
+                self.setting_stepper("ui-size", format!("{}%", (scale * 100.0).round() as u32),
+                    SettingAction::UiSmaller, SettingAction::UiLarger, cx)))
+            .child(row("Dim inactive panes", "Keep your active pane in focus.",
+                div().child(self.setting_switch(cx))))
+            .child(div().pt(px(16.0 * scale)).text_size(px(theme.ui_font.hint_px))
+                .text_color(if self.state.settings_error.is_some() { theme.chrome.destructive } else { theme.text.muted })
+                .child(self.state.settings_error.clone().unwrap_or_else(|| "Saved automatically".into())))
     }
 
     fn render_font_picker(&self, cx: &mut Context<Self>) -> Div {
