@@ -168,8 +168,9 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(state: AppState, startup: Startup, cx: &mut Context<Self>) -> Self {
-        let font_family =
-            observability::timed("terminal font resolve", || settings_view::resolve_terminal_family(&state.theme.font, cx));
+        let font_family = observability::timed("terminal font resolve", || {
+            settings_view::resolve_terminal_family(&state.theme.font, cx)
+        });
         tracing::info!(%font_family, "terminal font resolved");
         let Startup { terminals, store, restored, home } = startup;
         let ssh = Arc::new(InMemorySshService::new(&home));
