@@ -11,7 +11,6 @@ use std::rc::Rc;
 use std::time::Instant;
 
 const DEFAULT_PAGE_LINES: usize = 30;
-const SAVE_FAILED_PREFIX: &str = "Couldn't save";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct DocumentRef {
@@ -209,8 +208,7 @@ impl Shell {
             Ok(()) => pane.mark_saved(id, saved.version, saved.rope),
             Err(err) => {
                 let name = pane.find(id).map(|document| document_title(&document.path)).unwrap_or_default();
-                tracing::warn!(%err, "save failed");
-                self.notice = Some(format!("{SAVE_FAILED_PREFIX} {name}: {err}"));
+                tracing::warn!(%err, document = %name, "save failed");
             }
         }
         cx.notify();

@@ -13,10 +13,6 @@ const DIALOG_TEXT_GAP_PX: f32 = 6.0;
 const DIALOG_BUTTONS_TOP_PX: f32 = 16.0;
 const DIALOG_BUTTON_GAP_PX: f32 = 8.0;
 const DIALOG_BUTTON_PADDING_X_PX: f32 = 14.0;
-const NOTICE_PADDING_X_PX: f32 = 12.0;
-const NOTICE_PADDING_Y_PX: f32 = 6.0;
-const NOTICE_GAP_PX: f32 = 12.0;
-const DISMISS_LABEL: &str = "Dismiss";
 const CANCEL_LABEL: &str = "Cancel";
 
 struct ButtonPaint {
@@ -95,40 +91,6 @@ impl Shell {
                 tracing::debug!(?err, "workspace menu after shell dropped");
             }
         })
-    }
-
-    pub(super) fn render_notice(&self, notice: &str, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        div()
-            .flex_none()
-            .px(px(NOTICE_PADDING_X_PX))
-            .py(px(NOTICE_PADDING_Y_PX))
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap(px(NOTICE_GAP_PX))
-            .mx(px(theme.layout.window_margin_px))
-            .mb(px(theme.layout.island_gap_px))
-            .rounded(px(theme.layout.island_radius_px))
-            .bg(theme.surface.canvas)
-            .border_1()
-            .border_color(theme.border.default)
-            .shadow(box_shadows(&theme.shadow.card))
-            .font_family(SharedString::from(theme.ui_font.family.clone()))
-            .text_size(px(theme.ui_font.dialog_body_px))
-            .text_color(theme.text.muted)
-            .child(notice.to_string())
-            .child(
-                div()
-                    .id("notice-dismiss")
-                    .flex_none()
-                    .cursor_pointer()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.accent.primary)
-                    .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.dismiss_notice(cx)))
-                    .child(DISMISS_LABEL),
-            )
     }
 
     pub(super) fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> Div {

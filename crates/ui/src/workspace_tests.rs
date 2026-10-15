@@ -1,11 +1,11 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::tabs::{Tab, Tabs};
-use crate::workspaces::{fresh_terminal, restore_notice, WorkspaceModel};
+use crate::workspaces::{fresh_terminal, WorkspaceModel};
 use domain::{Axis, LayoutNode, Panel, PanelId, TabId, TerminalSessionId, WorkspaceId};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use workspace_service::{PanelSnapshot, StoreWarning, WorkspaceSnapshot, WorkspaceStore};
+use workspace_service::{PanelSnapshot, WorkspaceSnapshot, WorkspaceStore};
 
 fn split(axis: Axis, ratio: f32, first: LayoutNode, second: LayoutNode) -> LayoutNode {
     LayoutNode::Split { axis, ratio, first: Box::new(first), second: Box::new(second) }
@@ -268,18 +268,6 @@ fn created_workspace_is_exactly_what_comes_back_after_reopen() {
     assert_eq!(restored.active_id(), mine);
     assert_eq!(restored.tabs().active().map(|tab| tab.focused()), Some(panel));
     assert_eq!(restored.snapshot(), model.snapshot());
-}
-
-#[test]
-fn restore_notice_lists_each_warning() {
-    assert_eq!(restore_notice(&[]), None);
-    let notice = restore_notice(&[StoreWarning::MissingDirectory {
-        workspace: WorkspaceId::new(),
-        missing: PathBuf::from("/gone"),
-        fallback: PathBuf::from("/home/me"),
-    }])
-    .expect("notice");
-    assert!(notice.contains("/gone") && notice.contains("/home/me"));
 }
 
 #[test]

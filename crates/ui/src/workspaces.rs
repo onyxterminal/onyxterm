@@ -5,7 +5,7 @@ use crate::tabs::{Tab, Tabs};
 use domain::{DomainError, Panel, PanelId, PanelKind, TabId, TerminalSessionId, Workspace, WorkspaceId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use workspace_service::{PanelSnapshot, StoreWarning, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
+use workspace_service::{PanelSnapshot, TabSnapshot, WorkspaceSnapshot, DEFAULT_PANEL_TITLE};
 
 pub const SCRATCH_NAME: &str = "Scratch";
 
@@ -288,22 +288,5 @@ pub fn fresh_terminal(panel: PanelId, cwd: PathBuf) -> PanelSnapshot {
         name: None,
         path: None,
         documents: Vec::new(),
-    }
-}
-
-pub fn restore_notice(warnings: &[StoreWarning]) -> Option<String> {
-    let lines: Vec<String> = warnings.iter().map(warning_text).collect();
-    (!lines.is_empty()).then(|| lines.join("  \u{2022}  "))
-}
-
-fn warning_text(warning: &StoreWarning) -> String {
-    match warning {
-        StoreWarning::DatabaseQuarantined { quarantined_to, .. } => {
-            format!("Saved layout was unreadable and moved to {}", quarantined_to.display())
-        }
-        StoreWarning::MissingDirectory { missing, fallback, .. } => {
-            format!("{} no longer exists; opened {} instead", missing.display(), fallback.display())
-        }
-        StoreWarning::LayoutDropped(_) => "An invalid saved layout was dropped".to_string(),
     }
 }

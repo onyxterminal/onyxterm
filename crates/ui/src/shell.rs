@@ -24,7 +24,7 @@ use crate::pane_title::OscTitle;
 use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle};
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
-use crate::workspaces::{restore_notice, WorkspaceModel};
+use crate::workspaces::WorkspaceModel;
 use domain::{Axis, Direction, LayoutNode, Panel, PanelId, PanelKind, TabId, TerminalSessionId, WorkspaceId};
 use editor_core::syntax::Language;
 use gpui::{
@@ -137,7 +137,6 @@ pub struct Shell {
     menu_field: Option<MenuField>,
     menu_search: TextField,
     tab_field: Option<TabField>,
-    notice: Option<String>,
     marked_text: Option<String>,
     split_drag: Option<splits::SplitDrag>,
     drop_target: Option<crate::pane_drop::DropTarget>,
@@ -190,7 +189,6 @@ impl Shell {
             menu_field: None,
             menu_search: TextField::default(),
             tab_field: None,
-            notice: restore_notice(&restored.warnings),
             marked_text: None,
             split_drag: None,
             drop_target: None,
@@ -947,11 +945,6 @@ impl Shell {
         self.select_workspace(id, cx);
     }
 
-    fn dismiss_notice(&mut self, cx: &mut Context<Self>) {
-        self.notice = None;
-        cx.notify();
-    }
-
     fn open_tab(&mut self, cx: &mut Context<Self>) {
         let cwd = self.model.active_root();
         if let Some(panel) = self.spawn_shell_panel(cwd, cx) {
@@ -1310,7 +1303,6 @@ impl Render for Shell {
                 cx.notify();
             }));
         let palette_visible = self.state.palette_visible;
-        let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
@@ -1346,7 +1338,6 @@ impl Render for Shell {
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
             .child(tab_strip)
-            .children(notice)
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
