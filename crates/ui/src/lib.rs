@@ -64,6 +64,7 @@ pub use shell::Startup;
 pub fn run_app(startup: Startup) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
+        cx.activate(true);
         let bundled_fonts = observability::timed("bundled fonts", || cx.text_system().add_fonts(vec![
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf")),
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf")),
