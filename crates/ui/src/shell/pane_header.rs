@@ -19,6 +19,7 @@ const RENAME_RADIUS_PX: f32 = 5.0;
 const PILL_PADDING_X_PX: f32 = 7.0;
 const PILL_PADDING_Y_PX: f32 = 2.0;
 const PILL_RADIUS_PX: f32 = 9.0;
+const PILL_LINE_HEIGHT_PX: f32 = 12.5;
 
 struct PillPaint {
     fill: Hsla,
@@ -67,8 +68,6 @@ impl Shell {
             .gap(px(HEADER_GAP_PX * scale))
             .font_family(SharedString::from(theme.ui_font.family.clone()))
             .text_size(px(theme.ui_font.pane_title_px))
-            .bg(theme.surface.canvas)
-            .rounded_t(px(theme.layout.island_radius_px))
             .child(drag_handle)
             .when(self.is_pane_in_copy_mode(panel), |header| header.child(self.copy_mode_pill()))
             .when(self.is_pane_maximized(panel), |header| header.child(self.maximized_pill()))
@@ -102,6 +101,7 @@ impl Shell {
             .bg(paint.fill)
             .text_color(paint.text)
             .text_size(px(self.state.theme.ui_font.pill_px))
+            .line_height(px(PILL_LINE_HEIGHT_PX * scale))
             .font_weight(paint.weight)
             .child(label)
     }

@@ -12,6 +12,7 @@ const HINT_PADDING_Y_PX: f32 = 6.0;
 const HINT_GAP_PX: f32 = 14.0;
 const HINT_KEY_GAP_PX: f32 = 3.0;
 const HINT_RADIUS_PX: f32 = 8.0;
+const HINT_LINE_HEIGHT_PX: f32 = 13.0;
 
 impl Shell {
     pub(super) fn toggle_copy_mode(&mut self) {
@@ -71,6 +72,7 @@ impl Shell {
             .shadow(box_shadows(&theme.shadow.hint))
             .font_family(SharedString::from(theme.ui_font.family.clone()))
             .text_size(px(theme.ui_font.hint_px))
+            .line_height(px(HINT_LINE_HEIGHT_PX * scale))
             .text_color(theme.text.muted)
             .whitespace_nowrap()
             .children(hints);
