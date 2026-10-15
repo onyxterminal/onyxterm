@@ -1,6 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
+use crate::cell_paint::{ligature_spans, merged_spans, CellGlyph, GlyphCache, GlyphKey};
 use crate::input::wheel_bytes;
 use crate::pixel_grid::{align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point};
 use crate::theme::Theme;
@@ -10,6 +11,7 @@ use gpui::{
     ScrollWheelEvent, ShapedLine, SharedString, Size, Styled, TextRun, UnderlineStyle, Window,
 };
 use std::cell::RefCell;
+use std::ops::Range;
 use std::rc::Rc;
 use terminal_core::{Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
 
@@ -23,6 +25,8 @@ const ANSI_COLOR_COUNT: u8 = 16;
 const CUBE_START: u8 = 16;
 const GRAYSCALE_START: u8 = 232;
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+const REFERENCE_GLYPH: char = 'm';
+const UNDERLINE_DESCENT_RATIO: f32 = 0.618;
 
 type CellSizeCache = Rc<RefCell<Option<(f32, Size<Pixels>)>>>;
 
@@ -174,6 +178,7 @@ pub struct TerminalStyle {
     pub insets: ContentInsets,
     cell_size_cache: CellSizeCache,
     align_cache: crate::pixel_grid::AlignCache,
+    glyph_cache: GlyphCache,
 }
 
 impl TerminalStyle {
@@ -205,6 +210,7 @@ impl TerminalStyle {
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
             align_cache: Rc::default(),
+            glyph_cache: Rc::default(),
         }
     }
 
@@ -358,6 +364,18 @@ struct FramePainter<'a> {
     is_focused: bool,
 }
 
+#[derive(Clone, Copy)]
+struct TextMetrics {
+    baseline: Pixels,
+    underline_drop: Pixels,
+}
+
+struct PaintRow<'a> {
+    index: usize,
+    cells: &'a [Cell],
+    baseline_origin: Point<Pixels>,
+}
+
 impl FramePainter<'_> {
     fn paint(&self, window: &mut Window, cx: &mut App) {
         for (row_index, row) in self.rows() {
@@ -365,9 +383,21 @@ impl FramePainter<'_> {
         }
         self.paint_selection(window);
         self.paint_cursor(window);
-        for (row_index, row) in self.rows() {
-            self.paint_text(row_index, row, window, cx);
-        }
+        let metrics = self.text_metrics(window);
+        window.paint_layer(self.grid_bounds(), |window| {
+            for (index, cells) in self.rows() {
+                let baseline_origin = self.baseline_origin(index, metrics.baseline, window);
+                let row = PaintRow { index, cells, baseline_origin };
+                self.paint_underlines(&row, metrics.underline_drop, window);
+                self.paint_text(&row, window, cx);
+            }
+        });
+    }
+
+    fn grid_bounds(&self) -> Bounds<Pixels> {
+        let cell = self.frame.cell;
+        let snapshot = &self.frame.snapshot;
+        Bounds::new(self.origin, size(cell.width * f32::from(snapshot.cols), cell.height * f32::from(snapshot.rows)))
     }
 
     fn paint_marked_text(&self, text: &str, window: &mut Window, cx: &mut App) {
@@ -406,14 +436,8 @@ impl FramePainter<'_> {
 
     fn paint_backgrounds(&self, row_index: usize, row: &[Cell], window: &mut Window) {
         let colors = self.style.colors;
-        let mut col = 0;
-        while col < row.len() {
-            let color = colors.background_of(&row[col]);
-            let span = row[col..].iter().take_while(|c| colors.background_of(c) == color).count();
-            if let Some(color) = color {
-                window.paint_quad(fill(self.cell_bounds(row_index, col, span), color));
-            }
-            col += span;
+        for (span, color) in merged_spans(row.iter().map(|cell| colors.background_of(cell))) {
+            window.paint_quad(fill(self.cell_bounds(row_index, span.start, span.len()), color));
         }
     }
 
@@ -444,26 +468,94 @@ impl FramePainter<'_> {
         window.paint_quad(outline(bounds, color, BorderStyle::Solid));
     }
 
-    fn cursor_col_on(&self, row_index: usize) -> Option<usize> {
-        let cursor = self.frame.snapshot.cursor.filter(|_| self.is_focused)?;
-        (usize::from(cursor.row) == row_index).then_some(usize::from(cursor.col))
+    fn text_color(&self, row_index: usize, col: usize, cell: &Cell) -> Hsla {
+        let cursor = self.frame.snapshot.cursor.filter(|_| self.is_focused);
+        let is_cursor_cell = cursor.is_some_and(|c| usize::from(c.row) == row_index && usize::from(c.col) == col);
+        if is_cursor_cell {
+            return self.style.colors.background;
+        }
+        self.style.colors.foreground_of(cell)
     }
 
-    fn paint_text(&self, row_index: usize, row: &[Cell], window: &mut Window, cx: &mut App) {
-        if row.iter().all(|cell| cell.ch <= ' ') {
+    fn text_metrics(&self, window: &Window) -> TextMetrics {
+        let reference = REFERENCE_GLYPH.to_string();
+        let run = self.text_run(FontWeight::NORMAL, self.style.colors.foreground, reference.len());
+        let line = window.text_system().shape_line(reference.into(), self.style.font_size, &[run], None);
+        TextMetrics {
+            baseline: baseline_offset(&line, self.frame.cell.height),
+            underline_drop: line.descent * UNDERLINE_DESCENT_RATIO,
+        }
+    }
+
+    fn baseline_origin(&self, row_index: usize, baseline: Pixels, window: &Window) -> Point<Pixels> {
+        let row_origin = self.origin + point(px(0.0), self.frame.cell.height * row_index as f32);
+        glyph_aligned_origin(row_origin, baseline, window.scale_factor()) + point(px(0.0), baseline)
+    }
+
+    fn paint_underlines(&self, row: &PaintRow, underline_drop: Pixels, window: &mut Window) {
+        let colors = row.cells.iter().enumerate().map(|(col, cell)| {
+            cell.is_underline().then(|| self.text_color(row.index, col, cell))
+        });
+        let cell_width = self.frame.cell.width;
+        for (span, color) in merged_spans(colors) {
+            let origin = row.baseline_origin + point(cell_width * span.start as f32, underline_drop);
+            let style = UnderlineStyle { thickness: px(1.0), color: Some(color), wavy: false };
+            window.paint_underline(origin, cell_width * span.len() as f32, &style);
+        }
+    }
+
+    fn paint_text(&self, row: &PaintRow, window: &mut Window, cx: &mut App) {
+        if row.cells.iter().all(|cell| cell.ch <= ' ') {
             return;
         }
-        let (text, runs) = self.text_runs(row_index, row);
-        if text.trim_end().is_empty() {
-            return;
+        let ligatures = ligature_spans(row.cells.iter().map(|cell| cell.ch));
+        for span in &ligatures {
+            self.paint_shaped(row, span.clone(), window, cx);
         }
+        for (col, cell) in row.cells.iter().enumerate() {
+            let is_shaped = ligatures.iter().any(|span| span.contains(&col));
+            if cell.ch > ' ' && !is_shaped {
+                self.paint_cell(row, col, window, cx);
+            }
+        }
+    }
+
+    fn paint_cell(&self, row: &PaintRow, col: usize, window: &mut Window, cx: &mut App) {
+        let cell = &row.cells[col];
+        let key = GlyphKey { ch: cell.ch, is_bold: cell.is_bold() };
+        let glyph = self.style.glyph_cache.borrow_mut().get_or_resolve(key, || self.resolve_glyph(key, window));
+        let Some(glyph) = glyph else {
+            self.paint_shaped(row, col..col + 1, window, cx);
+            return;
+        };
+        let origin = row.baseline_origin + point(self.frame.cell.width * col as f32, px(0.0));
+        let font_size = self.style.font_size;
+        let painted = if glyph.is_emoji {
+            window.paint_emoji(origin, glyph.font_id, glyph.glyph_id, font_size)
+        } else {
+            let color = self.text_color(row.index, col, cell);
+            window.paint_glyph(origin, glyph.font_id, glyph.glyph_id, font_size, color)
+        };
+        if let Err(err) = painted {
+            tracing::warn!(?err, "terminal glyph paint failed");
+        }
+    }
+
+    fn resolve_glyph(&self, key: GlyphKey, window: &Window) -> Option<CellGlyph> {
+        let run = self.text_run(font_weight(key.is_bold), self.style.colors.foreground, key.ch.len_utf8());
+        let line = window.text_system().shape_line(key.ch.to_string().into(), self.style.font_size, &[run], None);
+        CellGlyph::sole_glyph_of(&line)
+    }
+
+    fn paint_shaped(&self, row: &PaintRow, span: Range<usize>, window: &mut Window, cx: &mut App) {
         let cell = self.frame.cell;
+        let (text, runs) = self.text_runs(row, span.clone());
         let mut line = window.text_system().shape_line(text.into(), self.style.font_size, &runs, None);
         align_glyphs_to_cells(&mut line, cell.width, &self.style.align_cache);
-        let row_origin = self.origin + point(px(0.0), cell.height * row_index as f32);
-        let origin = self.glyph_origin(&line, row_origin, window);
+        let span_origin = self.cell_bounds(row.index, span.start, span.len()).origin;
+        let origin = self.glyph_origin(&line, span_origin, window);
         if let Err(err) = line.paint(origin, cell.height, window, cx) {
-            tracing::warn!(?err, "terminal row paint failed");
+            tracing::warn!(?err, "terminal span paint failed");
         }
     }
 
@@ -471,18 +563,13 @@ impl FramePainter<'_> {
         glyph_aligned_origin(origin, baseline_offset(line, self.frame.cell.height), window.scale_factor())
     }
 
-    fn text_runs(&self, row_index: usize, row: &[Cell]) -> (String, Vec<TextRun>) {
-        let cursor_col = self.cursor_col_on(row_index);
-        let mut text = String::with_capacity(row.len());
+    fn text_runs(&self, row: &PaintRow, span: Range<usize>) -> (String, Vec<TextRun>) {
+        let mut text = String::with_capacity(span.len());
         let mut runs: Vec<TextRun> = Vec::new();
-        for (col, cell) in row.iter().enumerate() {
+        for col in span {
+            let cell = &row.cells[col];
             let ch = if cell.ch < ' ' { ' ' } else { cell.ch };
-            let color = if cursor_col == Some(col) {
-                self.style.colors.background
-            } else {
-                self.style.colors.foreground_of(cell)
-            };
-            let run = self.cell_run(cell, color, ch.len_utf8());
+            let run = self.text_run(font_weight(cell.is_bold()), self.text_color(row.index, col, cell), ch.len_utf8());
             text.push(ch);
             match runs.last_mut() {
                 Some(last) if same_style(last, &run) => last.len += run.len,
@@ -492,21 +579,25 @@ impl FramePainter<'_> {
         (text, runs)
     }
 
-    fn cell_run(&self, cell: &Cell, color: Hsla, len: usize) -> TextRun {
-        let weight = if cell.is_bold() { FontWeight::BOLD } else { FontWeight::NORMAL };
-        let underline =
-            cell.is_underline().then_some(UnderlineStyle { thickness: px(1.0), color: None, wavy: false });
+    fn text_run(&self, weight: FontWeight, color: Hsla, len: usize) -> TextRun {
         TextRun {
             len,
             font: Font { weight, ..self.style.font() },
             color,
             background_color: None,
-            underline,
+            underline: None,
             strikethrough: None,
         }
     }
 }
 
+fn font_weight(is_bold: bool) -> FontWeight {
+    if is_bold {
+        return FontWeight::BOLD;
+    }
+    FontWeight::NORMAL
+}
+
 fn same_style(a: &TextRun, b: &TextRun) -> bool {
-    a.color == b.color && a.font.weight == b.font.weight && a.underline == b.underline
+    a.color == b.color && a.font.weight == b.font.weight
 }
