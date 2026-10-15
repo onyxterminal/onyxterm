@@ -179,7 +179,8 @@ mod tests {
         assert_eq!(kind_of(&found, "Err"), Some(TokenKind::Constant));
         assert_eq!(kind_of(&found, "None"), Some(TokenKind::Constant));
         assert_eq!(kind_of(&found, "done"), None);
-        assert_eq!(kind_of(&found, "!="), Some(TokenKind::Punctuation));
+        assert_eq!(kind_of(&found, "="), Some(TokenKind::Punctuation));
+        assert_eq!(kind_of(&found, "!"), None);
         assert_eq!(kind_of(&found, "));"), Some(TokenKind::Punctuation));
     }
 

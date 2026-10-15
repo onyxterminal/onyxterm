@@ -1070,18 +1070,31 @@ fn contrast_ratio(first: gpui::Hsla, second: gpui::Hsla) -> f32 {
     (first.max(second) + 0.05) / (first.min(second) + 0.05)
 }
 
+const BODY_TEXT_CONTRAST: f32 = 4.5;
+const DESIGN_COMMENT_CONTRAST: f32 = 3.0;
+
 #[test]
 fn every_builtin_theme_has_readable_syntax_colors() {
     for kind in ThemeKind::ALL {
         let theme = Theme::load(kind).expect("theme loads");
         let syntax = theme.syntax;
         let colors = [syntax.keyword, syntax.string, syntax.number, syntax.type_name, syntax.function,
-            syntax.macro_name, syntax.comment, syntax.punctuation, syntax.heading];
+            syntax.macro_name, syntax.punctuation, syntax.heading];
         for color in colors {
             let ratio = contrast_ratio(color, theme.surface.canvas);
-            assert!(ratio >= 4.5, "{kind:?} syntax color {color:?} has contrast {ratio}");
+            assert!(ratio >= BODY_TEXT_CONTRAST, "{kind:?} syntax color {color:?} has contrast {ratio}");
         }
+        let comment = contrast_ratio(syntax.comment, theme.surface.canvas);
+        assert!(comment >= DESIGN_COMMENT_CONTRAST, "{kind:?} comment color has contrast {comment}");
     }
+}
+
+#[test]
+fn onyx_and_apple_comments_use_the_design_subtle_colors() {
+    let dark = Theme::load(ThemeKind::Dark).unwrap();
+    let light = Theme::load(ThemeKind::Light).unwrap();
+    assert_eq!(dark.syntax.comment, crate::theme::hex_to_hsla("#7D838F", "comment").unwrap());
+    assert_eq!(light.syntax.comment, crate::theme::hex_to_hsla("#8A8A90", "comment").unwrap());
 }
 
 #[test]

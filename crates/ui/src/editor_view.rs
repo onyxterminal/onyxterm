@@ -7,7 +7,8 @@ use crate::theme::{EditorTokens, SyntaxTokens, Theme};
 use editor_core::syntax::{HighlightSource, Language, LineStates, Span, TokenKind};
 use editor_core::{line_len, DiffSource, HunkKind, LineDiff, LineMark, Rope, Selections, Selection, TAB_WIDTH};
 use gpui::{
-    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font, Hitbox, HitboxBehavior,
+    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font, FontStyle, FontWeight,
+    Hitbox, HitboxBehavior,
     Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollWheelEvent, SharedString,
     ShapedLine, Size, Styled, TextRun, UnderlineStyle, Window,
 };
@@ -558,10 +559,20 @@ impl EditorStyle {
         }
     }
 
+    fn font_for(&self, kind: Option<TokenKind>) -> Font {
+        let mut styled = self.font();
+        match kind {
+            Some(TokenKind::Keyword | TokenKind::Heading) => styled.weight = FontWeight::SEMIBOLD,
+            Some(TokenKind::Comment) => styled.style = FontStyle::Italic,
+            _ => {}
+        }
+        styled
+    }
+
     fn text_run(&self, len: usize, kind: Option<TokenKind>) -> TextRun {
         TextRun {
             len,
-            font: self.font(),
+            font: self.font_for(kind),
             color: self.color_of(kind),
             background_color: None,
             underline: None,
@@ -1517,6 +1528,19 @@ mod tests {
     #[test]
     fn change_bar_hugs_the_number_cell_ten_pixels_past_the_digits() {
         assert_eq!(change_bar_x(px(60.0), px(14.0)), px(54.0));
+    }
+
+    fn test_style() -> EditorStyle {
+        EditorStyle::from_theme(&Theme::load(crate::theme::ThemeKind::Dark).unwrap(), "Menlo".into())
+    }
+
+    #[test]
+    fn keywords_and_headings_are_semibold_and_comments_italic() {
+        let style = test_style();
+        assert_eq!(style.font_for(Some(TokenKind::Keyword)).weight, FontWeight::SEMIBOLD);
+        assert_eq!(style.font_for(Some(TokenKind::Heading)).weight, FontWeight::SEMIBOLD);
+        assert_eq!(style.font_for(Some(TokenKind::Comment)).style, FontStyle::Italic);
+        assert_eq!(style.font_for(Some(TokenKind::String)), style.font_for(None));
     }
 
     #[test]

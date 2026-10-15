@@ -7,7 +7,7 @@ const KEYWORDS: [&str; 36] = [
     "static", "struct", "super", "trait", "type", "unsafe", "use", "where", "while",
 ];
 const CONSTANTS: [&str; 6] = ["true", "false", "None", "Some", "Ok", "Err"];
-const PUNCTUATION: &[u8] = b"{}[]()<>;:,.=+-*/%&|^!?#@~$";
+const PUNCTUATION: &[u8] = b"{}[]()<>;:,.=&|?-";
 const RAW_PREFIXES: [&str; 2] = ["r", "br"];
 const BYTE_STRING_PREFIX: &str = "b";
 
