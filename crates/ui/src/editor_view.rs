@@ -29,6 +29,7 @@ const BITS_PER_BYTE: usize = 8;
 const TAB_BYTES: u64 = 0x0909_0909_0909_0909;
 const LOW_SEVEN_BITS: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 const CHANGE_BAR_WIDTH_PX: f32 = 2.0;
+const REVEALED_LINES_ABOVE: usize = 5;
 
 #[derive(Debug, Default)]
 pub struct EditorView {
@@ -38,6 +39,7 @@ pub struct EditorView {
     pub is_selecting: bool,
     pub line_states: LineStates,
     pub line_diff: LineDiff,
+    pub reveal_line: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -739,6 +741,9 @@ fn prepare_state(
     let viewport_height = f32::from(text_rect.size.height);
     let max_scroll = max_scroll_top(line_count, line_height_f);
     let mut view_ref = view.borrow_mut();
+    if let Some(line) = view_ref.reveal_line.take() {
+        view_ref.scroll_top = line.saturating_sub(REVEALED_LINES_ABOVE) as f32 * line_height_f;
+    }
     view_ref.scroll_top = view_ref.scroll_top.clamp(0.0, max_scroll);
     let range = visible_range(view_ref.scroll_top, viewport_height, line_height_f, line_count);
     let first_line = range.start;

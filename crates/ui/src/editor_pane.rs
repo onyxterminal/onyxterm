@@ -3,7 +3,7 @@
 
 use crate::editor_view::EditorView;
 use domain::DocumentId;
-use editor_core::{io::LoadError, Buffer, Editor, Rope};
+use editor_core::{io::LoadError, line_len, Buffer, Editor, Rope, Selection, Selections};
 use gpui::ScrollHandle;
 use std::cell::RefCell;
 use std::path::{Component, Path, PathBuf};
@@ -20,6 +20,20 @@ pub struct OpenDocument {
     pub path: PathBuf,
     pub state: EditorState,
     pub view: Rc<RefCell<EditorView>>,
+    pending_jump: Option<LineJump>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineJump {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl LineJump {
+    pub fn offset_in(self, rope: &Rope) -> usize {
+        let line = self.line.min(rope.len_lines().saturating_sub(1));
+        rope.line_to_char(line) + self.column.min(line_len(rope, line))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +55,18 @@ impl OpenDocument {
             path,
             state: EditorState::Loading,
             view: Rc::new(RefCell::new(EditorView::default())),
+            pending_jump: None,
         }
+    }
+
+    pub fn jump_to(&mut self, jump: LineJump) {
+        let Some(editor) = self.ready_mut() else {
+            self.pending_jump = Some(jump);
+            return;
+        };
+        let offset = jump.offset_in(editor.buffer().rope());
+        editor.set_selections(Selections::single(Selection::cursor(offset)));
+        self.view.borrow_mut().reveal_line = Some(jump.line);
     }
 
     pub fn ready(&self) -> Option<&Editor> {
@@ -174,6 +199,9 @@ impl EditorPane {
             Ok(buffer) => EditorState::Ready(Editor::new(buffer)),
             Err(err) => EditorState::Failed(crate::document::load_error_text(&err)),
         };
+        if let Some(jump) = document.pending_jump.take() {
+            document.jump_to(jump);
+        }
     }
 
     pub fn mark_saved(&mut self, id: DocumentId, version: u64, saved_rope: Rope) {
@@ -396,5 +424,13 @@ mod tests {
 
         assert_eq!(labels[0].detail.as_deref(), Some("a/src"));
         assert_eq!(labels[1].detail.as_deref(), Some("b/src"));
+    }
+
+    #[test]
+    fn line_jump_lands_on_the_line_and_clamps_to_its_end() {
+        let rope = Rope::from_str("fn main() {\n    run();\n}\n");
+        assert_eq!(LineJump { line: 1, column: 4 }.offset_in(&rope), 16);
+        assert_eq!(LineJump { line: 1, column: 99 }.offset_in(&rope), 22);
+        assert_eq!(LineJump { line: 99, column: 0 }.offset_in(&rope), rope.len_chars());
     }
 }
