@@ -239,11 +239,8 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
         .child(check)
         .child(lines)
         .children(item.shortcut.map(|shortcut| menu_shortcut(shortcut, theme)));
-    let delete = match item.can_delete {
-        true => delete_button(&item.id, theme, actions.delete.clone()).into_any_element(),
-        false => div().flex_none().size(px(ROW_ICON_BUTTON_PX)).into_any_element(),
-    };
-    div().flex().flex_row().items_center().gap(px(ROW_GAP_PX)).child(row).child(delete)
+    let delete = item.can_delete.then(|| delete_button(&item.id, theme, actions.delete.clone()));
+    div().flex().flex_row().items_center().gap(px(ROW_GAP_PX)).child(row).children(delete)
 }
 
 fn delete_button(id: &SharedString, theme: &Theme, delete: SelectHandler) -> impl IntoElement {
