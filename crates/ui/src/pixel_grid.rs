@@ -2,14 +2,15 @@ use gpui::{point, px, size, Bounds, LineLayout, Pixels, Point, ShapedLine};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use std::sync::Arc;
 
 const GLYPH_PHASE_BIAS_DEVICE_PX: f32 = 1.0 / 64.0;
 const MIN_CELL_DEVICE_PX: f32 = 1.0;
 const ALIGN_CACHE_LIMIT: usize = 1024;
 
-pub type AlignCache = RefCell<HashMap<(u64, Pixels), Arc<LineLayout>>>;
+pub type AlignCache = Rc<RefCell<HashMap<(u64, Pixels), Arc<LineLayout>>>>;
 
 pub fn snap_to_device(value: Pixels, scale: f32) -> Pixels {
     px((f32::from(value) * scale).round() / scale)
@@ -43,6 +44,9 @@ pub fn glyph_aligned_origin(origin: Point<Pixels>, baseline: Pixels, scale: f32)
 pub fn align_glyphs_to_cells(line: &mut ShapedLine, cell_width: Pixels, cache: &AlignCache) {
     let mut hasher = DefaultHasher::new();
     hasher.write(line.text.as_bytes());
+    for run in &line.runs {
+        run.font_id.hash(&mut hasher);
+    }
     let key = (hasher.finish(), cell_width);
     if let Some(aligned) = cache.borrow().get(&key).cloned() {
         let layout: &mut Arc<LineLayout> = line;

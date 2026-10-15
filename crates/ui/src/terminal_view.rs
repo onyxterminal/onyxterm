@@ -204,7 +204,7 @@ impl TerminalStyle {
             selection: theme.accent.primary.opacity(SELECTION_ALPHA),
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
-            align_cache: RefCell::new(std::collections::HashMap::new()),
+            align_cache: Rc::default(),
         }
     }
 
