@@ -105,7 +105,8 @@ fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &Unifo
                 .child(NO_RESULTS),
         );
     }
-    let height = theme.palette.row_height_px * rows.len().min(theme.palette.max_rows) as f32;
+    let list_height = theme.palette.row_height_px * rows.len() as f32;
+    let height = list_height.min(theme.palette.list_max_height_px - RESULTS_PADDING_PX * 2.0);
     let row_theme = theme.clone();
     let count = rows.len();
     let scrolling_rows = uniform_list(RESULTS_ID, count, move |range, _window, _cx| {

@@ -581,15 +581,15 @@ fn island_insets_place_content_under_header_and_grid_uses_inner_size() {
     use crate::terminal_view::{content_bounds, island_grid, ContentInsets, TerminalStyle};
     let theme = Theme::load_default().unwrap();
     let insets = ContentInsets::from_theme(&theme);
-    assert_eq!(theme.layout.pane_header_height_px, 26.0);
+    assert_eq!(theme.layout.pane_header_height_px, 30.0);
     assert_eq!(theme.island.pane_padding_bottom_px, 12.0);
     assert_eq!(theme.layout.island_radius_px, 10.0);
     assert_eq!(theme.layout.island_gap_px, 6.0);
-    assert_eq!(theme.layout.window_margin_px, 6.0);
-    assert_eq!(insets, ContentInsets { x: px(14.0), top: px(32.0), bottom: px(12.0) });
-    let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(513.0)));
+    assert_eq!(theme.layout.window_margin_px, 8.0);
+    assert_eq!(insets, ContentInsets { x: px(14.0), top: px(36.0), bottom: px(12.0) });
+    let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(517.0)));
     let inner = content_bounds(island, insets);
-    assert_eq!(inner.origin, gpui::point(px(114.0), px(82.0)));
+    assert_eq!(inner.origin, gpui::point(px(114.0), px(86.0)));
     assert_eq!(inner.size, gpui::size(px(788.0), px(469.0)));
     let cell = gpui::size(px(8.0), px(18.0));
     let style = TerminalStyle::from_theme(&theme, "ui-monospace".into());
@@ -822,9 +822,10 @@ fn tab_hit_testing_skips_the_source_tab_and_drags_need_a_dead_zone() {
 
 #[test]
 fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
-    use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry};
+    use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuState};
     let map = Keymap::default();
-    let entries = pane_menu_entries(false, &map);
+    let idle = PaneMenuState { is_maximized: false, is_copy_mode: false };
+    let entries = pane_menu_entries(idle, &map);
     let rows: Vec<(String, Option<String>)> = entries
         .iter()
         .map(|entry| match entry {
@@ -835,20 +836,25 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
     let expected = [
         ("Split Right", Some("\u{2318}D")),
         ("Split Down", Some("\u{21e7}\u{2318}D")),
+        ("-", None),
         ("Maximize Pane", Some("\u{2318}\u{21a9}")),
+        ("Clear", Some("\u{2318}K")),
+        ("Copy Mode", Some("\u{21e7}\u{2318}C")),
         ("-", None),
         ("Rename Pane\u{2026}", None),
         ("Move to New Tab", None),
+        ("Open Editor Here", Some("\u{2318}E")),
         ("-", None),
-        ("Close Pane", None),
+        ("Close Pane", Some("\u{2318}W")),
     ];
     let expected: Vec<(String, Option<String>)> =
         expected.iter().map(|(title, shortcut)| (title.to_string(), shortcut.map(str::to_string))).collect();
     assert_eq!(rows, expected);
-    let restore = pane_menu_entries(true, &map);
-    assert!(matches!(&restore[2], PaneMenuEntry::Item(item) if item.title == "Restore Pane"));
+    let restore = pane_menu_entries(PaneMenuState { is_maximized: true, is_copy_mode: true }, &map);
+    assert!(matches!(&restore[3], PaneMenuEntry::Item(item) if item.title == "Restore Pane"));
+    assert!(matches!(&restore[5], PaneMenuEntry::Item(item) if item.title == "Exit Copy Mode"));
     let commands = selectable_commands(&entries);
-    assert_eq!(commands.len(), 6);
+    assert_eq!(commands.len(), 9);
     assert_eq!(commands.last(), Some(&CommandId::ClosePane));
     let destructive: Vec<&str> = entries
         .iter()
@@ -1165,13 +1171,15 @@ fn apple_light_theme_loads_every_redesign_token() {
         [12.0, 11.5, 13.0, 16.0]
     );
     assert_eq!(theme.ui_font.hint_px, 11.0);
-    assert_eq!(theme.layout.tab_strip_height_px, 38.0);
+    assert_eq!(theme.layout.tab_strip_height_px, 40.0);
     assert_eq!(theme.top_bar.control_height_px, 26.0);
     assert_eq!(theme.top_bar.tab_gap_px, 2.0);
-    assert_eq!(theme.menu.row_height_px, 26.0);
-    assert_eq!(theme.palette.width_px, 600.0);
-    assert_eq!(theme.palette.row_height_px, 32.0);
-    assert_eq!(theme.dialog.radius_px, 12.0);
+    assert_eq!((theme.top_bar.tab_padding_left_px, theme.top_bar.tab_padding_right_px), (12.0, 26.0));
+    assert_eq!(theme.menu.row_height_px, 28.0);
+    assert_eq!((theme.menu.width_px, theme.menu.popover_width_px), (236.0, 320.0));
+    assert_eq!(theme.palette.width_px, 620.0);
+    assert_eq!(theme.palette.row_height_px, 34.0);
+    assert_eq!((theme.dialog.width_px, theme.dialog.radius_px), (272.0, 14.0));
     assert!(theme.island.dim_unfocused);
     assert_eq!(theme.island.unfocused_opacity, 0.8);
     assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 6.0));
@@ -1190,7 +1198,9 @@ fn shadow_tokens_become_layered_box_shadows() {
     assert_eq!(tab[1].offset, gpui::point(px(0.0), px(1.0)));
     assert_eq!(tab[1].blur_radius, px(2.0));
     let menu = box_shadows(&theme.shadow.menu);
-    assert_eq!((menu[0].offset.y, menu[0].blur_radius), (px(12.0), px(32.0)));
+    assert_eq!((menu[0].offset.y, menu[0].blur_radius), (px(14.0), px(40.0)));
+    let popover = box_shadows(&theme.shadow.popover);
+    assert_eq!((popover[0].offset.y, popover[0].blur_radius), (px(18.0), px(50.0)));
     let palette = box_shadows(&theme.shadow.palette);
     assert_eq!((palette[0].offset.y, palette[0].blur_radius), (px(30.0), px(80.0)));
 }
@@ -1354,7 +1364,7 @@ fn keymap_binds_vim_movement_with_command_held() {
     let cmd = Modifiers::command();
     assert_eq!(map.resolve(&Combo::new(cmd, "h")), Some(CommandId::FocusPane(Direction::Left)));
     assert_eq!(map.resolve(&Combo::new(cmd, "j")), Some(CommandId::FocusPane(Direction::Down)));
-    assert_eq!(map.resolve(&Combo::new(cmd, "k")), Some(CommandId::FocusPane(Direction::Up)));
+    assert_eq!(map.resolve(&Combo::new(cmd, "k")), Some(CommandId::ClearTerminal));
     assert_eq!(map.resolve(&Combo::new(cmd, "l")), Some(CommandId::FocusPane(Direction::Right)));
     assert_eq!(map.resolve(&Combo::new(cmd | Modifiers::alt(), "up")), Some(CommandId::FocusPane(Direction::Up)));
     assert_eq!(map.combo_for(CommandId::FocusPane(Direction::Left)), Some(&Combo::new(cmd, "h")));
@@ -1507,18 +1517,19 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     map.bind(Combo::new(Modifiers::command_shift(), "left"), CommandId::MoveTabLeft);
     let groups = shortcut_groups(&registry, &map, "");
     let categories: Vec<&str> = groups.iter().map(|group| group.category).collect();
-    assert_eq!(categories, ["Tabs", "Panes", "Palette", "Application", "Files", "Workspaces", "Edit", "Window"]);
+    assert_eq!(categories, ["Tabs", "Panes", "Files", "Terminal", "Workspaces", "Edit", "Application", "Palette",
+        "Window"]);
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
-    assert_eq!(listed, registry.list().len() - 1);
+    assert_eq!(listed, registry.list().len() - 2);
     assert!(groups.iter().flat_map(|group| &group.shortcuts).all(|shortcut| shortcut.command != CommandId::ClosePalette));
     let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
-    assert_eq!(tab_titles[..7], ["New Tab", "Move Tab Left", "Move Tab Right", "Next Tab", "Rename Tab",
-        "Previous Tab", "Close Tab"]);
+    assert_eq!(tab_titles[..7], ["New Tab", "Next Tab", "Previous Tab", "Move Tab Left", "Move Tab Right",
+        "Rename Tab", "Close Tab"]);
     assert_eq!(tab_titles[7..], ["Select Tab 1", "Select Tab 2", "Select Tab 3", "Select Tab 4", "Select Tab 5",
         "Select Tab 6", "Select Tab 7", "Select Tab 8", "Select Tab 9"]);
     assert_eq!(groups[0].shortcuts[0].combo, None);
-    assert_eq!(groups[0].shortcuts[1].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
-    let save = groups[4].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
+    assert_eq!(groups[0].shortcuts[3].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
+    let save = groups[2].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
     assert_eq!(save.combo, Some(Combo::new(Modifiers::command(), "s")));
 }
 
@@ -1533,7 +1544,7 @@ fn shortcut_filter_matches_title_or_category_ignoring_case() {
     };
     assert_eq!(titles("SPLIT"), ["Split Right", "Split Down"]);
     assert_eq!(titles("  workspaces ")[..6], ["Switch Workspace", "New Workspace", "Rename Workspace\u{2026}",
-        "Next Workspace", "Previous Workspace", "Open Workspace Menu"]);
+        "Next Workspace", "Previous Workspace", "Select Workspace 1"]);
     assert_eq!(titles("select workspace 9"), ["Select Workspace 9"]);
     assert!(titles("no such command").is_empty());
     let categories: Vec<&str> = shortcut_groups(&registry, &map, "copy").iter().map(|group| group.category).collect();

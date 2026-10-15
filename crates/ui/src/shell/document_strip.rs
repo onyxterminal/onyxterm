@@ -48,7 +48,7 @@ impl Shell {
             .left_0()
             .right_0()
             .h(px(strip_height(scale)))
-            .px(px(theme.pane_header.padding_x_px - PILL_PADDING_RIGHT_PX * scale))
+            .px(px(theme.pane_header.padding_left_px - PILL_PADDING_RIGHT_PX * scale))
             .flex()
             .flex_row()
             .items_center()

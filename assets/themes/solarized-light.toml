@@ -40,42 +40,48 @@ idle = "#B4B4B9"
 control_fill = "rgba(7,54,66,0.07)"
 icon_hover_fill = "rgba(0,0,0,0.06)"
 menu_fill = "rgba(255,251,237,0.98)"
-selected_shortcut = "rgba(253,246,227,0.85)"
 destructive = "#D70015"
 on_destructive = "#FFFFFF"
+logo_ink = "#FFFFFF"
 warning = "#A35200"
 backdrop = "rgba(0,0,0,0.16)"
 
 [ui_font]
 family = ".SystemUIFont"
 tab_px = 12.0
+workspace_px = 12.5
 button_px = 12.0
 pane_title_px = 11.5
+pill_px = 10.5
 menu_px = 13.0
 shortcut_px = 12.0
+category_px = 11.5
 palette_input_px = 16.0
 hint_px = 11.0
 section_label_px = 11.0
 dialog_title_px = 13.0
-dialog_body_px = 12.0
+dialog_body_px = 11.5
 
 [top_bar]
 leading_gap_px = 10.0
 control_height_px = 26.0
 control_radius_px = 6.0
-logo_px = 14.0
+logo_px = 15.0
 separator_width_px = 1.0
 separator_height_px = 16.0
-tab_padding_x_px = 14.0
+tab_padding_left_px = 12.0
+tab_padding_right_px = 26.0
 tab_gap_px = 2.0
-item_gap_px = 8.0
+item_gap_px = 6.0
 
 [pane_header]
-padding_x_px = 10.0
-status_dot_px = 6.0
-icon_button_px = 20.0
+padding_left_px = 12.0
+padding_right_px = 6.0
+status_dot_px = 7.0
+icon_button_px = 22.0
 icon_button_radius_px = 5.0
 icon_px = 12.0
+close_icon_px = 10.0
 
 [editor]
 gutter_text = "rgba(0,0,0,0.28)"
@@ -100,33 +106,38 @@ punctuation = "#4F636A"
 heading = "#1A6FA8"
 
 [menu]
-width_px = 240.0
-radius_px = 10.0
+width_px = 236.0
+radius_px = 9.0
 padding_px = 5.0
-border_px = 0.5
-row_height_px = 26.0
+border_px = 1.0
+row_height_px = 28.0
 row_radius_px = 5.0
-row_padding_x_px = 9.0
+row_padding_x_px = 10.0
 offset_px = 4.0
-section_label_height_px = 22.0
+section_label_height_px = 25.0
+popover_width_px = 320.0
+popover_radius_px = 11.0
+popover_padding_px = 6.0
+popover_row_height_px = 40.0
 
 [palette]
-width_px = 600.0
-top_px = 72.0
-radius_px = 12.0
-border_px = 0.5
-search_height_px = 48.0
-search_icon_px = 18.0
-row_height_px = 32.0
-row_radius_px = 6.0
-footer_height_px = 30.0
-max_rows = 9
+width_px = 620.0
+top_px = 84.0
+radius_px = 13.0
+border_px = 1.0
+search_height_px = 52.0
+search_icon_px = 16.0
+row_height_px = 34.0
+row_radius_px = 7.0
+footer_height_px = 34.0
+list_max_height_px = 372.0
 
 [dialog]
-width_px = 360.0
-radius_px = 12.0
-button_height_px = 24.0
-button_radius_px = 6.0
+width_px = 272.0
+radius_px = 14.0
+button_height_px = 28.0
+button_radius_px = 7.0
+logo_px = 44.0
 
 [island]
 focus_ring_px = 1.0
@@ -147,8 +158,18 @@ blur = 2.0
 color = "rgba(0,0,0,0.08)"
 
 [[shadow.menu]]
-y = 12.0
-blur = 32.0
+y = 14.0
+blur = 40.0
+color = "rgba(0,0,0,0.16)"
+
+[[shadow.popover]]
+y = 18.0
+blur = 50.0
+color = "rgba(0,0,0,0.16)"
+
+[[shadow.hint]]
+y = 6.0
+blur = 20.0
 color = "rgba(0,0,0,0.16)"
 
 [[shadow.palette]]
@@ -188,15 +209,15 @@ bright_white = "#002B36"
 option_as_meta = true
 
 [layout]
-tab_strip_height_px = 38
-pane_header_height_px = 26
+tab_strip_height_px = 40
+pane_header_height_px = 30
 border_radius_px = 6
 gap_px = 1
 island_radius_px = 10
 island_gap_px = 6
-window_margin_px = 6
+window_margin_px = 8
 min_pane_px = 120
 animation_ms = 150
 traffic_light_left_px = 14
-traffic_light_top_px = 12
+traffic_light_top_px = 14
 traffic_lights_width_px = 74

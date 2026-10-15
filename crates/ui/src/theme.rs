@@ -298,23 +298,28 @@ impl Theme {
 
     pub fn scale_ui(&mut self, scale: f32) {
         macro_rules! scale { ($object:expr, $($field:ident),+ $(,)?) => { $( $object.$field *= scale; )+ }; }
-        scale!(self.ui_font, tab_px, button_px, pane_title_px, menu_px, shortcut_px,
-            palette_input_px, hint_px, section_label_px, dialog_title_px, dialog_body_px);
+        scale!(self.ui_font, tab_px, workspace_px, button_px, pane_title_px, pill_px, menu_px, shortcut_px,
+            category_px, palette_input_px, hint_px, section_label_px, dialog_title_px, dialog_body_px);
         scale!(self.layout, tab_strip_height_px, pane_header_height_px, border_radius_px,
             gap_px, island_radius_px, island_gap_px, window_margin_px, min_pane_px,
             traffic_light_left_px, traffic_light_top_px, traffic_lights_width_px);
         scale!(self.top_bar, leading_gap_px, control_height_px, control_radius_px, logo_px,
-            separator_width_px, separator_height_px, tab_padding_x_px, tab_gap_px, item_gap_px);
-        scale!(self.pane_header, padding_x_px, status_dot_px, icon_button_px, icon_button_radius_px, icon_px);
+            separator_width_px, separator_height_px, tab_padding_left_px, tab_padding_right_px, tab_gap_px,
+            item_gap_px);
+        scale!(self.pane_header, padding_left_px, padding_right_px, status_dot_px, icon_button_px,
+            icon_button_radius_px, icon_px, close_icon_px);
         scale!(self.menu, width_px, radius_px, padding_px, border_px, row_height_px, row_radius_px,
-            row_padding_x_px, offset_px, section_label_height_px);
+            row_padding_x_px, offset_px, section_label_height_px, popover_width_px, popover_radius_px,
+            popover_padding_px, popover_row_height_px);
         scale!(self.palette, width_px, top_px, radius_px, border_px, search_height_px,
-            search_icon_px, row_height_px, row_radius_px, footer_height_px);
-        scale!(self.dialog, width_px, radius_px, button_height_px, button_radius_px);
+            search_icon_px, row_height_px, row_radius_px, footer_height_px, list_max_height_px);
+        scale!(self.dialog, width_px, radius_px, button_height_px, button_radius_px, logo_px);
         scale!(self.island, focus_ring_px, unfocused_border_px, pane_padding_x_px,
             pane_padding_top_px, pane_padding_bottom_px);
         scale!(self.editor, gutter_padding_px, cursor_width_px);
-        for shadow in self.shadow.tab.iter_mut().chain(&mut self.shadow.menu).chain(&mut self.shadow.palette) {
+        let shadows = [&mut self.shadow.tab, &mut self.shadow.menu, &mut self.shadow.popover, &mut self.shadow.hint,
+            &mut self.shadow.palette];
+        for shadow in shadows.into_iter().flat_map(|layers| layers.iter_mut()) {
             scale!(shadow, x, y, blur, spread);
         }
     }
@@ -512,11 +517,11 @@ pub struct ChromeTokens {
     #[serde(deserialize_with = "color")]
     pub menu_fill: Hsla,
     #[serde(deserialize_with = "color")]
-    pub selected_shortcut: Hsla,
-    #[serde(deserialize_with = "color")]
     pub destructive: Hsla,
     #[serde(deserialize_with = "color")]
     pub on_destructive: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub logo_ink: Hsla,
     #[serde(deserialize_with = "color")]
     pub warning: Hsla,
     #[serde(deserialize_with = "color")]
@@ -527,10 +532,13 @@ pub struct ChromeTokens {
 pub struct UiFontTokens {
     pub family: String,
     pub tab_px: f32,
+    pub workspace_px: f32,
     pub button_px: f32,
     pub pane_title_px: f32,
+    pub pill_px: f32,
     pub menu_px: f32,
     pub shortcut_px: f32,
+    pub category_px: f32,
     pub palette_input_px: f32,
     pub hint_px: f32,
     pub section_label_px: f32,
@@ -546,18 +554,21 @@ pub struct TopBarTokens {
     pub logo_px: f32,
     pub separator_width_px: f32,
     pub separator_height_px: f32,
-    pub tab_padding_x_px: f32,
+    pub tab_padding_left_px: f32,
+    pub tab_padding_right_px: f32,
     pub tab_gap_px: f32,
     pub item_gap_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct PaneHeaderTokens {
-    pub padding_x_px: f32,
+    pub padding_left_px: f32,
+    pub padding_right_px: f32,
     pub status_dot_px: f32,
     pub icon_button_px: f32,
     pub icon_button_radius_px: f32,
     pub icon_px: f32,
+    pub close_icon_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -571,6 +582,10 @@ pub struct MenuTokens {
     pub row_padding_x_px: f32,
     pub offset_px: f32,
     pub section_label_height_px: f32,
+    pub popover_width_px: f32,
+    pub popover_radius_px: f32,
+    pub popover_padding_px: f32,
+    pub popover_row_height_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -584,7 +599,7 @@ pub struct PaletteTokens {
     pub row_height_px: f32,
     pub row_radius_px: f32,
     pub footer_height_px: f32,
-    pub max_rows: usize,
+    pub list_max_height_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -593,6 +608,7 @@ pub struct DialogTokens {
     pub radius_px: f32,
     pub button_height_px: f32,
     pub button_radius_px: f32,
+    pub logo_px: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -677,6 +693,8 @@ impl ShadowLayer {
 pub struct ShadowTokens {
     pub tab: Vec<ShadowLayer>,
     pub menu: Vec<ShadowLayer>,
+    pub popover: Vec<ShadowLayer>,
+    pub hint: Vec<ShadowLayer>,
     pub palette: Vec<ShadowLayer>,
 }
 

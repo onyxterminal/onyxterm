@@ -30,6 +30,16 @@ pub fn display_title(source: &TitleSource) -> String {
     }
 }
 
+pub fn terminal_title(source: &TitleSource, shell: &str) -> String {
+    if let Some(name) = source.name {
+        return name.to_string();
+    }
+    match source.job {
+        Some(job) => truncate_title(&job_title(job, source.osc)),
+        None => shell.to_string(),
+    }
+}
+
 pub fn title_tooltip(source: &TitleSource) -> String {
     let cwd = source.cwd.display();
     let full_title = source.name.map(str::to_string).or_else(|| source.job.map(|job| job_title(job, source.osc)));
@@ -59,6 +69,14 @@ pub fn truncate_title(text: &str) -> String {
     }
     let kept: String = text.chars().take(MAX_TITLE_CHARS - 1).collect();
     format!("{}{ELLIPSIS}", kept.trim_end())
+}
+
+pub fn home_relative(path: &Path, home: &Path) -> String {
+    match path.strip_prefix(home) {
+        Ok(relative) if relative.as_os_str().is_empty() => HOME_MARK.to_string(),
+        Ok(relative) => format!("{HOME_MARK}/{}", relative.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 pub fn short_cwd(path: &Path, home: &Path) -> String {

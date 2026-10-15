@@ -1,6 +1,6 @@
 use super::Shell;
 use crate::document::explicit_title;
-use crate::pane_title::{display_title, title_tooltip, TitleSource};
+use crate::pane_title::{display_title, short_cwd, terminal_title, title_tooltip, TitleSource};
 use domain::PanelId;
 use gpui::{Context, Task};
 use std::path::PathBuf;
@@ -32,7 +32,25 @@ pub(super) fn poll_pane_statuses(cx: &mut Context<Shell>) -> Task<()> {
 
 impl Shell {
     pub(super) fn pane_display_title(&self, panel: PanelId) -> String {
-        display_title(&self.title_source(panel))
+        let source = self.title_source(panel);
+        match self.panes.get(&panel) {
+            Some(pane) => terminal_title(&source, &pane.shell_name),
+            None => display_title(&source),
+        }
+    }
+
+    pub(super) fn pane_cwd_label(&self, panel: PanelId) -> Option<String> {
+        self.panes.get(&panel)?;
+        let source = self.title_source(panel);
+        Some(short_cwd(source.cwd, source.home))
+    }
+
+    pub(super) fn tab_title(&self, tab: &crate::tabs::Tab) -> String {
+        tab.name().map_or_else(|| self.pane_display_title(tab.focused()), str::to_string)
+    }
+
+    pub(super) fn is_tab_busy(&self, tab: &crate::tabs::Tab) -> bool {
+        tab.layout().leaves().into_iter().any(|panel| self.is_pane_busy(panel))
     }
 
     pub(super) fn is_pane_busy(&self, panel: PanelId) -> bool {

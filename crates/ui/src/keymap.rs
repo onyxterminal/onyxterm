@@ -166,6 +166,13 @@ impl Keymap {
         self.order.iter().find(|combo| self.bindings.get(*combo) == Some(&command))
     }
 
+    pub fn display_combo(&self, command: CommandId) -> Option<&Combo> {
+        self.combo_for(command).or_else(|| match command {
+            CommandId::ClosePane => self.combo_for(CommandId::CloseActive),
+            _ => None,
+        })
+    }
+
     pub fn combos_for(&self, command: CommandId) -> Vec<&Combo> {
         self.order.iter().filter(|combo| self.bindings.get(*combo) == Some(&command)).collect()
     }
@@ -327,6 +334,7 @@ pub fn shortcut_groups(registry: &CommandRegistry, keymap: &Keymap, query: &str)
 }
 
 const INDEXED_SLOTS: usize = 9;
+const CLEAR_TERMINAL_KEY: &str = "k";
 
 const DIRECTION_KEYS: [(Direction, &str, &str); 4] = [
     (Direction::Left, "h", "left"),
@@ -375,6 +383,8 @@ fn bind_panes(map: &mut Keymap) {
     map.bind(Combo::new(Modifiers::command_shift(), "d"), SplitDown);
     map.bind(Combo::new(cmd, "enter"), MaximizePane);
     map.bind(Combo::new(Modifiers::command_shift(), "g"), GridLayout);
+    map.bind(Combo::new(cmd, CLEAR_TERMINAL_KEY), ClearTerminal);
+    map.bind(Combo::new(Modifiers::control(), "c"), InterruptProcess);
     map.bind(Combo::new(Modifiers::command_shift(), "e"), EqualizePanes);
 }
 
@@ -382,7 +392,9 @@ fn bind_pane_movement(map: &mut Keymap) {
     use CommandId::*;
     let cmd = Modifiers::command();
     for (direction, vim_key, arrow_key) in DIRECTION_KEYS {
-        map.bind(Combo::new(cmd, vim_key), FocusPane(direction));
+        if vim_key != CLEAR_TERMINAL_KEY {
+            map.bind(Combo::new(cmd, vim_key), FocusPane(direction));
+        }
         map.bind(Combo::new(cmd | Modifiers::alt(), arrow_key), FocusPane(direction));
         map.bind(Combo::new(Modifiers::command_shift(), vim_key), SwapPane(direction));
         map.bind(Combo::new(cmd | Modifiers::control(), vim_key), ResizePane(direction));

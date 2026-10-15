@@ -1,25 +1,38 @@
-use super::islands::pane_group;
 use super::Shell;
 use crate::command::CommandId;
 use crate::document::DocumentPane;
 use crate::theme::icons::Icon;
-use crate::theme::menu_chrome::{field_text, focused_field};
+use crate::theme::menu_chrome::field_text;
 use domain::PanelId;
-use gpui::{div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window};
+use gpui::{
+    div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Svg, Window,
+};
 
-const GEAR_TOOLTIP: &str = "Pane Options";
+const MORE_TOOLTIP: &str = "Pane Options";
 const COPY_MODE_LABEL: &str = "Copy mode";
+const MAXIMIZED_LABEL: &str = "Maximized";
 const CLOSE_TOOLTIP: &str = "Close Pane";
-const HEADER_GAP_PX: f32 = 7.0;
-const BUTTON_GAP_PX: f32 = 2.0;
+const HEADER_GAP_PX: f32 = 8.0;
+const UNFOCUSED_BUTTON_OPACITY: f32 = 0.45;
+const RENAME_WIDTH_PX: f32 = 180.0;
+const RENAME_HEIGHT_PX: f32 = 22.0;
 const RENAME_PADDING_X_PX: f32 = 6.0;
 const RENAME_RADIUS_PX: f32 = 5.0;
+const PILL_PADDING_X_PX: f32 = 7.0;
+const PILL_PADDING_Y_PX: f32 = 2.0;
+const PILL_RADIUS_PX: f32 = 9.0;
+
+struct PillPaint {
+    fill: Hsla,
+    text: Hsla,
+    weight: FontWeight,
+}
 
 impl Shell {
     pub(super) fn render_pane_header(&self, panel: PanelId, is_focused: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let header = theme.pane_header;
-        let group = pane_group(panel);
+        let scale = self.state.settings.ui_scale;
         let drag_handle = div()
             .flex_1()
             .min_w(px(0.0))
@@ -27,7 +40,7 @@ impl Shell {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(HEADER_GAP_PX))
+            .gap(px(HEADER_GAP_PX * scale))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, event: &gpui::MouseDownEvent, window, cx| {
@@ -41,42 +54,58 @@ impl Shell {
             )
             .child(self.status_dot(panel))
             .child(self.pane_title_element(panel, is_focused));
-        let buttons = div()
-            .flex_none()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(BUTTON_GAP_PX))
-            .when(!is_focused, |buttons| buttons.invisible().group_hover(group.clone(), |style| style.visible()))
-            .child(self.gear_button(panel, cx))
-            .child(self.close_button(panel, cx));
+        let button_opacity = if is_focused { 1.0 } else { UNFOCUSED_BUTTON_OPACITY };
         div()
             .absolute()
             .top_0()
             .left_0()
             .right_0()
             .h(px(theme.layout.pane_header_height_px))
-            .px(px(header.padding_x_px))
+            .pl(px(header.padding_left_px))
+            .pr(px(header.padding_right_px))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(HEADER_GAP_PX))
+            .gap(px(HEADER_GAP_PX * scale))
             .font_family(SharedString::from(theme.ui_font.family.clone()))
             .text_size(px(theme.ui_font.pane_title_px))
             .bg(theme.surface.canvas)
             .rounded_t(px(theme.layout.island_radius_px))
             .child(drag_handle)
-            .when(self.is_pane_in_copy_mode(panel), |header| header.child(self.copy_mode_badge()))
-            .child(buttons)
+            .when(self.is_pane_in_copy_mode(panel), |header| header.child(self.copy_mode_pill()))
+            .when(self.is_pane_maximized(panel), |header| header.child(self.maximized_pill()))
+            .child(self.more_button(panel, cx).opacity(button_opacity))
+            .child(self.close_button(panel, cx).opacity(button_opacity))
     }
 
-    fn copy_mode_badge(&self) -> impl IntoElement {
+    fn is_pane_maximized(&self, panel: PanelId) -> bool {
+        self.model.tabs().active().is_some_and(|tab| tab.is_maximized() && tab.focused() == panel)
+    }
+
+    fn copy_mode_pill(&self) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let paint = PillPaint { fill: theme.accent.selection, text: theme.accent.primary, weight: FontWeight::SEMIBOLD };
+        self.header_pill(COPY_MODE_LABEL, paint)
+    }
+
+    fn maximized_pill(&self) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let paint = PillPaint { fill: theme.chrome.control_fill, text: theme.text.muted, weight: FontWeight::NORMAL };
+        self.header_pill(MAXIMIZED_LABEL, paint)
+    }
+
+    fn header_pill(&self, label: &'static str, paint: PillPaint) -> impl IntoElement {
+        let scale = self.state.settings.ui_scale;
         div()
             .flex_none()
-            .text_color(self.state.theme.accent.primary)
-            .text_size(px(self.state.theme.ui_font.hint_px))
-            .font_weight(FontWeight::MEDIUM)
-            .child(COPY_MODE_LABEL)
+            .px(px(PILL_PADDING_X_PX * scale))
+            .py(px(PILL_PADDING_Y_PX * scale))
+            .rounded(px(PILL_RADIUS_PX * scale))
+            .bg(paint.fill)
+            .text_color(paint.text)
+            .text_size(px(self.state.theme.ui_font.pill_px))
+            .font_weight(paint.weight)
+            .child(label)
     }
 
     fn status_dot(&self, panel: PanelId) -> impl IntoElement {
@@ -93,47 +122,63 @@ impl Shell {
 
     fn pane_title_element(&self, panel: PanelId, is_focused: bool) -> Stateful<gpui::Div> {
         let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
         let id = SharedString::from(format!("pane-title-{panel}"));
         if let Some(field) = self.pane_field.as_ref().filter(|field| field.panel == panel) {
-            return focused_field(theme)
+            return div()
                 .id(id)
-                .flex_shrink()
-                .min_w(px(0.0))
-                .px(px(RENAME_PADDING_X_PX))
-                .rounded(px(RENAME_RADIUS_PX))
+                .flex_none()
+                .w(px(RENAME_WIDTH_PX * scale))
+                .h(px(RENAME_HEIGHT_PX * scale))
+                .px(px(RENAME_PADDING_X_PX * scale))
+                .flex()
+                .items_center()
+                .overflow_hidden()
+                .rounded(px(RENAME_RADIUS_PX * scale))
+                .border_1()
+                .border_color(theme.border.focus)
+                .bg(theme.chrome.control_fill)
                 .child(field_text(&field.input, &self.pane_display_title(panel), theme));
         }
-        let (color, weight) = match is_focused {
-            true => (theme.text.default, FontWeight::SEMIBOLD),
-            false => (theme.text.subtle, FontWeight::MEDIUM),
-        };
+        let title_color = if is_focused { theme.text.default } else { theme.text.muted };
+        let cwd = self.pane_cwd_label(panel).map(|cwd| {
+            div().min_w(px(0.0)).truncate().text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle).child(cwd)
+        });
         div()
             .id(id)
-            .flex_1()
+            .flex_shrink()
             .min_w(px(0.0))
-            .truncate()
-            .text_color(color)
-            .font_weight(weight)
+            .flex()
+            .flex_row()
+            .items_baseline()
+            .gap(px(HEADER_GAP_PX * scale))
+            .overflow_hidden()
+            .whitespace_nowrap()
             .tooltip(self.tooltip_builder(self.pane_title_tooltip(panel).into()))
-            .child(self.pane_display_title(panel))
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(title_color)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.pane_display_title(panel)),
+            )
+            .children(cwd)
     }
 
-    fn header_button(&self, id: String, tooltip: &'static str, icon: Icon) -> Stateful<gpui::Div> {
+    fn header_button(&self, id: String, tooltip: &'static str, icon: Svg) -> Stateful<gpui::Div> {
         let header = self.state.theme.pane_header;
-        let hover_fill = self.state.theme.chrome.icon_hover_fill;
         div()
             .id(SharedString::from(id))
             .relative()
+            .flex_none()
             .size(px(header.icon_button_px))
             .flex()
             .items_center()
             .justify_center()
             .rounded(px(header.icon_button_radius_px))
             .cursor_pointer()
-            .text_color(self.state.theme.text.muted)
-            .hover(move |style| style.bg(hover_fill))
             .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
-            .child(icon.sized(header.icon_px, self.state.theme.text.subtle))
+            .child(icon)
     }
 
     pub(super) fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
@@ -149,20 +194,22 @@ impl Shell {
         move |_window, cx| cx.new(|_| Tooltip { text: text.clone(), style: style.clone() }).into()
     }
 
-    fn gear_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
-        self.header_button(format!("pane-gear-{panel}"), GEAR_TOOLTIP, Icon::Gear)
-            .child(self.gear_bounds_probe(panel))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |shell, _event, window, cx| {
-                    cx.stop_propagation();
-                    shell.toggle_pane_menu(panel, window, cx);
-                }),
-            )
+    fn more_button(&self, panel: PanelId, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
+        let theme = &self.state.theme;
+        let icon = Icon::More.sized(theme.pane_header.icon_px, theme.text.subtle);
+        self.header_button(format!("pane-more-{panel}"), MORE_TOOLTIP, icon).on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |shell, _event, window, cx| {
+                cx.stop_propagation();
+                shell.toggle_pane_menu(panel, window, cx);
+            }),
+        )
     }
 
-    fn close_button(&self, panel: PanelId, cx: &mut Context<Self>) -> impl IntoElement {
-        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, Icon::Close).on_mouse_down(
+    fn close_button(&self, panel: PanelId, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
+        let theme = &self.state.theme;
+        let icon = Icon::Close.sized(theme.pane_header.close_icon_px, theme.text.subtle);
+        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, icon).on_mouse_down(
             MouseButton::Left,
             cx.listener(move |shell, _event, window, cx| {
                 cx.stop_propagation();

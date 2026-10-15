@@ -4,7 +4,7 @@
 use crate::text_field::TextField;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::{
-    field_text, focused_field, menu_panel, menu_row, menu_section_label, menu_separator, menu_shortcut, MenuRowStyle,
+    field_text, menu_row, menu_section_label, menu_separator, menu_shortcut, popover_panel, MenuRowStyle,
 };
 use crate::theme::Theme;
 use crate::workspaces::SCRATCH_NAME;
@@ -13,21 +13,41 @@ use gpui::{div, prelude::*, px, App, Div, MouseButton, SharedString, Window};
 use std::rc::Rc;
 
 const SECTION_LABEL: &str = "Workspaces";
-const SSH_SECTION_LABEL: &str = "SSH";
+const SSH_SECTION_LABEL: &str = "SSH hosts";
 const NEW_WORKSPACE_LABEL: &str = "New Workspace\u{2026}";
+const SETTINGS_LABEL: &str = "Settings\u{2026}";
 const NAME_PLACEHOLDER: &str = "Workspace name";
 const SEARCH_PLACEHOLDER: &str = "Filter workspaces";
+const COMMIT_HINT: &str = "\u{21a9}";
 const CHECK_MARK: &str = "\u{2713}";
-const CHECK_COLUMN_PX: f32 = 18.0;
-const ROW_ACTION_ICON_PX: f32 = 13.0;
+const META_SEPARATOR: &str = " \u{00b7} ";
+const CHECK_COLUMN_PX: f32 = 14.0;
+const ROW_GAP_PX: f32 = 2.0;
+const ROW_LINE_GAP_PX: f32 = 1.0;
+const ROW_ICON_BUTTON_PX: f32 = 26.0;
+const ROW_ICON_PX: f32 = 12.0;
+const SEARCH_HEIGHT_PX: f32 = 30.0;
+const SEARCH_PADDING_X_PX: f32 = 9.0;
+const SEARCH_MARGIN_X_PX: f32 = 2.0;
+const SEARCH_MARGIN_TOP_PX: f32 = 2.0;
+const SEARCH_MARGIN_BOTTOM_PX: f32 = 4.0;
+const SEARCH_RADIUS_PX: f32 = 7.0;
+const SEARCH_GAP_PX: f32 = 7.0;
+const SEARCH_ICON_PX: f32 = 13.0;
+const NAME_FIELD_HEIGHT_PX: f32 = 32.0;
+const NAME_FIELD_MARGIN_Y_PX: f32 = 2.0;
+const NAME_FIELD_RADIUS_PX: f32 = 6.0;
+const NAME_FIELD_GAP_PX: f32 = 8.0;
 const NEW_WORKSPACE_GROUP: &str = "new-workspace";
-const SEARCH_GROUP: &str = "workspace-search";
+const SETTINGS_GROUP: &str = "workspace-settings";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceMenuItem {
     pub id: SharedString,
     pub name: SharedString,
+    pub path: SharedString,
     pub tab_count: usize,
+    pub shortcut: Option<String>,
     pub is_active: bool,
     pub can_delete: bool,
 }
@@ -45,6 +65,7 @@ pub struct WorkspaceMenuModel {
     pub field: Option<MenuField>,
     pub search: TextField,
     pub new_workspace_shortcut: Option<String>,
+    pub settings_shortcut: Option<String>,
 }
 
 pub type SelectHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
@@ -55,6 +76,8 @@ pub struct WorkspaceMenuActions {
     pub select: SelectHandler,
     pub delete: SelectHandler,
     pub create: ClickHandler,
+    pub connect: SelectHandler,
+    pub open_settings: ClickHandler,
 }
 
 pub fn workspace_button_label(name: Option<&str>) -> &str {
@@ -68,13 +91,27 @@ pub fn tab_count_label(count: usize) -> String {
     }
 }
 
+pub fn workspace_meta(tab_count: usize, path: &str) -> String {
+    match tab_count {
+        0 => path.to_string(),
+        count => format!("{}{META_SEPARATOR}{path}", tab_count_label(count)),
+    }
+}
+
+pub fn ssh_target(host: &SshHost) -> String {
+    let Some(hostname) = host.hostname.as_deref() else {
+        return String::new();
+    };
+    let user = host.user.as_deref().map(|user| format!("{user}@")).unwrap_or_default();
+    let port = host.port.map(|port| format!(":{port}")).unwrap_or_default();
+    format!("{user}{hostname}{port}")
+}
+
 pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: WorkspaceMenuActions) -> Div {
-    let WorkspaceMenuModel { items, ssh_hosts, field, search, new_workspace_shortcut } = model;
+    let WorkspaceMenuModel { items, ssh_hosts, field, search, new_workspace_shortcut, settings_shortcut } = model;
     let is_creating = field.as_ref().is_some_and(|field| field.renaming.is_none());
     let needle = search.text().trim().to_ascii_lowercase();
-    let filtered: Vec<WorkspaceMenuItem> = filter_workspaces(items, &needle);
-    let filtered_ssh: Vec<SshHost> = filter_ssh_hosts(ssh_hosts, &needle);
-    let rows: Vec<_> = filtered
+    let rows: Vec<_> = filter_workspaces(items, &needle)
         .into_iter()
         .map(|item| {
             let editing = field.as_ref().filter(|field| field.renaming.as_ref() == Some(&item.id));
@@ -84,44 +121,34 @@ pub fn workspace_menu(model: WorkspaceMenuModel, theme: &Theme, actions: Workspa
             }
         })
         .collect();
-    let ssh_rows: Vec<_> = filtered_ssh
-        .into_iter()
-        .map(|host| ssh_row(host, theme).into_any_element())
-        .collect();
-    let footer = match field.filter(|_| is_creating) {
+    let ssh_hosts = filter_ssh_hosts(ssh_hosts, &needle);
+    let ssh_section = (!ssh_hosts.is_empty()).then(|| ssh_section(ssh_hosts, theme, &actions));
+    let new_workspace = match field.filter(|_| is_creating) {
         Some(field) => name_field(&field.input, theme).into_any_element(),
         None => new_workspace_row(new_workspace_shortcut, theme, actions.create.clone()).into_any_element(),
     };
-    menu_panel(theme)
+    popover_panel(theme)
         .child(search_field(&search, theme))
         .child(menu_section_label(SECTION_LABEL, theme))
         .children(rows)
+        .child(new_workspace)
+        .children(ssh_section)
         .child(menu_separator(theme))
-        .child(menu_section_label(SSH_SECTION_LABEL, theme))
-        .children(ssh_rows)
-        .child(footer)
+        .child(settings_row(settings_shortcut, theme, actions.open_settings.clone()))
 }
 
 fn filter_workspaces(items: Vec<WorkspaceMenuItem>, needle: &str) -> Vec<WorkspaceMenuItem> {
     if needle.is_empty() {
-        items
-    } else {
-        items
-            .into_iter()
-            .filter(|item| item.name.to_ascii_lowercase().contains(needle))
-            .collect()
+        return items;
     }
+    items.into_iter().filter(|item| item.name.to_ascii_lowercase().contains(needle)).collect()
 }
 
 fn filter_ssh_hosts(hosts: Vec<SshHost>, needle: &str) -> Vec<SshHost> {
     if needle.is_empty() {
-        hosts
-    } else {
-        hosts
-            .into_iter()
-            .filter(|host| ssh_matches(host, needle))
-            .collect()
+        return hosts;
     }
+    hosts.into_iter().filter(|host| ssh_matches(host, needle)).collect()
 }
 
 fn ssh_matches(host: &SshHost, needle: &str) -> bool {
@@ -137,18 +164,20 @@ fn ssh_matches(host: &SshHost, needle: &str) -> bool {
 }
 
 fn search_field(search: &TextField, theme: &Theme) -> impl IntoElement {
-    let group = SharedString::from(SEARCH_GROUP);
-    focused_field(theme)
-        .id(group)
-        .h(px(theme.menu.row_height_px))
+    div()
+        .h(px(SEARCH_HEIGHT_PX))
         .flex_none()
-        .mx(px(theme.menu.padding_px))
-        .mt(px(theme.menu.padding_px))
-        .mb(px(theme.menu.row_padding_x_px))
-        .px(px(theme.menu.row_padding_x_px))
-        .rounded(px(theme.menu.row_radius_px))
+        .mx(px(SEARCH_MARGIN_X_PX))
+        .mt(px(SEARCH_MARGIN_TOP_PX))
+        .mb(px(SEARCH_MARGIN_BOTTOM_PX))
+        .px(px(SEARCH_PADDING_X_PX))
         .flex()
+        .flex_row()
         .items_center()
+        .gap(px(SEARCH_GAP_PX))
+        .rounded(px(SEARCH_RADIUS_PX))
+        .bg(theme.chrome.control_fill)
+        .child(Icon::MagnifierBold.sized(SEARCH_ICON_PX, theme.text.subtle))
         .child(field_text(search, SEARCH_PLACEHOLDER, theme))
 }
 
@@ -156,103 +185,111 @@ fn row_style(group: SharedString) -> MenuRowStyle {
     MenuRowStyle { group, is_highlighted: false, is_destructive: false }
 }
 
-fn ssh_row(host: SshHost, theme: &Theme) -> impl IntoElement {
+fn meta_text(text: impl Into<SharedString>, theme: &Theme) -> Div {
+    div().min_w(px(0.0)).truncate().text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle).child(text.into())
+}
+
+fn ssh_section(hosts: Vec<SshHost>, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .child(menu_separator(theme))
+        .child(menu_section_label(SSH_SECTION_LABEL, theme))
+        .children(hosts.into_iter().map(|host| ssh_row(host, theme, actions.connect.clone())))
+}
+
+fn ssh_row(host: SshHost, theme: &Theme, connect: SelectHandler) -> impl IntoElement {
     let group = SharedString::from(format!("ssh-row-{}", host.alias));
     let id = SharedString::from(format!("ssh-host-{}", host.alias));
-    let style = MenuRowStyle { group, is_highlighted: false, is_destructive: false };
-    let label: SharedString = host.to_string().into();
-    menu_row(id, style, theme)
-        .child(div().w(px(CHECK_COLUMN_PX)).flex_none())
-        .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
+    let alias = SharedString::from(host.alias.clone());
+    let target = ssh_target(&host);
+    menu_row(id, row_style(group), theme)
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| connect(&alias, window, cx))
+        .child(div().flex_none().child(host.alias))
+        .child(meta_text(target, theme))
 }
 
 fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuActions) -> impl IntoElement {
     let group = SharedString::from(format!("workspace-row-{}", item.id));
-    let style = row_style(group.clone());
-    let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme);
-    let trailing = if item.can_delete {
-        div()
-            .relative()
-            .w(px(theme.pane_header.icon_button_px))
-            .h(px(theme.pane_header.icon_button_px))
-            .flex_none()
-            .child(
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .child(count.group_hover(group.clone(), |style| style.invisible())),
-            )
-            .child(row_actions(&item.id, group, theme, &actions))
-            .into_any_element()
-    } else {
-        count.into_any_element()
-    };
     let (select, select_id) = (actions.select.clone(), item.id.clone());
-    menu_row(item.id.clone(), style, theme)
-        .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
-        .when(item.is_active, |row| row.bg(theme.chrome.control_fill))
-        .child(div().w(px(CHECK_COLUMN_PX)).flex_none().child(if item.is_active { CHECK_MARK } else { "" }))
-        .child(div().flex_1().min_w(px(0.0)).truncate().child(item.name))
-        .child(trailing)
-}
-
-fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
-    let (delete, delete_id) = (actions.delete.clone(), id.clone());
-    div()
-        .absolute()
-        .inset_0()
+    let check = div()
+        .w(px(CHECK_COLUMN_PX))
+        .flex_none()
+        .text_color(theme.accent.primary)
+        .when(item.is_active, |check| check.child(CHECK_MARK));
+    let lines = div()
+        .min_w(px(0.0))
         .flex()
-        .flex_row()
-        .items_center()
-        .invisible()
-        .group_hover(group, |style| style.visible())
-        .child(row_button(format!("delete-{id}"), Icon::Trash, theme, move |window, cx| delete(&delete_id, window, cx)))
+        .flex_col()
+        .gap(px(ROW_LINE_GAP_PX))
+        .child(div().min_w(px(0.0)).truncate().child(item.name.clone()))
+        .child(meta_text(workspace_meta(item.tab_count, &item.path), theme));
+    let row = menu_row(item.id.clone(), row_style(group), theme)
+        .flex_1()
+        .min_w(px(0.0))
+        .h(px(theme.menu.popover_row_height_px))
+        .justify_start()
+        .when(item.is_active, |row| row.bg(theme.chrome.control_fill))
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
+        .child(check)
+        .child(lines)
+        .child(div().flex_1())
+        .children(item.shortcut.map(|shortcut| menu_shortcut(shortcut, theme)));
+    let delete = match item.can_delete {
+        true => delete_button(&item.id, theme, actions.delete.clone()).into_any_element(),
+        false => div().flex_none().size(px(ROW_ICON_BUTTON_PX)).into_any_element(),
+    };
+    div().flex().flex_row().items_center().gap(px(ROW_GAP_PX)).child(row).child(delete)
 }
 
-fn row_button(
-    id: String,
-    icon: Icon,
-    theme: &Theme,
-    on_click: impl Fn(&mut Window, &mut App) + 'static,
-) -> impl IntoElement {
-    let header = theme.pane_header;
-    let hover_fill = theme.chrome.icon_hover_fill;
+fn delete_button(id: &SharedString, theme: &Theme, delete: SelectHandler) -> impl IntoElement {
+    let delete_id = id.clone();
     div()
-        .id(SharedString::from(id))
-        .size(px(header.icon_button_px))
+        .id(SharedString::from(format!("delete-{id}")))
+        .flex_none()
+        .size(px(ROW_ICON_BUTTON_PX))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(header.icon_button_radius_px))
-        .hover(move |style| style.bg(hover_fill))
+        .rounded(px(theme.menu.row_radius_px))
+        .cursor_pointer()
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
             cx.stop_propagation();
-            on_click(window, cx);
+            delete(&delete_id, window, cx);
         })
-        .child(icon.sized(ROW_ACTION_ICON_PX, theme.text.on_accent))
+        .child(Icon::Trash.sized(ROW_ICON_PX, theme.text.subtle))
 }
 
 fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandler) -> impl IntoElement {
-    let style = row_style(NEW_WORKSPACE_GROUP.into());
-    let shortcut = shortcut.map(|shortcut| menu_shortcut(shortcut, &style, theme));
-    menu_row(NEW_WORKSPACE_GROUP, style, theme)
+    menu_row(NEW_WORKSPACE_GROUP, row_style(NEW_WORKSPACE_GROUP.into()), theme)
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| create(window, cx))
-        .child(div().w(px(CHECK_COLUMN_PX)).flex_none())
-        .child(div().flex_1().child(NEW_WORKSPACE_LABEL))
-        .children(shortcut)
+        .child(div().child(NEW_WORKSPACE_LABEL))
+        .children(shortcut.map(|shortcut| menu_shortcut(shortcut, theme)))
+}
+
+fn settings_row(shortcut: Option<String>, theme: &Theme, open_settings: ClickHandler) -> impl IntoElement {
+    menu_row(SETTINGS_GROUP, row_style(SETTINGS_GROUP.into()), theme)
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| open_settings(window, cx))
+        .child(div().child(SETTINGS_LABEL))
+        .children(shortcut.map(|shortcut| menu_shortcut(shortcut, theme)))
 }
 
 fn name_field(input: &TextField, theme: &Theme) -> impl IntoElement {
-    focused_field(theme)
-        .h(px(theme.menu.row_height_px))
+    div()
+        .h(px(NAME_FIELD_HEIGHT_PX))
         .flex_none()
+        .my(px(NAME_FIELD_MARGIN_Y_PX))
         .px(px(theme.menu.row_padding_x_px))
-        .rounded(px(theme.menu.row_radius_px))
         .flex()
+        .flex_row()
         .items_center()
-        .child(field_text(input, NAME_PLACEHOLDER, theme))
+        .gap(px(NAME_FIELD_GAP_PX))
+        .rounded(px(NAME_FIELD_RADIUS_PX))
+        .border_1()
+        .border_color(theme.border.focus)
+        .bg(theme.chrome.control_fill)
+        .child(div().flex_1().min_w(px(0.0)).overflow_hidden().child(field_text(input, NAME_PLACEHOLDER, theme)))
+        .child(menu_shortcut(COMMIT_HINT, theme))
 }
 
 #[cfg(test)]
@@ -282,7 +319,9 @@ mod paint_tests {
             items: vec![WorkspaceMenuItem {
                 id: "workspace-1".into(),
                 name: "Project".into(),
+                path: "~/project".into(),
                 tab_count: 2,
+                shortcut: None,
                 is_active: true,
                 can_delete: true,
             }],
@@ -290,6 +329,7 @@ mod paint_tests {
             field: None,
             search: TextField::default(),
             new_workspace_shortcut: None,
+            settings_shortcut: None,
         };
         let actions = WorkspaceMenuActions {
             select: Rc::new(|_, _, _| {}),
@@ -298,16 +338,16 @@ mod paint_tests {
                 Rc::new(move |_, _, _| delete_count.set(delete_count.get() + 1))
             },
             create: Rc::new(|_, _| {}),
+            connect: Rc::new(|_, _, _| {}),
+            open_settings: Rc::new(|_, _| {}),
         };
-        let row_y = theme.menu.padding_px
-            + theme.menu.row_height_px
-            + theme.menu.row_padding_x_px
+        let row_y = theme.menu.popover_padding_px
+            + SEARCH_MARGIN_TOP_PX
+            + SEARCH_HEIGHT_PX
+            + SEARCH_MARGIN_BOTTOM_PX
             + theme.menu.section_label_height_px
-            + theme.menu.row_height_px / 2.0;
-        let action_x = theme.menu.width_px
-            - theme.menu.padding_px
-            - theme.menu.row_padding_x_px
-            - theme.pane_header.icon_button_px * 0.5;
+            + theme.menu.popover_row_height_px / 2.0;
+        let action_x = theme.menu.popover_width_px - theme.menu.popover_padding_px - ROW_ICON_BUTTON_PX * 0.5;
         let (_menu, cx) = app.add_window_view(|_, _| TestMenu { model, theme, actions });
         cx.simulate_mouse_move(point(px(action_x), px(row_y)), None, Modifiers::default());
         cx.simulate_mouse_down(point(px(action_x), px(row_y)), MouseButton::Left, Modifiers::default());

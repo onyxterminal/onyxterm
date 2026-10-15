@@ -78,6 +78,10 @@ const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 const UNNAMED_FILE: &str = "This file";
 const OUTPUT_COALESCE_INTERVAL: Duration = Duration::from_millis(8);
+const CLEAR_SCREEN_AND_SCROLLBACK: &[u8] = b"\x1b[H\x1b[2J\x1b[3J";
+const REDRAW_PROMPT: &[u8] = b"\x0c";
+const INTERRUPT: &[u8] = b"\x03";
+const SSH_PROGRAM: &str = "ssh";
 
 static FIRST_FRAME: Milestone = Milestone::new("first frame");
 static FIRST_PTY_SPAWNED: Milestone = Milestone::new("first pty spawned");
@@ -88,6 +92,7 @@ struct Pane {
     session: TerminalSessionId,
     terminal: TerminalPane,
     osc: Option<OscTitle>,
+    shell_name: String,
     status: pane_status::PaneStatus,
     is_refreshing: bool,
     _events: Task<()>,
@@ -152,7 +157,6 @@ pub struct Shell {
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     is_copy_top_pending: bool,
-    gear_bounds: pane_options::GearBounds,
     picker_bounds: pane_drag::BoundsMap<crate::color_picker::PickerDrag>,
     settings_focus: Option<FieldTarget>,
     slider_bounds: pane_drag::BoundsMap<settings_slider::SettingSlider>,
@@ -203,7 +207,6 @@ impl Shell {
             pane_menu: None,
             pane_field: None,
             is_copy_top_pending: false,
-            gear_bounds: pane_options::GearBounds::default(),
             picker_bounds: pane_drag::BoundsMap::default(),
             settings_focus: None,
             slider_bounds: pane_drag::BoundsMap::default(),
@@ -527,6 +530,8 @@ impl Shell {
             }
             CommandId::MoveToNewTab => self.move_focused_to_new_tab(),
             CommandId::ToggleCopyMode => self.toggle_copy_mode(),
+            CommandId::ClearTerminal => self.clear_terminal(),
+            CommandId::InterruptProcess => self.interrupt_process(),
             CommandId::OpenFile => self.prompt_open(false, cx),
             CommandId::OpenFolder => self.prompt_open(true, cx),
             CommandId::OpenEditorHere => self.open_editor_here(cx),
@@ -746,6 +751,18 @@ impl Shell {
         cx.notify();
     }
 
+    fn connect_ssh_host(&mut self, alias: &SharedString, cx: &mut Context<Self>) {
+        self.close_workspace_menu(cx);
+        self.open_tab(cx);
+        if let Some(handle) = self.focused_handle() {
+            write_to(handle, ssh_command_line(alias).as_bytes());
+        }
+        if let Some(tab) = self.model.tabs_mut().active_mut() {
+            tab.rename(Some(alias.to_string()));
+        }
+        self.persist();
+    }
+
     fn request_delete_workspace(&mut self, key: &SharedString, cx: &mut Context<Self>) {
         if let Some(id) = self.workspace_by_key(key) {
             self.pending = Some(Confirmation::DeleteWorkspace(id));
@@ -783,6 +800,22 @@ impl Shell {
         write_to(handle, &paste_bytes(&text, handle.input_modes()));
     }
 
+    fn clear_terminal(&self) {
+        let Some(handle) = self.focused_handle() else {
+            return;
+        };
+        handle.terminal().feed(CLEAR_SCREEN_AND_SCROLLBACK);
+        if !handle.has_foreground_job() {
+            write_to(handle, REDRAW_PROMPT);
+        }
+    }
+
+    fn interrupt_process(&self) {
+        if let Some(handle) = self.focused_handle() {
+            write_to(handle, INTERRUPT);
+        }
+    }
+
     fn select_all(&self) {
         if let Some(handle) = self.focused_handle() {
             handle.terminal().select_all();
@@ -801,7 +834,11 @@ impl Shell {
     }
 
     fn request_close_tab(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self.model.tabs().active() else {
+        self.request_close_tab_at(self.model.tabs().active_index(), cx);
+    }
+
+    fn request_close_tab_at(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(tab) = self.model.tabs().iter().nth(index) else {
             return;
         };
         let id = tab.id();
@@ -1115,6 +1152,7 @@ impl Shell {
         command: ShellCommand,
         cx: &mut Context<Self>,
     ) -> Option<TerminalSessionId> {
+        let shell_name = shell_title(&command);
         let session = self
             .terminals
             .spawn_command(command, INITIAL_GRID)
@@ -1127,6 +1165,7 @@ impl Shell {
             session,
             terminal: TerminalPane::new(handle),
             osc: None,
+            shell_name,
             status: pane_status::PaneStatus::default(),
             is_refreshing: false,
             _events: events,
@@ -1387,6 +1426,11 @@ fn write_to(handle: &TerminalHandle, bytes: &[u8]) {
     if let Err(err) = handle.write(bytes) {
         tracing::warn!(?err, "pty write failed");
     }
+}
+
+fn ssh_command_line(alias: &str) -> String {
+    let quoted = alias.replace('\'', "'\\''");
+    format!("{SSH_PROGRAM} '{quoted}'\n")
 }
 
 fn login_shell_command(cwd: PathBuf) -> ShellCommand {

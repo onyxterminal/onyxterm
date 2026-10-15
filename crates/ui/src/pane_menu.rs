@@ -23,19 +23,30 @@ pub enum PaneMenuEntry {
     Divider,
 }
 
-pub fn pane_menu_entries(is_maximized: bool, keymap: &Keymap) -> Vec<PaneMenuEntry> {
-    let maximize_title = if is_maximized { "Restore Pane" } else { "Maximize Pane" };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PaneMenuState {
+    pub is_maximized: bool,
+    pub is_copy_mode: bool,
+}
+
+pub fn pane_menu_entries(state: PaneMenuState, keymap: &Keymap) -> Vec<PaneMenuEntry> {
+    let maximize_title = if state.is_maximized { "Restore Pane" } else { "Maximize Pane" };
+    let copy_mode_title = if state.is_copy_mode { "Exit Copy Mode" } else { "Copy Mode" };
     let item = |command: CommandId, title: &'static str| {
-        let shortcut = keymap.combo_for(command).map(|combo| combo.glyphs());
+        let shortcut = keymap.display_combo(command).map(|combo| combo.glyphs());
         PaneMenuEntry::Item(PaneMenuItem { command, title, shortcut })
     };
     vec![
         item(CommandId::SplitRight, "Split Right"),
         item(CommandId::SplitDown, "Split Down"),
+        PaneMenuEntry::Divider,
         item(CommandId::MaximizePane, maximize_title),
+        item(CommandId::ClearTerminal, "Clear"),
+        item(CommandId::ToggleCopyMode, copy_mode_title),
         PaneMenuEntry::Divider,
         item(CommandId::RenamePane, "Rename Pane\u{2026}"),
         item(CommandId::MoveToNewTab, "Move to New Tab"),
+        item(CommandId::OpenEditorHere, "Open Editor Here"),
         PaneMenuEntry::Divider,
         item(CommandId::ClosePane, "Close Pane"),
     ]

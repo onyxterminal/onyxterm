@@ -59,9 +59,11 @@ pub enum CommandId {
     NextDocument,
     PrevDocument,
     CloseDocument,
+    ClearTerminal,
+    InterruptProcess,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 72] = [
+const COMMAND_KEYS: [(CommandId, &str); 74] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -100,6 +102,7 @@ const COMMAND_KEYS: [(CommandId, &str); 72] = [
     (CommandId::SelectWorkspace(4), "select_workspace_5"), (CommandId::SelectWorkspace(5), "select_workspace_6"),
     (CommandId::SelectWorkspace(6), "select_workspace_7"), (CommandId::SelectWorkspace(7), "select_workspace_8"),
     (CommandId::SelectWorkspace(8), "select_workspace_9"),
+    (CommandId::ClearTerminal, "clear_terminal"), (CommandId::InterruptProcess, "interrupt_process"),
 ];
 
 const SELECT_TAB_TITLES: [&str; 9] = [
@@ -122,11 +125,11 @@ impl CommandId {
     }
 
     pub fn is_rebindable(self) -> bool {
-        self != CommandId::ClosePalette
+        !matches!(self, CommandId::ClosePalette | CommandId::SwitchWorkspace)
     }
 
     pub fn is_listed_in_palette(self) -> bool {
-        !matches!(self, CommandId::SelectTab(_) | CommandId::SelectWorkspace(_))
+        !matches!(self, CommandId::SelectTab(_) | CommandId::SelectWorkspace(_) | CommandId::SwitchWorkspace)
     }
 
     pub fn is_structural(self) -> bool {
@@ -295,20 +298,35 @@ pub fn default_commands() -> Vec<Command> {
     use CommandId::*;
     let mut commands = vec![
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
+        Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),
+        Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
+        Command::builder(OpenEditorHere, "Open Editor Here", "Files", no_op).build(),
+        Command::builder(ToggleFileTree, "Toggle File Tree", "Files", no_op).build(),
+        Command::builder(ToggleEditorBundle, "Toggle Editor Bundle", "Files", no_op).build(),
+        Command::builder(Save, "Save", "Files", no_op).build(),
+        Command::builder(NextDocument, "Next Document", "Files", no_op).build(),
+        Command::builder(ClearTerminal, "Clear Terminal", "Terminal", no_op).build(),
+        Command::builder(InterruptProcess, "Interrupt Process", "Terminal", no_op).build(),
+        Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
+        Command::builder(GridLayout, "Arrange Panes in Grid", "Panes", no_op).build(),
+        Command::builder(EqualizePanes, "Equalize Panes", "Panes", no_op).build(),
+        Command::builder(RenamePane, "Rename Pane\u{2026}", "Panes", no_op).build(),
+        Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),
+        Command::builder(ClosePane, "Close Pane", "Panes", no_op).build(),
+        Command::builder(NextTab, "Next Tab", "Tabs", no_op).build(),
+        Command::builder(PrevTab, "Previous Tab", "Tabs", no_op).build(),
+        Command::builder(OpenWorkspaceMenu, "Switch Workspace", "Workspaces", no_op).build(),
+        Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
+        Command::builder(ToggleCopyMode, "Toggle Copy Mode", "Edit", no_op).build(),
+        Command::builder(OpenSettings, "Settings", "Application", no_op).build(),
         Command::builder(CloseActive, "Close", "Panes", no_op).build(),
         Command::builder(MoveTabLeft, "Move Tab Left", "Tabs", no_op).build(),
         Command::builder(MoveTabRight, "Move Tab Right", "Tabs", no_op).build(),
-        Command::builder(ClosePane, "Close Pane", "Panes", no_op).build(),
         Command::builder(OpenPalette, "Open Palette", "Palette", toggle_palette).build(),
-        Command::builder(OpenSettings, "Settings", "Application", no_op).build(),
         Command::builder(ClosePalette, "Close Palette", "Palette", close_palette)
             .enabled_when(palette_open)
             .build(),
-        Command::builder(NextTab, "Next Tab", "Tabs", no_op).build(),
         Command::builder(RenameTab, "Rename Tab", "Tabs", no_op).build(),
-        Command::builder(PrevTab, "Previous Tab", "Tabs", no_op).build(),
-        Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),
-        Command::builder(SplitDown, "Split Down", "Panes", no_op).build(),
         Command::builder(FocusAdjacent, "Focus Next Pane", "Panes", no_op).build(),
         Command::builder(FocusPane(Direction::Left), "Focus Pane Left", "Panes", no_op).build(),
         Command::builder(FocusPane(Direction::Right), "Focus Pane Right", "Panes", no_op).build(),
@@ -322,30 +340,17 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(ResizePane(Direction::Right), "Resize Pane Right", "Panes", no_op).build(),
         Command::builder(ResizePane(Direction::Up), "Resize Pane Up", "Panes", no_op).build(),
         Command::builder(ResizePane(Direction::Down), "Resize Pane Down", "Panes", no_op).build(),
-        Command::builder(MaximizePane, "Maximize Pane", "Panes", no_op).build(),
-        Command::builder(GridLayout, "Arrange Panes in Grid", "Panes", no_op).build(),
-        Command::builder(EqualizePanes, "Equalize Panes", "Panes", no_op).build(),
-        Command::builder(RenamePane, "Rename Pane", "Panes", no_op).build(),
-        Command::builder(MoveToNewTab, "Move Pane to New Tab", "Panes", no_op).build(),
         Command::builder(OpenFile, "Open File…", "Files", no_op).build(),
         Command::builder(OpenFolder, "Open Folder…", "Files", no_op).build(),
-        Command::builder(OpenEditorHere, "Open Editor Here", "Files", no_op).build(),
-        Command::builder(ToggleFileTree, "Toggle File Tree", "Files", no_op).build(),
-        Command::builder(ToggleEditorBundle, "Toggle Editor Bundle", "Files", no_op).build(),
-        Command::builder(Save, "Save", "Files", no_op).build(),
-        Command::builder(NextDocument, "Next Document", "Files", no_op).build(),
         Command::builder(PrevDocument, "Previous Document", "Files", no_op).build(),
         Command::builder(CloseDocument, "Close Document", "Files", no_op).build(),
         Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
-        Command::builder(NewWorkspace, "New Workspace", "Workspaces", no_op).build(),
         Command::builder(RenameWorkspace, "Rename Workspace\u{2026}", "Workspaces", no_op).build(),
         Command::builder(NextWorkspace, "Next Workspace", "Workspaces", no_op).build(),
         Command::builder(PrevWorkspace, "Previous Workspace", "Workspaces", no_op).build(),
-        Command::builder(OpenWorkspaceMenu, "Open Workspace Menu", "Workspaces", no_op).build(),
         Command::builder(CloseTab, "Close Tab", "Tabs", no_op).build(),
         Command::builder(Copy, "Copy", "Edit", no_op).build(),
         Command::builder(SelectAll, "Select All", "Edit", no_op).build(),
-        Command::builder(ToggleCopyMode, "Toggle Copy Mode", "Edit", no_op).build(),
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
         Command::builder(Minimize, "Minimize", "Window", no_op).build(),

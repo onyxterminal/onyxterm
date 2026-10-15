@@ -1,13 +1,12 @@
 use super::{FieldTarget, Shell, DOWN_KEY, ENTER_KEY, ESCAPE_KEY, UP_KEY};
 use crate::motion::fade_in;
-use crate::pane_menu::{pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuItem};
+use crate::pane_menu::{
+    pane_menu_entries, selectable_commands, step_selection, PaneMenuEntry, PaneMenuItem, PaneMenuState,
+};
 use crate::text_field::TextField;
 use crate::theme::menu_chrome::{menu_panel, menu_row, menu_separator, menu_shortcut, MenuRowStyle};
 use domain::PanelId;
-use super::pane_drag::{bounds_probe, BoundsMap};
 use gpui::{div, prelude::*, px, AnyElement, Context, Keystroke, MouseButton, SharedString, Window};
-
-pub(super) type GearBounds = BoundsMap<PanelId>;
 
 pub(super) struct PaneMenu {
     panel: PanelId,
@@ -20,10 +19,6 @@ pub(super) struct PaneField {
 }
 
 impl Shell {
-    pub(super) fn gear_bounds_probe(&self, panel: PanelId) -> impl IntoElement {
-        bounds_probe(&self.gear_bounds, panel)
-    }
-
     pub(super) fn toggle_pane_menu(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_pane(panel);
         window.focus(&self.focus_handle);
@@ -42,11 +37,14 @@ impl Shell {
     }
 
     fn menu_commands(&self) -> Vec<crate::command::CommandId> {
-        selectable_commands(&pane_menu_entries(self.is_active_maximized(), &self.state.keymap))
+        selectable_commands(&pane_menu_entries(self.pane_menu_state(), &self.state.keymap))
     }
 
-    fn is_active_maximized(&self) -> bool {
-        self.model.tabs().active().is_some_and(|tab| tab.is_maximized())
+    fn pane_menu_state(&self) -> PaneMenuState {
+        PaneMenuState {
+            is_maximized: self.model.tabs().active().is_some_and(|tab| tab.is_maximized()),
+            is_copy_mode: self.is_copy_mode_active(),
+        }
     }
 
     pub(super) fn handle_pane_menu_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
@@ -116,9 +114,9 @@ impl Shell {
 
     pub(super) fn render_pane_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.pane_menu.as_ref()?;
-        let anchor = self.gear_bounds.borrow().get(&menu.panel).copied()?;
         let theme = &self.state.theme;
-        let entries = pane_menu_entries(self.is_active_maximized(), &self.state.keymap);
+        let island = self.stage.island_bounds().into_iter().find(|(panel, _)| *panel == menu.panel)?.1;
+        let entries = pane_menu_entries(self.pane_menu_state(), &self.state.keymap);
         let mut index = 0;
         let rows: Vec<AnyElement> = entries
             .into_iter()
@@ -131,8 +129,8 @@ impl Shell {
                 }
             })
             .collect();
-        let left = (anchor.right() - px(theme.menu.width_px)).max(px(0.0));
-        let top = anchor.bottom() + px(theme.menu.offset_px);
+        let left = (island.right() - px(theme.pane_header.padding_right_px + theme.menu.width_px)).max(px(0.0));
+        let top = island.top() + px(theme.layout.pane_header_height_px);
         let popover = div().absolute().left(left).top(top).occlude().child(menu_panel(theme).children(rows));
         let backdrop = div()
             .absolute()
@@ -150,7 +148,7 @@ impl Shell {
             is_highlighted: is_selected,
             is_destructive: item.is_destructive(),
         };
-        let shortcut = item.shortcut.map(|shortcut| menu_shortcut(shortcut, &style, theme));
+        let shortcut = item.shortcut.map(|shortcut| menu_shortcut(shortcut, theme));
         menu_row(("pane-menu-item", index), style, theme)
             .on_mouse_down(
                 MouseButton::Left,
@@ -159,7 +157,7 @@ impl Shell {
                     shell.run_pane_menu_item(index, window, cx);
                 }),
             )
-            .child(div().flex_1().child(item.title))
+            .child(div().min_w(px(0.0)).truncate().child(item.title))
             .children(shortcut)
             .into_any_element()
     }
