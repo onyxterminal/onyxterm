@@ -93,12 +93,12 @@ impl Shell {
 
     pub(super) fn render_confirmation(&self, copy: ConfirmCopy, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
-        let confirm_fill = match copy.is_destructive {
-            true => theme.chrome.destructive,
-            false => theme.accent.primary,
+        let (confirm_fill, confirm_text) = match copy.is_destructive {
+            true => (theme.chrome.destructive, theme.chrome.on_destructive),
+            false => (theme.accent.primary, theme.text.on_accent),
         };
         let cancel = ButtonPaint { fill: theme.surface.canvas, text: theme.text.default, border: theme.border.default };
-        let confirm = ButtonPaint { fill: confirm_fill, text: theme.text.inverse, border: confirm_fill };
+        let confirm = ButtonPaint { fill: confirm_fill, text: confirm_text, border: confirm_fill };
         div()
             .absolute()
             .inset_0()
@@ -112,9 +112,9 @@ impl Shell {
                     .w(px(theme.dialog.width_px))
                     .p(px(DIALOG_PADDING_PX))
                     .font_family(SharedString::from(theme.ui_font.family.clone()))
-                    .bg(theme.chrome.palette_fill)
+                    .bg(theme.chrome.menu_fill)
                     .border(px(theme.palette.border_px))
-                    .border_color(theme.chrome.menu_border)
+                    .border_color(theme.border.default)
                     .rounded(px(theme.dialog.radius_px))
                     .shadow(box_shadows(&theme.shadow.palette))
                     .flex()

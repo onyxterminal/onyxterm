@@ -1319,7 +1319,7 @@ impl Render for Shell {
             .relative()
             .flex()
             .flex_col()
-            .bg(theme.surface.subtle)
+            .bg(theme.surface.window)
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))

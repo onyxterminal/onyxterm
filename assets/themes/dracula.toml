@@ -4,16 +4,17 @@ version = "2"
 kind = "dark"
 
 [surface]
+window = "#20212B"
 canvas = "#282A36"
-subtle = "#20212B"
 raised = "#343746"
 sunken = "#222430"
+settings_window = "#282A36"
 
 [text]
 default = "#F8F8F2"
 muted = "#C9C9D2"
 subtle = "#A1A2B0"
-inverse = "#24212F"
+on_accent = "#24212F"
 
 [border]
 default = "rgba(248,248,242,0.17)"
@@ -24,6 +25,7 @@ focus = "#BD93F9"
 primary = "#BD93F9"
 primary_hover = "#D0B0FF"
 primary_active = "#AA78EF"
+selection = "rgba(189,147,249,0.18)"
 
 [status]
 running = "#34C759"
@@ -38,10 +40,10 @@ idle = "#C7C7CC"
 control_fill = "rgba(255,255,255,0.07)"
 icon_hover_fill = "rgba(255,255,255,0.08)"
 menu_fill = "rgba(52,55,70,0.98)"
-menu_border = "rgba(255,255,255,0.18)"
-palette_fill = "rgba(52,55,70,0.98)"
 selected_shortcut = "rgba(36,33,47,0.78)"
-destructive = "#D70015"
+destructive = "#FF6961"
+on_destructive = "#2A0B0B"
+warning = "#FFB340"
 backdrop = "rgba(0,0,0,0.48)"
 
 [ui_font]
@@ -134,11 +136,6 @@ unfocused_opacity = 0.82
 pane_padding_x_px = 14.0
 pane_padding_top_px = 6.0
 pane_padding_bottom_px = 12.0
-
-[[shadow.card]]
-y = 1.0
-blur = 3.0
-color = "rgba(255,255,255,0.07)"
 
 [[shadow.tab]]
 spread = 0.5

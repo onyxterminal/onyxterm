@@ -34,7 +34,7 @@ pub struct IslandLook {
 impl IslandLook {
     pub fn for_role(theme: &Theme, role: IslandRole) -> Self {
         let (edge_px, edge_color) = match role.shows_focus_ring() {
-            true => (theme.island.focus_ring_px, theme.accent.primary),
+            true => (theme.island.focus_ring_px, theme.border_focus()),
             false => (theme.island.unfocused_border_px, theme.border_default()),
         };
         let content_opacity = match role.is_dimmed(theme) {

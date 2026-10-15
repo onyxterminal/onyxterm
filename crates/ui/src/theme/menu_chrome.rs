@@ -4,7 +4,6 @@ use gpui::{canvas, div, prelude::*, px, AnyElement, Div, ElementId, FontWeight, 
 use std::ops::Range;
 
 const CARET_WIDTH_PX: f32 = 1.5;
-const FIELD_SELECTION_ALPHA: f32 = 0.35;
 const SEPARATOR_MARGIN_Y_PX: f32 = 5.0;
 const SEPARATOR_THICKNESS_PX: f32 = 1.0;
 const FOCUS_RING_ALPHA: f32 = 0.25;
@@ -32,7 +31,7 @@ pub fn menu_panel(theme: &Theme) -> Div {
         .text_color(theme.text.default)
         .bg(theme.chrome.menu_fill)
         .border(px(menu.border_px))
-        .border_color(theme.chrome.menu_border)
+        .border_color(theme.border.default)
         .rounded(px(menu.radius_px))
         .shadow(box_shadows(&theme.shadow.menu))
         .flex()
@@ -41,7 +40,7 @@ pub fn menu_panel(theme: &Theme) -> Div {
 
 pub fn menu_row(id: impl Into<ElementId>, style: MenuRowStyle, theme: &Theme) -> Stateful<Div> {
     let menu = theme.menu;
-    let (highlight, inverse) = (theme.accent.primary, theme.text.inverse);
+    let (highlight, highlight_text) = (theme.accent.primary, theme.text.on_accent);
     let text_color = match style.is_destructive {
         true => theme.chrome.destructive,
         false => theme.text.default,
@@ -58,8 +57,8 @@ pub fn menu_row(id: impl Into<ElementId>, style: MenuRowStyle, theme: &Theme) ->
         .rounded(px(menu.row_radius_px))
         .cursor_pointer()
         .text_color(text_color)
-        .when(style.is_highlighted, |row| row.bg(highlight).text_color(inverse))
-        .hover(move |style| style.bg(highlight).text_color(inverse))
+        .when(style.is_highlighted, |row| row.bg(highlight).text_color(highlight_text))
+        .hover(move |style| style.bg(highlight).text_color(highlight_text))
 }
 
 pub fn menu_shortcut(text: impl Into<SharedString>, style: &MenuRowStyle, theme: &Theme) -> Div {
@@ -147,7 +146,7 @@ fn covers(outer: &Range<usize>, inner: &Range<usize>) -> bool {
 fn field_span(text: String, style: SpanStyle, theme: &Theme) -> Div {
     div()
         .text_color(theme.text.default)
-        .when(style.is_selected, |span| span.bg(theme.accent.primary.opacity(FIELD_SELECTION_ALPHA)))
+        .when(style.is_selected, |span| span.bg(theme.accent.selection))
         .when(style.is_marked, |span| span.underline())
         .child(text)
 }

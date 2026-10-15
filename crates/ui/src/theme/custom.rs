@@ -56,7 +56,7 @@ pub struct CustomColors {
 impl CustomColors {
     pub fn from_theme(theme: &Theme) -> Self {
         Self {
-            background: hex(theme.surface.canvas), chrome: hex(theme.surface.subtle),
+            background: hex(theme.surface.canvas), chrome: hex(theme.surface.window),
             surface: hex(theme.surface.raised), text: hex(theme.text.default),
             muted_text: hex(theme.text.muted), accent: hex(theme.accent.primary),
             black: hex(theme.ansi.black), red: hex(theme.ansi.red),
@@ -103,21 +103,22 @@ impl CustomColors {
         let color = |field| hex_to_hsla(self.get(field), "custom color").expect("validated custom color");
         theme.surface.canvas = color(ColorField::Background);
         theme.surface.sunken = theme.surface.canvas;
-        theme.surface.subtle = color(ColorField::Chrome);
+        theme.surface.settings_window = theme.surface.canvas;
+        theme.surface.window = color(ColorField::Chrome);
         theme.surface.raised = color(ColorField::Surface);
         theme.chrome.menu_fill = theme.surface.raised;
-        theme.chrome.palette_fill = theme.surface.raised;
         theme.text.default = color(ColorField::Text);
         theme.text.muted = color(ColorField::MutedText);
         theme.text.subtle = theme.text.muted;
         theme.accent.primary = color(ColorField::Accent);
         theme.accent.primary_hover = shifted_lightness(theme.accent.primary, 0.08);
         theme.accent.primary_active = shifted_lightness(theme.accent.primary, -0.08);
-        theme.border.focus = theme.accent.primary;
+        theme.border.focus = theme.accent.primary.opacity(theme.border.focus.a);
+        theme.accent.selection = theme.accent.primary.opacity(theme.accent.selection.a);
         theme.status.starting = theme.accent.primary;
         let accent_rgb: Rgba = theme.accent.primary.into();
         let brightness = 0.2126 * accent_rgb.r + 0.7152 * accent_rgb.g + 0.0722 * accent_rgb.b;
-        theme.text.inverse = if brightness > 0.57 { gpui::rgb(0x17191D).into() }
+        theme.text.on_accent = if brightness > 0.57 { gpui::rgb(0x17191D).into() }
             else { gpui::rgb(0xFFFFFF).into() };
         theme.ansi.black = color(ColorField::Black);
         theme.ansi.red = color(ColorField::Red);
@@ -184,7 +185,8 @@ mod tests {
         decoded.apply(&mut theme);
         assert_eq!(theme.name, "custom");
         assert_eq!(hex(theme.accent.primary), "#FF00AA");
-        assert_eq!(theme.border.focus, theme.accent.primary);
+        assert_eq!(theme.border.focus, theme.accent.primary.opacity(theme.border.focus.a));
+        assert_eq!(theme.accent.selection.h, theme.accent.primary.h);
     }
 
     #[test]

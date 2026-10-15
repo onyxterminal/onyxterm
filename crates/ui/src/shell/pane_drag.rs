@@ -262,7 +262,7 @@ impl Shell {
                         .py_1()
                         .rounded(px(theme.layout.border_radius_px))
                         .bg(theme.accent.primary)
-                        .text_color(theme.text.inverse)
+                        .text_color(theme.text.on_accent)
                         .child(SWAP_LABEL),
                 ),
         };

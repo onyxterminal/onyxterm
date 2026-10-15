@@ -4,7 +4,7 @@ use crate::pane_layout::{compute_layout, grid_changes, Gap, PaneLayout, Rect, Sp
 use crate::pane_motion::{duration_from_ms, transition_for, IslandFrame, PaneMotion, Scene};
 use crate::tabs::SplitSide;
 use crate::terminal_view::island_grid;
-use crate::theme::{box_shadows, LayoutTokens, Theme};
+use crate::theme::{LayoutTokens, Theme};
 use domain::{LayoutNode, PanelId, TabId};
 use gpui::{
     canvas, div, point, prelude::*, px, size, AnyElement, Bounds, Context, Div, Pixels, Point, SharedString, Size,
@@ -122,7 +122,6 @@ pub(super) fn island_card(theme: &Theme) -> Div {
         .overflow_hidden()
         .rounded(px(theme.layout.island_radius_px))
         .bg(theme.canvas())
-        .shadow(box_shadows(&theme.shadow.card))
 }
 
 pub(super) fn island_content(look: IslandLook, content: impl IntoElement) -> Div {

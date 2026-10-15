@@ -91,7 +91,7 @@ impl Shell {
         let cancel = EditorButton { id: "picker-cancel", label: "Cancel".into(), tone: ButtonTone::Quiet };
         let keep = EditorButton { id: "picker-keep", label: "Keep color".into(), tone: ButtonTone::Primary };
         div().mt(px(4.0 * scale)).mb(px(8.0 * scale)).p(px(14.0 * scale))
-            .rounded(px(10.0 * scale)).bg(theme.surface.subtle)
+            .rounded(px(10.0 * scale)).bg(theme.surface.raised)
             .border_1().border_color(theme.border.muted)
             .flex().flex_col().gap(px(14.0 * scale))
             .child(div().flex().gap(px(18.0 * scale))

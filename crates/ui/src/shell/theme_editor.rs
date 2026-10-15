@@ -165,7 +165,7 @@ impl Shell {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
         let (fill, hover, text) = match button.tone {
-            ButtonTone::Primary => (theme.accent.primary, theme.accent.primary_hover, theme.text.inverse),
+            ButtonTone::Primary => (theme.accent.primary, theme.accent.primary_hover, theme.text.on_accent),
             ButtonTone::Quiet => (theme.chrome.control_fill, theme.chrome.icon_hover_fill, theme.text.default),
         };
         div().id(button.id).flex_none().h(px(28.0 * scale)).px(px(12.0 * scale))
@@ -237,7 +237,7 @@ impl Shell {
             .rounded(px(2.0 * scale)).bg(color);
         let cursor = div().w(px(PREVIEW_CURSOR_WIDTH_PX * scale)).h(px(PREVIEW_CURSOR_HEIGHT_PX * scale)).bg(accent);
         div().mb(px(16.0 * scale)).p(px(6.0 * scale)).rounded(px(10.0 * scale))
-            .bg(theme.surface.subtle).border_1().border_color(theme.border.default)
+            .bg(theme.surface.raised).border_1().border_color(theme.border.default)
             .child(div().h(px(20.0 * scale)).px(px(6.0 * scale)).flex().items_center().gap(px(6.0 * scale))
                 .child(dot(ansi.red)).child(dot(ansi.yellow)).child(dot(ansi.green))
                 .child(div().flex_1().flex().justify_center().pr(px(36.0 * scale))

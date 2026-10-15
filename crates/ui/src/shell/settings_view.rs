@@ -290,7 +290,7 @@ impl Shell {
             }))
             .child(card.max_h(viewport.height - px(CARD_WINDOW_MARGIN_PX * 2.0))
                 .max_w(viewport.width - px(CARD_WINDOW_MARGIN_PX * 2.0))
-                .rounded(px(16.0 * scale)).bg(theme.surface.raised)
+                .rounded(px(16.0 * scale)).bg(theme.surface.settings_window)
                 .shadow(box_shadows(&theme.shadow.palette))
                 .border_1().border_color(theme.border.default).occlude()
                 .font_family(SharedString::from(theme.ui_font.family.clone()))
@@ -466,7 +466,7 @@ impl Shell {
                 .h(px(FONT_ROW_PX * scale)).px(px(10.0 * scale)).flex().items_center()
                 .rounded(px(5.0 * scale)).cursor_pointer()
                 .bg(if selected { theme.accent.primary } else { theme.surface.raised })
-                .text_color(if selected { theme.text.inverse } else { theme.text.default })
+                .text_color(if selected { theme.text.on_accent } else { theme.text.default })
                 .when(name != SYSTEM_MONOSPACE, |row| row.font_family(SharedString::from(name.clone())))
                 .child(label)
                 .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {

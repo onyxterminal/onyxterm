@@ -92,10 +92,11 @@ struct RawMeta {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SurfaceTokensRaw {
+    window: String,
     canvas: String,
-    subtle: String,
     raised: String,
     sunken: String,
+    settings_window: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,7 +104,7 @@ struct TextTokensRaw {
     default: String,
     muted: String,
     subtle: String,
-    inverse: String,
+    on_accent: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,6 +119,7 @@ struct AccentTokensRaw {
     primary: String,
     primary_hover: String,
     primary_active: String,
+    selection: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -188,10 +190,11 @@ pub struct LayoutTokens {
 
 #[derive(Debug, Clone, Copy)]
 pub struct SurfaceTokens {
+    pub window: Hsla,
     pub canvas: Hsla,
-    pub subtle: Hsla,
     pub raised: Hsla,
     pub sunken: Hsla,
+    pub settings_window: Hsla,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -199,7 +202,7 @@ pub struct TextTokens {
     pub default: Hsla,
     pub muted: Hsla,
     pub subtle: Hsla,
-    pub inverse: Hsla,
+    pub on_accent: Hsla,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,6 +217,7 @@ pub struct AccentTokens {
     pub primary: Hsla,
     pub primary_hover: Hsla,
     pub primary_active: Hsla,
+    pub selection: Hsla,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -310,8 +314,7 @@ impl Theme {
         scale!(self.island, focus_ring_px, unfocused_border_px, pane_padding_x_px,
             pane_padding_top_px, pane_padding_bottom_px);
         scale!(self.editor, gutter_padding_px, cursor_width_px);
-        for shadow in self.shadow.card.iter_mut().chain(&mut self.shadow.tab)
-            .chain(&mut self.shadow.menu).chain(&mut self.shadow.palette) {
+        for shadow in self.shadow.tab.iter_mut().chain(&mut self.shadow.menu).chain(&mut self.shadow.palette) {
             scale!(shadow, x, y, blur, spread);
         }
     }
@@ -321,16 +324,17 @@ impl Theme {
             name: raw.meta.name,
             appearance: raw.meta.kind,
             surface: SurfaceTokens {
+                window: parse_color(&raw.surface.window, "surface.window")?,
                 canvas: parse_color(&raw.surface.canvas, "surface.canvas")?,
-                subtle: parse_color(&raw.surface.subtle, "surface.subtle")?,
                 raised: parse_color(&raw.surface.raised, "surface.raised")?,
                 sunken: parse_color(&raw.surface.sunken, "surface.sunken")?,
+                settings_window: parse_color(&raw.surface.settings_window, "surface.settings_window")?,
             },
             text: TextTokens {
                 default: parse_color(&raw.text.default, "text.default")?,
                 muted: parse_color(&raw.text.muted, "text.muted")?,
                 subtle: parse_color(&raw.text.subtle, "text.subtle")?,
-                inverse: parse_color(&raw.text.inverse, "text.inverse")?,
+                on_accent: parse_color(&raw.text.on_accent, "text.on_accent")?,
             },
             border: BorderTokens {
                 default: parse_color(&raw.border.default, "border.default")?,
@@ -347,6 +351,7 @@ impl Theme {
                     &raw.accent.primary_active,
                     "accent.primary_active",
                 )?,
+                selection: parse_color(&raw.accent.selection, "accent.selection")?,
             },
             status: StatusTokens {
                 running: parse_color(&raw.status.running, "status.running")?,
@@ -507,13 +512,13 @@ pub struct ChromeTokens {
     #[serde(deserialize_with = "color")]
     pub menu_fill: Hsla,
     #[serde(deserialize_with = "color")]
-    pub menu_border: Hsla,
-    #[serde(deserialize_with = "color")]
-    pub palette_fill: Hsla,
-    #[serde(deserialize_with = "color")]
     pub selected_shortcut: Hsla,
     #[serde(deserialize_with = "color")]
     pub destructive: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub on_destructive: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub warning: Hsla,
     #[serde(deserialize_with = "color")]
     pub backdrop: Hsla,
 }
@@ -670,7 +675,6 @@ impl ShadowLayer {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShadowTokens {
-    pub card: Vec<ShadowLayer>,
     pub tab: Vec<ShadowLayer>,
     pub menu: Vec<ShadowLayer>,
     pub palette: Vec<ShadowLayer>,

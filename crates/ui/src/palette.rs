@@ -60,9 +60,9 @@ pub fn build_overlay(state: &AppState, theme: &Theme, scroll: &UniformListScroll
             .occlude()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| cx.stop_propagation())
             .font_family(SharedString::from(theme.ui_font.family.clone()))
-            .bg(theme.chrome.palette_fill)
+            .bg(theme.chrome.menu_fill)
             .border(px(palette.border_px))
-            .border_color(theme.chrome.menu_border)
+            .border_color(theme.border.default)
             .rounded(px(palette.radius_px))
             .shadow(box_shadows(&theme.shadow.palette))
             .overflow_hidden()
@@ -123,7 +123,7 @@ fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, scroll: &Unifo
 
 fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
     let (fill, title_color, label_color) = match is_selected {
-        true => (theme.accent.primary, theme.text.inverse, theme.text.inverse),
+        true => (theme.accent.primary, theme.text.on_accent, theme.text.on_accent),
         false => (gpui::transparent_black(), theme.text.default, theme.text.subtle),
     };
     div()

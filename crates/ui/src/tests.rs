@@ -1144,7 +1144,8 @@ fn custom_theme_inherits_its_base_appearance() {
 #[test]
 fn apple_light_theme_loads_every_redesign_token() {
     let theme = Theme::load_default().unwrap();
-    assert_color(theme.surface.subtle, "#F5F5F7");
+    assert_color(theme.surface.window, "#F5F5F7");
+    assert_color(theme.surface.settings_window, "#F2F2F4");
     assert_color(theme.surface.canvas, "#FFFFFF");
     assert_color(theme.text.default, "#1D1D1F");
     assert_color(theme.text.muted, "#6E6E73");
@@ -1156,7 +1157,6 @@ fn apple_light_theme_loads_every_redesign_token() {
     assert!((theme.border.muted.a - 0.08).abs() < 1e-3);
     assert!((theme.border.default.a - 0.10).abs() < 1e-3);
     assert!((theme.chrome.menu_fill.a - 0.94).abs() < 1e-3);
-    assert!((theme.chrome.palette_fill.a - 0.96).abs() < 1e-3);
     assert_eq!(theme.ui_font.family, ".SystemUIFont");
     assert_eq!(
         [theme.ui_font.tab_px, theme.ui_font.pane_title_px, theme.ui_font.menu_px, theme.ui_font.palette_input_px],
@@ -1187,8 +1187,6 @@ fn shadow_tokens_become_layered_box_shadows() {
     assert!((tab[0].color.a - 0.10).abs() < 1e-3);
     assert_eq!(tab[1].offset, gpui::point(px(0.0), px(1.0)));
     assert_eq!(tab[1].blur_radius, px(2.0));
-    let card = box_shadows(&theme.shadow.card);
-    assert_eq!((card[0].offset.y, card[0].blur_radius), (px(1.0), px(3.0)));
     let menu = box_shadows(&theme.shadow.menu);
     assert_eq!((menu[0].offset.y, menu[0].blur_radius), (px(12.0), px(32.0)));
     let palette = box_shadows(&theme.shadow.palette);
@@ -1248,7 +1246,7 @@ fn look_for(is_focused: bool, is_split: bool) -> crate::island_look::IslandLook 
 fn focus_ring_shows_only_on_the_focused_island_of_a_split() {
     let theme = Theme::load_default().unwrap();
     let ring = look_for(true, true);
-    assert_eq!((ring.edge_px, ring.edge_color), (1.0, theme.accent.primary));
+    assert_eq!((ring.edge_px, ring.edge_color), (1.0, theme.border_focus()));
     for (is_focused, is_split) in [(true, false), (false, true), (false, false)] {
         let hairline = look_for(is_focused, is_split);
         assert_eq!((hairline.edge_px, hairline.edge_color), (0.5, theme.border_default()));

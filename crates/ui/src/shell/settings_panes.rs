@@ -62,7 +62,7 @@ impl Shell {
         let scale = self.state.settings.ui_scale;
         let divider = || div().h(px(1.0)).mx(px(ROW_INSET_PX * scale)).bg(theme.border.muted);
         div().flex().flex_col().rounded(px(GROUP_RADIUS_PX * scale))
-            .bg(theme.surface.subtle).border_1().border_color(theme.border.muted)
+            .bg(theme.surface.raised).border_1().border_color(theme.border.muted)
             .children(rows.into_iter().enumerate()
                 .map(|(index, row)| div().when(index > 0, |el| el.child(divider())).child(row)))
     }
@@ -270,7 +270,7 @@ impl Shell {
             BundleSide::Right | BundleSide::Bottom => (terminal, editor),
         };
         div().flex_none().w(px(DIAGRAM_WIDTH_PX * scale)).h(px(DIAGRAM_HEIGHT_PX * scale)).p(px(4.0 * scale))
-            .rounded(px(GROUP_RADIUS_PX * scale)).bg(theme.surface.subtle).border_1().border_color(theme.border.muted)
+            .rounded(px(GROUP_RADIUS_PX * scale)).bg(theme.surface.raised).border_1().border_color(theme.border.muted)
             .flex().when(is_stacked, |diagram| diagram.flex_col())
             .child(first).child(second)
     }

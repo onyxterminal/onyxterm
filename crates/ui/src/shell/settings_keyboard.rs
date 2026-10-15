@@ -90,7 +90,7 @@ impl Shell {
             .child(div().flex_1().min_w(px(0.0))
                 .child(div().text_size(px(TITLE_PX * scale)).text_color(theme.text.default).child(shortcut.title))
                 .children(replaced.map(|caption| div().text_size(px(CAPTION_PX * scale))
-                    .text_color(theme.status.stopping).child(caption))))
+                    .text_color(theme.chrome.warning).child(caption))))
             .child(div().flex_none().flex().items_center().gap(px(10.0 * scale))
                 .when(is_customized, |controls| controls.child(self.reset_shortcut_link(command, cx)))
                 .child(self.binding_button(command, shortcut.combo.as_ref(), cx)))

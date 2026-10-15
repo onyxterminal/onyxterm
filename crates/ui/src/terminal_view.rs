@@ -16,7 +16,6 @@ use std::rc::Rc;
 use terminal_core::{Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
 
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
-const SELECTION_ALPHA: f32 = 0.25;
 const WORD_CLICK_COUNT: usize = 2;
 const LINE_CLICK_COUNT: usize = 3;
 const MIN_COLS: u16 = 2;
@@ -206,7 +205,7 @@ impl TerminalStyle {
             font_family: font_family.into(),
             font_size: px(theme.font.size_px),
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
-            selection: theme.accent.primary.opacity(SELECTION_ALPHA),
+            selection: theme.accent.selection,
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
             align_cache: Rc::default(),

@@ -16,7 +16,7 @@ pub fn row_style(row: &Row, is_selected: bool, is_focused: bool, theme: &Theme) 
     let label = SharedString::from(row.name.clone());
     let resting_color = if row.is_ignored { theme.text.muted } else { theme.text.default };
     match (is_selected, is_focused) {
-        (true, true) => (label, theme.text.inverse, Some(theme.accent.primary)),
+        (true, true) => (label, theme.text.on_accent, Some(theme.accent.primary)),
         (true, false) => (label, resting_color, Some(theme.chrome.control_fill)),
         (false, _) => (label, resting_color, None),
     }
@@ -91,7 +91,7 @@ mod tests {
         let theme = theme();
         let (_, color, fill) = row_style(&row(false, false, false), true, true, &theme);
         assert_eq!(fill, Some(theme.accent.primary));
-        assert_eq!(color, theme.text.inverse);
+        assert_eq!(color, theme.text.on_accent);
     }
 
     #[test]
