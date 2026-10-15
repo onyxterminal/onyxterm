@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod buffer;
+mod comment;
 mod diff;
 mod edit;
 mod editor;

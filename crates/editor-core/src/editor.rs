@@ -1,4 +1,5 @@
 use crate::buffer::{Buffer, CRLF, LF};
+use crate::comment::toggle_comment_changes;
 use crate::edit::{Bias, Change, Edit};
 use crate::history::{EditKind, History, Record};
 use crate::motion::{line_end, line_start, move_selection, next_grapheme, prev_grapheme, word_left, word_range, word_right, Motion};
@@ -177,6 +178,12 @@ impl Editor {
             })
             .collect();
         self.commit(per_selection, EditKind::Typing, now, Placement::AfterInsert);
+    }
+
+    pub fn toggle_line_comment(&mut self, token: &str, now: Instant) {
+        let lines = touched_lines(self.buffer.rope(), &self.selections);
+        let changes = toggle_comment_changes(self.buffer.rope(), &lines, token);
+        self.commit(changes, EditKind::Other, now, Placement::Mapped);
     }
 
     pub fn copy_text(&self) -> Option<String> {
@@ -359,6 +366,36 @@ mod tests {
 
     fn heads(editor: &Editor) -> Vec<usize> {
         editor.selections().as_slice().iter().map(|selection| selection.head).collect()
+    }
+
+    #[test]
+    fn toggling_a_comment_prefixes_the_caret_line_after_its_indent() {
+        let mut editor = editor_with("fn main() {\n    run();\n}\n", &[18]);
+        editor.toggle_line_comment("//", Instant::now());
+        assert_eq!(text(&editor), "fn main() {\n    // run();\n}\n");
+        assert_eq!(heads(&editor), vec![21]);
+        editor.toggle_line_comment("//", Instant::now());
+        assert_eq!(text(&editor), "fn main() {\n    run();\n}\n");
+        assert_eq!(heads(&editor), vec![18]);
+    }
+
+    #[test]
+    fn toggling_a_selection_comments_every_non_blank_line_unless_all_are_commented() {
+        let mut editor = Editor::new(Buffer::from_text("a = 1\n\n# b = 2\n"));
+        editor.set_selections(Selections::single(Selection::new(0, 13)));
+        editor.toggle_line_comment("#", Instant::now());
+        assert_eq!(text(&editor), "# a = 1\n\n# # b = 2\n");
+        editor.toggle_line_comment("#", Instant::now());
+        assert_eq!(text(&editor), "a = 1\n\n# b = 2\n");
+    }
+
+    #[test]
+    fn uncommenting_accepts_a_marker_without_a_gap_and_undoes_in_one_step() {
+        let mut editor = editor_with("//x\n", &[0]);
+        editor.toggle_line_comment("//", Instant::now());
+        assert_eq!(text(&editor), "x\n");
+        editor.apply(EditorAction::Undo, Instant::now());
+        assert_eq!(text(&editor), "//x\n");
     }
 
     #[test]
