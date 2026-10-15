@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-const DOUBLE_CLICK: usize = 2;
+const SINGLE_CLICK: usize = 1;
 const GIT_REFRESH_DEBOUNCE: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,7 +287,7 @@ impl Shell {
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(move |shell, event: &MouseUpEvent, _window, cx| {
-                if event.click_count == DOUBLE_CLICK {
+                if event.click_count == SINGLE_CLICK {
                     shell.open_tree_row(panel, index, cx);
                 }
             }),
