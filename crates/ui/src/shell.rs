@@ -4,63 +4,72 @@
 use crate::app::AppState;
 use crate::app::PaletteChoice;
 use crate::command::{
-    close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
-    CommandId,
+    close_palette, open_choice_palette, open_palette, palette_move, palette_selected,
+    palette_selected_choice, CommandId,
+};
+use crate::confirm::{
+    close_pane_copy, close_tab_copy, delete_workspace_copy, discard_documents_copy,
+    discard_pane_copy, discard_tab_copy, quit_copy, ConfirmCopy, Confirmation,
 };
 use crate::document::{document_cwd, document_title, document_zone, render_document, DocumentPane};
 use crate::editor_pane::OpenDocument;
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
-use crate::confirm::{
-    close_pane_copy, close_tab_copy, delete_workspace_copy, discard_documents_copy, discard_pane_copy, discard_tab_copy,
-    quit_copy, ConfirmCopy, Confirmation,
+use crate::input::{
+    dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes,
 };
 use crate::menus::{install_menus, RunCommand};
 use crate::motion::fade_in;
 use crate::open_target::RecentEditors;
-use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
 use crate::palette as palette_render;
-use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
 use crate::pane_title::OscTitle;
-use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle};
+use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
+use crate::terminal_view::{
+    terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle,
+};
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::{restore_notice, WorkspaceModel};
-use domain::{Axis, Direction, LayoutNode, Panel, PanelId, PanelKind, TabId, TerminalSessionId, WorkspaceId};
+use domain::{
+    Axis, Direction, LayoutNode, Panel, PanelId, PanelKind, TabId, TerminalSessionId, WorkspaceId,
+};
 use editor_core::syntax::Language;
 use gpui::{
-    canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler, ExternalPaths,
-    FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
-    Styled, Subscription, Task, TitlebarOptions, UniformListScrollHandle, Window, WindowOptions,
+    canvas, div, point, prelude::*, px, AnyElement, ClipboardItem, Context, ElementInputHandler,
+    ExternalPaths, FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement,
+    Render, ScrollStrategy, SharedString, Styled, Subscription, Task, TitlebarOptions,
+    UniformListScrollHandle, Window, WindowOptions,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use terminal_core::broadcast::{error::RecvError, Receiver};
-use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
+use terminal_core::{
+    GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle,
+};
 use workspace_service::{InMemorySshService, PanelSnapshot, RestoredState, WorkspaceStore};
 
+mod color_picker_view;
+mod copy_mode;
 mod dialogs;
 mod document_strip;
 mod documents;
 mod editor_io;
 mod file_tree_input;
 mod islands;
-mod pane_header;
 mod pane_drag;
+mod pane_header;
 mod pane_options;
 mod pane_status;
-mod splits;
 mod settings_keyboard;
 mod settings_panes;
 mod settings_search_view;
 mod settings_slider;
 mod settings_view;
-mod color_picker_view;
-mod copy_mode;
-mod theme_editor;
+mod splits;
 mod tab_strip;
 mod text_input;
+mod theme_editor;
 
 use tab_strip::TabDrag;
 use tab_strip::TabField;
@@ -122,6 +131,7 @@ pub struct Shell {
     recent_editors: RecentEditors,
     pending: Option<Confirmation>,
     is_workspace_menu_open: bool,
+    is_signal_red: bool,
     menu_field: Option<MenuField>,
     menu_search: TextField,
     tab_field: Option<TabField>,
@@ -152,9 +162,17 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(state: AppState, startup: Startup, cx: &mut Context<Self>) -> Self {
-        let font_family = state.theme.font.resolve_family(&cx.text_system().all_font_names());
+        let font_family = state
+            .theme
+            .font
+            .resolve_family(&cx.text_system().all_font_names());
         tracing::info!(%font_family, "terminal font resolved");
-        let Startup { terminals, store, restored, home } = startup;
+        let Startup {
+            terminals,
+            store,
+            restored,
+            home,
+        } = startup;
         let ssh = Arc::new(InMemorySshService::new(&home));
         let mut shell = Self {
             style: TerminalStyle::from_theme(&state.theme, font_family),
@@ -170,6 +188,7 @@ impl Shell {
             recent_editors: RecentEditors::default(),
             pending: None,
             is_workspace_menu_open: false,
+            is_signal_red: false,
             menu_field: None,
             menu_search: TextField::default(),
             tab_field: None,
@@ -230,7 +249,8 @@ impl Shell {
         if self.model.tabs().is_empty() {
             self.open_tab(cx);
         }
-        let is_live = |panel: PanelId| self.panes.contains_key(&panel) || self.documents.contains_key(&panel);
+        let is_live =
+            |panel: PanelId| self.panes.contains_key(&panel) || self.documents.contains_key(&panel);
         let documents = self.model.documents_to_restore(is_live);
         let terminals = self.model.terminals_to_spawn(is_live);
         for panel in documents {
@@ -287,14 +307,21 @@ impl Shell {
 
     fn find_bundle(&self) -> Option<(PanelId, PanelId)> {
         let tab = self.model.tabs().active()?;
-        Self::find_bundle_in(tab.layout(), &|id| self.model.panel(id).map(|record| record.panel.kind))
+        Self::find_bundle_in(tab.layout(), &|id| {
+            self.model.panel(id).map(|record| record.panel.kind)
+        })
     }
 
-    fn find_bundle_in(node: &LayoutNode, kind: &dyn Fn(PanelId) -> Option<PanelKind>) -> Option<(PanelId, PanelId)> {
+    fn find_bundle_in(
+        node: &LayoutNode,
+        kind: &dyn Fn(PanelId) -> Option<PanelKind>,
+    ) -> Option<(PanelId, PanelId)> {
         let LayoutNode::Split { first, second, .. } = node else {
             return None;
         };
-        if let (LayoutNode::Leaf { panel_id: a }, LayoutNode::Leaf { panel_id: b }) = (first.as_ref(), second.as_ref()) {
+        if let (LayoutNode::Leaf { panel_id: a }, LayoutNode::Leaf { panel_id: b }) =
+            (first.as_ref(), second.as_ref())
+        {
             match (kind(*a), kind(*b)) {
                 (Some(PanelKind::FileTree), Some(PanelKind::Editor)) => return Some((*a, *b)),
                 (Some(PanelKind::Editor), Some(PanelKind::FileTree)) => return Some((*b, *a)),
@@ -344,7 +371,17 @@ impl Shell {
         let Some(tab) = self.model.tabs_mut().active_mut() else {
             return;
         };
-        if tab.wrap_focused_with_pair(outer_axis, size, 0.5, file_tree_id, editor_id, places_before).is_err() {
+        if tab
+            .wrap_focused_with_pair(
+                outer_axis,
+                size,
+                0.5,
+                file_tree_id,
+                editor_id,
+                places_before,
+            )
+            .is_err()
+        {
             self.discard_pane(file_tree_id, cx);
             self.discard_pane(editor_id, cx);
         }
@@ -352,14 +389,22 @@ impl Shell {
 
     fn save_editor_bundle_settings(&mut self, side: BundleSide, size: f32) {
         let _ = self.store.set_setting(EDITOR_BUNDLE_SIDE_KEY, side.key());
-        let _ = self.store.set_setting(EDITOR_BUNDLE_SIZE_KEY, &size.to_string());
+        let _ = self
+            .store
+            .set_setting(EDITOR_BUNDLE_SIZE_KEY, &size.to_string());
     }
 
     fn open_document(&mut self, panel: Panel, path: PathBuf, cx: &mut Context<Self>) {
         let id = panel.id;
         let zone = document_zone(panel.kind);
         let cwd = document_cwd(panel.kind, &path, self.model.active_root());
-        self.model.add_panel(PanelSnapshot { panel, cwd, name: None, path: Some(path), documents: Vec::new() });
+        self.model.add_panel(PanelSnapshot {
+            panel,
+            cwd,
+            name: None,
+            path: Some(path),
+            documents: Vec::new(),
+        });
         self.restore_document(id, cx);
         self.sync_editor_record(id);
         let Some(tab) = self.model.tabs_mut().active_mut() else {
@@ -396,7 +441,9 @@ impl Shell {
 
     fn run_command(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
         match id {
-            CommandId::Copy | CommandId::Paste | CommandId::SelectAll if self.active_field().is_some() => {
+            CommandId::Copy | CommandId::Paste | CommandId::SelectAll
+                if self.active_field().is_some() =>
+            {
                 self.run_field_command(id, cx)
             }
             CommandId::Copy if self.has_focused_editor() => self.copy_from_editor(cx),
@@ -518,7 +565,12 @@ impl Shell {
         }
     }
 
-    fn consume_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    fn consume_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let keystroke = &event.keystroke;
         if keystroke.key == ESCAPE_KEY && self.is_dragging_pane() {
             return self.cancel_pane_drag(cx);
@@ -593,23 +645,41 @@ impl Shell {
     }
 
     fn repeat_text(&self, handle: &TerminalHandle, keystroke: &Keystroke) -> bool {
-        let Some(text) = keystroke.key_char.as_deref().filter(|text| !text.is_empty()) else {
+        let Some(text) = keystroke
+            .key_char
+            .as_deref()
+            .filter(|text| !text.is_empty())
+        else {
             return false;
         };
         write_to(handle, text.as_bytes());
         true
     }
 
-    fn drop_paths(&mut self, panel: PanelId, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+    fn drop_paths(
+        &mut self,
+        panel: PanelId,
+        paths: &ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.focus_pane(panel);
         window.focus(&self.focus_handle);
         if let Some(pane) = self.panes.get(&panel) {
-            write_to(&pane.terminal.handle, dropped_paths_text(paths.paths()).as_bytes());
+            write_to(
+                &pane.terminal.handle,
+                dropped_paths_text(paths.paths()).as_bytes(),
+            );
         }
         cx.notify();
     }
 
-    fn handle_palette_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    fn handle_palette_key(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         match keystroke.key.as_str() {
             ESCAPE_KEY => close_palette(&mut self.state),
             ENTER_KEY => self.run_palette_selection(window, cx),
@@ -623,7 +693,8 @@ impl Shell {
 
     fn move_palette_selection(&mut self, step: isize, strategy: ScrollStrategy) {
         palette_move(&mut self.state, step);
-        self.palette_scroll.scroll_to_item(self.state.palette_selection, strategy);
+        self.palette_scroll
+            .scroll_to_item(self.state.palette_selection, strategy);
     }
 
     fn run_palette_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -693,7 +764,10 @@ impl Shell {
             .model
             .entries()
             .iter()
-            .map(|entry| PaletteChoice { key: entry.workspace.id.to_string(), title: entry.workspace.name.clone() })
+            .map(|entry| PaletteChoice {
+                key: entry.workspace.id.to_string(),
+                title: entry.workspace.name.clone(),
+            })
             .collect();
         open_choice_palette(&mut self.state, choices);
         self.scroll_palette_to_top();
@@ -705,15 +779,24 @@ impl Shell {
 
     fn start_new_workspace(&mut self, cx: &mut Context<Self>) {
         self.is_workspace_menu_open = true;
-        self.menu_field = Some(MenuField { renaming: None, input: TextField::default() });
+        self.menu_field = Some(MenuField {
+            renaming: None,
+            input: TextField::default(),
+        });
         cx.notify();
     }
 
     fn start_rename_workspace(&mut self, key: &SharedString, cx: &mut Context<Self>) {
-        let Some(name) = self.workspace_by_key(key).and_then(|id| self.model.workspace_name(id)) else {
+        let Some(name) = self
+            .workspace_by_key(key)
+            .and_then(|id| self.model.workspace_name(id))
+        else {
             return;
         };
-        self.menu_field = Some(MenuField { renaming: Some(key.clone()), input: TextField::new(name) });
+        self.menu_field = Some(MenuField {
+            renaming: Some(key.clone()),
+            input: TextField::new(name),
+        });
         cx.notify();
     }
 
@@ -734,11 +817,18 @@ impl Shell {
     }
 
     fn workspace_by_key(&self, key: &str) -> Option<WorkspaceId> {
-        self.model.entries().iter().map(|entry| entry.workspace.id).find(|id| id.to_string() == key)
+        self.model
+            .entries()
+            .iter()
+            .map(|entry| entry.workspace.id)
+            .find(|id| id.to_string() == key)
     }
 
     fn copy_selection(&self, cx: &mut Context<Self>) {
-        let Some(text) = self.focused_handle().and_then(|handle| handle.terminal().selection_text()) else {
+        let Some(text) = self
+            .focused_handle()
+            .and_then(|handle| handle.terminal().selection_text())
+        else {
             return;
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -789,17 +879,28 @@ impl Shell {
     }
 
     fn has_running_processes(&self, panels: &[PanelId]) -> bool {
-        panels
-            .iter()
-            .any(|panel| self.panes.get(panel).is_some_and(|pane| pane.terminal.handle.has_foreground_job()))
+        panels.iter().any(|panel| {
+            self.panes
+                .get(panel)
+                .is_some_and(|pane| pane.terminal.handle.has_foreground_job())
+        })
     }
 
     fn unsaved_count(&self, panels: impl Iterator<Item = PanelId>) -> usize {
-        panels.filter_map(|panel| self.documents.get(&panel)).map(DocumentPane::unsaved_count).sum()
+        panels
+            .filter_map(|panel| self.documents.get(&panel))
+            .map(DocumentPane::unsaved_count)
+            .sum()
     }
 
     fn close_tab(&mut self, id: TabId, cx: &mut Context<Self>) {
-        let Some(panels) = self.model.tabs().iter().find(|tab| tab.id() == id).map(|tab| tab.layout().leaves()) else {
+        let Some(panels) = self
+            .model
+            .tabs()
+            .iter()
+            .find(|tab| tab.id() == id)
+            .map(|tab| tab.layout().leaves())
+        else {
             return;
         };
         for panel in panels {
@@ -833,7 +934,11 @@ impl Shell {
             Confirmation::ClosePane(_) => close_pane_copy(),
             Confirmation::CloseTab(_) => close_tab_copy(),
             Confirmation::DiscardPane(panel) => match self.unsaved_count(std::iter::once(panel)) {
-                0 | 1 => discard_pane_copy(&self.dirty_document_name(panel).unwrap_or_else(|| UNNAMED_FILE.to_string())),
+                0 | 1 => discard_pane_copy(
+                    &self
+                        .dirty_document_name(panel)
+                        .unwrap_or_else(|| UNNAMED_FILE.to_string()),
+                ),
                 unsaved => discard_documents_copy(unsaved),
             },
             Confirmation::DiscardDocument(panel, id) => {
@@ -848,14 +953,21 @@ impl Shell {
                     .find(|tab| tab.id() == id)
                     .map(|tab| tab.layout().leaves())
                     .unwrap_or_default();
-                discard_tab_copy(self.unsaved_count(leaves.iter().copied()), self.has_running_processes(&leaves))
+                discard_tab_copy(
+                    self.unsaved_count(leaves.iter().copied()),
+                    self.has_running_processes(&leaves),
+                )
             }
             Confirmation::Quit { sessions, unsaved } => quit_copy(sessions, unsaved),
             Confirmation::DeleteWorkspace(id) => {
                 let panels = self.model.workspace_panels(id);
                 let live = panels.iter().filter(|p| self.panes.contains_key(p)).count();
                 let unsaved = self.unsaved_count(panels.into_iter());
-                delete_workspace_copy(self.model.workspace_name(id).unwrap_or_default(), live, unsaved)
+                delete_workspace_copy(
+                    self.model.workspace_name(id).unwrap_or_default(),
+                    live,
+                    unsaved,
+                )
             }
         }
     }
@@ -1035,7 +1147,8 @@ impl Shell {
     }
 
     fn remember_focused_editor(&mut self) {
-        let is_editor = |panel: &PanelId| matches!(self.documents.get(panel), Some(DocumentPane::Editor(_)));
+        let is_editor =
+            |panel: &PanelId| matches!(self.documents.get(panel), Some(DocumentPane::Editor(_)));
         if let Some(panel) = self.model.focused_document().filter(is_editor) {
             self.recent_editors.touch(panel);
         }
@@ -1081,7 +1194,13 @@ impl Shell {
         let panel = PanelId::new();
         let session = self.spawn_session(panel, command, cx)?;
         let record = Panel::new_terminal(panel, title, session);
-        self.model.add_panel(PanelSnapshot { panel: record, cwd, name: None, path: None, documents: Vec::new() });
+        self.model.add_panel(PanelSnapshot {
+            panel: record,
+            cwd,
+            name: None,
+            path: None,
+            documents: Vec::new(),
+        });
         Some(panel)
     }
 
@@ -1098,14 +1217,17 @@ impl Shell {
             .ok()?;
         let handle = self.terminals.handle_for(session)?;
         let events = watch_session(panel, handle.subscribe(), cx);
-        self.panes.insert(panel, Pane {
-            session,
-            terminal: TerminalPane::new(handle),
-            osc: None,
-            status: pane_status::PaneStatus::default(),
-            is_refreshing: false,
-            _events: events,
-        });
+        self.panes.insert(
+            panel,
+            Pane {
+                session,
+                terminal: TerminalPane::new(handle),
+                osc: None,
+                status: pane_status::PaneStatus::default(),
+                is_refreshing: false,
+                _events: events,
+            },
+        );
         Some(session)
     }
 
@@ -1114,7 +1236,10 @@ impl Shell {
         if let Some(title) = batch.title {
             if let Some(pane) = self.panes.get_mut(&panel) {
                 let owner = pane.terminal.handle.foreground_process_group();
-                pane.osc = Some(OscTitle { text: title.clone(), owner });
+                pane.osc = Some(OscTitle {
+                    text: title.clone(),
+                    owner,
+                });
             }
             if let Some(record) = self.model.panel_mut(panel) {
                 record.panel.title = title;
@@ -1136,7 +1261,10 @@ impl Shell {
     }
 
     fn pane_focus(&self, cx: &mut Context<Self>) -> PaneFocus {
-        PaneFocus { marked_text: self.marked_text.clone(), register_input: self.input_registration(cx) }
+        PaneFocus {
+            marked_text: self.marked_text.clone(),
+            register_input: self.input_registration(cx),
+        }
     }
 
     fn input_registration(&self, cx: &mut Context<Self>) -> InputRegistration {
@@ -1156,7 +1284,9 @@ impl Shell {
     ) -> AnyElement {
         match document {
             DocumentPane::Editor(pane) => match pane.active().ready() {
-                Some(editor) => self.render_editor_canvas(panel, pane.active(), editor, is_focused, cx),
+                Some(editor) => {
+                    self.render_editor_canvas(panel, pane.active(), editor, is_focused, cx)
+                }
                 None => render_document(document, &self.state.theme),
             },
             DocumentPane::FileTree(tree_pane) if tree_pane.exists => {
@@ -1193,18 +1323,29 @@ impl Shell {
 
     fn field_input_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let register = self.input_registration(cx);
-        canvas(|_bounds, _window, _cx| {}, move |bounds, _state, window, cx| register(bounds, window, cx))
-            .absolute()
-            .inset_0()
+        canvas(
+            |_bounds, _window, _cx| {},
+            move |bounds, _state, window, cx| register(bounds, window, cx),
+        )
+        .absolute()
+        .inset_0()
     }
 
     fn render_pane(&self, panel: PanelId, cx: &mut Context<Self>) -> AnyElement {
-        let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
+        let is_focused = self
+            .model
+            .tabs()
+            .active()
+            .is_some_and(|tab| tab.focused() == panel);
         let content = if let Some(document) = self.documents.get(&panel) {
             self.render_document_pane(panel, document, is_focused, cx)
         } else if let Some(pane) = self.panes.get(&panel) {
-            terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)))
-                .into_any_element()
+            terminal_canvas(
+                pane.terminal.clone(),
+                self.style.clone(),
+                is_focused.then(|| self.pane_focus(cx)),
+            )
+            .into_any_element()
         } else {
             return div().into_any_element();
         };
@@ -1220,7 +1361,11 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
+            .on_drop(
+                cx.listener(move |shell, paths: &ExternalPaths, window, cx| {
+                    shell.drop_paths(panel, paths, window, cx)
+                }),
+            )
             .child(islands::island_content(look, content))
             .child(header)
             .children(self.render_document_strip(panel, is_focused, cx))
@@ -1250,19 +1395,33 @@ impl Render for Shell {
                 });
             }
         });
-        let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll, on_select)
-            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
-                close_palette(&mut shell.state);
-                cx.notify();
-            }));
+        let palette_overlay =
+            palette_render::build_overlay(&self.state, theme, &self.palette_scroll, on_select)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|shell, _event, _window, cx| {
+                        close_palette(&mut shell.state);
+                        cx.notify();
+                    }),
+                );
         let palette_visible = self.state.palette_visible;
-        let notice = self.notice.clone().map(|notice| self.render_notice(&notice, cx));
-        let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
+        let notice = self
+            .notice
+            .clone()
+            .map(|notice| self.render_notice(&notice, cx));
+        let workspace_menu = self
+            .is_workspace_menu_open
+            .then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
         let tab_ghost = self.render_tab_ghost();
-        let close_prompt = self.pending.map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
-        let settings_overlay = self.state.settings_visible.then(|| self.render_settings(window, cx));
+        let close_prompt = self
+            .pending
+            .map(|pending| self.render_confirmation(self.confirmation_copy(pending), cx));
+        let settings_overlay = self
+            .state
+            .settings_visible
+            .then(|| self.render_settings(window, cx));
         let field_input = self.active_field().map(|_| self.field_input_probe(cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
         let theme = &self.state.theme;
@@ -1277,24 +1436,46 @@ impl Render for Shell {
             .bg(theme.surface.subtle)
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
-            .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
-            .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
-            .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| {
-                shell.drag_split(event, cx);
-                shell.drag_pane(event, cx);
-                shell.drag_tab(event, cx);
+            .on_key_down(
+                cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)),
+            )
+            .on_action(cx.listener(|shell, action: &RunCommand, window, cx| {
+                shell.run_command(action.0, window, cx)
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|shell, event: &gpui::MouseUpEvent, window, cx| {
-                shell.end_split_drag(cx);
-                shell.release_pane_drag(window, cx);
-                shell.release_tab_drag(event, window, cx);
-            }))
+            .on_mouse_move(
+                cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| {
+                    shell.drag_split(event, cx);
+                    shell.drag_pane(event, cx);
+                    shell.drag_tab(event, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|shell, event: &gpui::MouseUpEvent, window, cx| {
+                    shell.end_split_drag(cx);
+                    shell.release_pane_drag(window, cx);
+                    shell.release_tab_drag(event, window, cx);
+                }),
+            )
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
-            .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)),
+            )
             .child(tab_strip)
             .children(notice)
-            .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
-            .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .w_full()
+                    .px(margin)
+                    .pb(margin)
+                    .children(pane_area),
+            )
+            .when(palette_visible, |el| {
+                el.child(fade_in(palette_overlay, "palette", animation_ms))
+            })
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
             .children(pane_ghost)
             .children(tab_ghost)
@@ -1307,10 +1488,20 @@ impl Render for Shell {
 
 fn show_about(window: &mut Window, cx: &mut gpui::App) {
     let detail = format!("Version {}", crate::version());
-    let _dismissed = window.prompt(gpui::PromptLevel::Info, ABOUT_TITLE, Some(&detail), &[ABOUT_OK], cx);
+    let _dismissed = window.prompt(
+        gpui::PromptLevel::Info,
+        ABOUT_TITLE,
+        Some(&detail),
+        &[ABOUT_OK],
+        cx,
+    );
 }
 
-fn watch_session(panel: PanelId, mut events: Receiver<TerminalEvent>, cx: &mut Context<Shell>) -> Task<()> {
+fn watch_session(
+    panel: PanelId,
+    mut events: Receiver<TerminalEvent>,
+    cx: &mut Context<Shell>,
+) -> Task<()> {
     cx.spawn(async move |shell, cx| loop {
         let batch = next_batch(&mut events).await;
         let exited = batch.exited;
@@ -1342,9 +1533,19 @@ fn write_to(handle: &TerminalHandle, bytes: &[u8]) {
 }
 
 fn login_shell_command(cwd: PathBuf) -> ShellCommand {
-    let program = std::env::var_os("SHELL").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_SHELL));
-    let cwd = if Path::new(&cwd).is_dir() { cwd } else { PathBuf::from("/") };
-    ShellCommand { program, args: vec![LOGIN_FLAG.to_string()], cwd }
+    let program = std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_SHELL));
+    let cwd = if Path::new(&cwd).is_dir() {
+        cwd
+    } else {
+        PathBuf::from("/")
+    };
+    ShellCommand {
+        program,
+        args: vec![LOGIN_FLAG.to_string()],
+        cwd,
+    }
 }
 
 fn shell_title(command: &ShellCommand) -> String {
@@ -1368,13 +1569,17 @@ pub fn open_shell_window(
         titlebar: Some(TitlebarOptions {
             title: options.titlebar.and_then(|titlebar| titlebar.title),
             appears_transparent: true,
-            traffic_light_position: Some(point(px(layout.traffic_light_left_px), px(layout.traffic_light_top_px))),
+            traffic_light_position: Some(point(
+                px(layout.traffic_light_left_px),
+                px(layout.traffic_light_top_px),
+            )),
         }),
         ..options
     };
     cx.open_window(themed_options, |window, cx| {
         let shell = cx.new(|cx| {
-            cx.observe_window_bounds(window, |_shell, _window, cx| cx.notify()).detach();
+            cx.observe_window_bounds(window, |_shell, _window, cx| cx.notify())
+                .detach();
             Shell::new(state, startup, cx)
         });
         window.focus(&shell.read(cx).focus_handle);

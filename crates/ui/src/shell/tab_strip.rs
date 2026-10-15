@@ -3,8 +3,8 @@ use super::{FieldTarget, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::command::CommandId;
 use crate::pane_drop::{has_left_dead_zone, tab_drop_target};
 use crate::tabs::numbered_tab_label;
-use crate::theme::icons::Icon;
 use crate::text_field::TextField;
+use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
 use crate::theme::{Appearance, Theme};
 use crate::workspace_menu::workspace_button_label;
@@ -25,6 +25,7 @@ const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const PALETTE_BUTTON_GAP_PX: f32 = 5.0;
 const PALETTE_ICON_PX: f32 = 12.0;
 const APPEARANCE_ICON_PX: f32 = 14.0;
+const SIGNAL_DOT_PX: f32 = 10.0;
 const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
@@ -63,7 +64,11 @@ pub(super) struct TabDrag {
 }
 
 impl Shell {
-    pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_tab_strip(
+        &self,
+        is_fullscreen: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = &self.state.theme;
         let layout = theme.layout;
         let active = (self.model.active_id(), self.model.tabs().active_index());
@@ -99,11 +104,16 @@ impl Shell {
                     .flex_row()
                     .items_center()
                     .gap(px(TAB_PILL_GAP_PX * self.state.settings.ui_scale))
-                    .children(self.tab_pills().into_iter().map(|pill| self.render_tab_pill(pill, cx))),
+                    .children(
+                        self.tab_pills()
+                            .into_iter()
+                            .map(|pill| self.render_tab_pill(pill, cx)),
+                    ),
             )
             .child(self.render_new_tab_button(cx))
             .child(self.render_palette_button(cx))
             .child(self.render_appearance_button(cx))
+            .child(self.render_signal_button(cx))
     }
 
     fn tab_pills(&self) -> Vec<TabPill> {
@@ -118,7 +128,11 @@ impl Shell {
                     Some(field) => TabLabel::Editing(field.input.clone()),
                     None => TabLabel::Title(title),
                 };
-                TabPill { index, label, is_active: index == active }
+                TabPill {
+                    index,
+                    label,
+                    is_active: index == active,
+                }
             })
             .collect()
     }
@@ -152,8 +166,13 @@ impl Shell {
             .text_color(theme.text.muted)
             .shadow(shadows)
             .when(is_raised, |pill| pill.bg(theme.chrome.control_fill))
-            .when(pill.is_active, |pill| pill.text_color(theme.text.default).font_weight(FontWeight::MEDIUM))
-            .when(!is_raised, |pill| pill.hover(move |style| style.bg(hover_fill)))
+            .when(pill.is_active, |pill| {
+                pill.text_color(theme.text.default)
+                    .font_weight(FontWeight::MEDIUM)
+            })
+            .when(!is_raised, |pill| {
+                pill.hover(move |style| style.bg(hover_fill))
+            })
             .child(bounds_probe(&self.tab_bounds, index))
             .on_mouse_down(
                 MouseButton::Left,
@@ -168,13 +187,18 @@ impl Shell {
 
     fn render_workspace_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
-        let name = workspace_button_label(self.model.workspace_name(self.model.active_id())).to_string();
+        let name =
+            workspace_button_label(self.model.workspace_name(self.model.active_id())).to_string();
         strip_button("workspace-menu-button", theme)
-            .px(px(WORKSPACE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale))
+            .px(px(
+                WORKSPACE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale
+            ))
             .gap(px(WORKSPACE_BUTTON_GAP_PX * self.state.settings.ui_scale))
             .max_w(px(180.0 * self.state.settings.ui_scale))
             .text_color(theme.text.muted)
-            .when(self.is_workspace_menu_open, |el| el.bg(theme.chrome.control_fill))
+            .when(self.is_workspace_menu_open, |el| {
+                el.bg(theme.chrome.control_fill)
+            })
             .tooltip(self.tooltip_builder("Switch workspace".into()))
             .on_mouse_down(
                 MouseButton::Left,
@@ -183,7 +207,14 @@ impl Shell {
                     shell.toggle_workspace_menu(cx);
                 }),
             )
-            .child(div().min_w(px(0.0)).truncate().font_weight(FontWeight::MEDIUM).text_color(theme.text.default).child(name))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text.default)
+                    .child(name),
+            )
             .child(Icon::Chevron.sized(CHEVRON_PX * self.state.settings.ui_scale))
     }
 
@@ -208,9 +239,15 @@ impl Shell {
 
     fn render_palette_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
-        let shortcut = self.state.keymap.combo_for(CommandId::OpenPalette).map(|combo| combo.glyphs());
+        let shortcut = self
+            .state
+            .keymap
+            .combo_for(CommandId::OpenPalette)
+            .map(|combo| combo.glyphs());
         strip_button("palette-button", theme)
-            .px(px(PALETTE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale))
+            .px(px(
+                PALETTE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale
+            ))
             .gap(px(PALETTE_BUTTON_GAP_PX * self.state.settings.ui_scale))
             .text_size(px(theme.ui_font.hint_px))
             .text_color(theme.text.subtle)
@@ -247,8 +284,39 @@ impl Shell {
             .child(icon.sized(APPEARANCE_ICON_PX * self.state.settings.ui_scale))
     }
 
+    fn render_signal_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.state.theme;
+        let signal_color = if self.is_signal_red {
+            theme.status.failed
+        } else {
+            theme.status.running
+        };
+        let dot_size = px(SIGNAL_DOT_PX * self.state.settings.ui_scale);
+        strip_button("signal-button", theme)
+            .w(px(theme.top_bar.control_height_px))
+            .justify_center()
+            .ml(px(theme.top_bar.tab_gap_px))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|shell, _event, _window, cx| {
+                    cx.stop_propagation();
+                    shell.toggle_signal(cx);
+                }),
+            )
+            .child(div().size(dot_size).rounded_full().bg(signal_color))
+    }
+
+    fn toggle_signal(&mut self, cx: &mut Context<Self>) {
+        self.is_signal_red = !self.is_signal_red;
+        cx.notify();
+    }
+
     fn press_tab_pill(&mut self, index: usize, press: Point<Pixels>, cx: &mut Context<Self>) {
-        if self.tab_field.as_ref().is_some_and(|field| field.index == index) {
+        if self
+            .tab_field
+            .as_ref()
+            .is_some_and(|field| field.index == index)
+        {
             return;
         }
         if index >= self.model.tabs().len() {
@@ -280,7 +348,12 @@ impl Shell {
         }
     }
 
-    pub(super) fn release_tab_drag(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn release_tab_drag(
+        &mut self,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(drag) = self.tab_drag.take() else {
             return;
         };
@@ -292,8 +365,12 @@ impl Shell {
             }
             return;
         }
-        let bounds: Vec<(usize, Bounds<Pixels>)> =
-            self.tab_bounds.borrow().iter().map(|(index, bounds)| (*index, *bounds)).collect();
+        let bounds: Vec<(usize, Bounds<Pixels>)> = self
+            .tab_bounds
+            .borrow()
+            .iter()
+            .map(|(index, bounds)| (*index, *bounds))
+            .collect();
         let Some(target) = tab_drop_target(event.position, &bounds, drag.from) else {
             return;
         };
@@ -320,7 +397,10 @@ impl Shell {
         if !drag.is_active || drag.from == index {
             return false;
         }
-        self.tab_bounds.borrow().get(&index).is_some_and(|bounds| bounds.contains(&drag.cursor))
+        self.tab_bounds
+            .borrow()
+            .get(&index)
+            .is_some_and(|bounds| bounds.contains(&drag.cursor))
     }
 
     pub(super) fn render_tab_ghost(&self) -> Option<AnyElement> {
@@ -371,7 +451,11 @@ impl Shell {
         self.tab_field = Some(TabField { index, input });
     }
 
-    pub(super) fn handle_tab_field_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) -> bool {
+    pub(super) fn handle_tab_field_key(
+        &mut self,
+        keystroke: &Keystroke,
+        cx: &mut Context<Self>,
+    ) -> bool {
         match keystroke.key.as_str() {
             ESCAPE_KEY => self.tab_field = None,
             ENTER_KEY => self.commit_tab_field(),
