@@ -355,9 +355,22 @@ fn document_panels_are_not_spawned_as_terminals() {
     model.add_panel(editor_snapshot(editor, &home.path().join("main.rs")));
     model.tabs_mut().active_mut().expect("tab").split_focused(Axis::Horizontal, editor).expect("split");
 
-    assert_eq!(model.terminals_to_spawn(|_| false), vec![terminal]);
+    assert_eq!(model.shown_terminals_to_spawn(|_| false), vec![terminal]);
     assert_eq!(model.documents_to_restore(|_| false), vec![editor]);
     assert!(model.documents_to_restore(|panel| panel == editor).is_empty());
+}
+
+#[test]
+fn only_terminals_in_the_shown_tab_need_spawning() {
+    let home = TempDir::new().expect("home");
+    let mut model = seeded_model(home.path());
+    let hidden = open_terminal_tab(&mut model, home.path());
+    let shown = open_terminal_tab(&mut model, home.path());
+
+    assert_eq!(model.shown_terminals_to_spawn(|_| false), vec![shown]);
+    model.tabs_mut().activate(0);
+    assert_eq!(model.shown_terminals_to_spawn(|_| false), vec![hidden]);
+    assert!(model.shown_terminals_to_spawn(|panel| panel == hidden).is_empty());
 }
 
 #[test]

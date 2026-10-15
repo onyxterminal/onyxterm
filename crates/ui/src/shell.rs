@@ -150,6 +150,7 @@ pub struct Shell {
     tab_scroll: gpui::ScrollHandle,
     visible_tab: std::cell::Cell<Option<(WorkspaceId, usize)>>,
     is_redraw_pending: bool,
+    spawned_tab: Option<TabId>,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     is_copy_top_pending: bool,
@@ -201,6 +202,7 @@ impl Shell {
             tab_scroll: gpui::ScrollHandle::new(),
             visible_tab: std::cell::Cell::new(None),
             is_redraw_pending: false,
+            spawned_tab: None,
             pane_menu: None,
             pane_field: None,
             is_copy_top_pending: false,
@@ -251,11 +253,24 @@ impl Shell {
         }
         let is_live = |panel: PanelId| self.panes.contains_key(&panel) || self.documents.contains_key(&panel);
         let documents = self.model.documents_to_restore(is_live);
-        let terminals = self.model.terminals_to_spawn(is_live);
         for panel in documents {
             self.restore_document(panel, cx);
         }
-        for panel in terminals {
+        self.spawn_shown_terminals(cx);
+    }
+
+    fn spawn_terminals_on_tab_change(&mut self, cx: &mut Context<Self>) {
+        let shown = self.model.tabs().active().map(|tab| tab.id());
+        if shown == self.spawned_tab {
+            return;
+        }
+        self.spawned_tab = shown;
+        self.spawn_shown_terminals(cx);
+    }
+
+    fn spawn_shown_terminals(&mut self, cx: &mut Context<Self>) {
+        let is_live = |panel: PanelId| self.panes.contains_key(&panel);
+        for panel in self.model.shown_terminals_to_spawn(is_live) {
             self.spawn_restored(panel, cx);
         }
     }
@@ -1272,6 +1287,7 @@ impl Render for Shell {
         if FIRST_OUTPUT_RECEIVED.is_reached() {
             FIRST_OUTPUT_RENDERED.reach();
         }
+        self.spawn_terminals_on_tab_change(cx);
         let now = Instant::now();
         let pane_area = self.render_pane_area(window, now, cx);
         if self.needs_motion_frame(now) {

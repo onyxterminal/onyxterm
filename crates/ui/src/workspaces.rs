@@ -118,8 +118,9 @@ impl WorkspaceModel {
         self.tabs().iter().flat_map(|tab| tab.layout().leaves()).filter(|panel| !is_live(*panel)).collect()
     }
 
-    pub fn terminals_to_spawn(&self, is_live: impl Fn(PanelId) -> bool) -> Vec<PanelId> {
-        self.panels_to_spawn(is_live).into_iter().filter(|panel| !self.is_document(*panel)).collect()
+    pub fn shown_terminals_to_spawn(&self, is_live: impl Fn(PanelId) -> bool) -> Vec<PanelId> {
+        let shown = self.tabs().active().map(|tab| tab.layout().leaves()).unwrap_or_default();
+        shown.into_iter().filter(|panel| !is_live(*panel) && !self.is_document(*panel)).collect()
     }
 
     pub fn documents_to_restore(&self, is_live: impl Fn(PanelId) -> bool) -> Vec<PanelId> {
