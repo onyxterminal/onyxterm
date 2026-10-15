@@ -38,7 +38,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use terminal_core::broadcast::{error::RecvError, Receiver};
-use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
+use terminal_core::{CommandBlock, GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
 use workspace_service::{InMemorySshService, PanelSnapshot, RestoredState, WorkspaceStore};
 
 mod dialogs;
@@ -103,6 +103,8 @@ struct EventBatch {
     title: Option<String>,
     has_output: bool,
     exited: bool,
+    has_command_started: bool,
+    finished: Vec<CommandBlock>,
 }
 
 impl EventBatch {
@@ -115,6 +117,8 @@ impl EventBatch {
                 self.has_output = true;
             }
             TerminalEvent::Resized { .. } => self.has_output = true,
+            TerminalEvent::CommandStarted(_) => self.has_command_started = true,
+            TerminalEvent::CommandFinished(block) => self.finished.push(block),
         }
     }
 }
@@ -1188,7 +1192,8 @@ impl Shell {
             self.close_pane(panel, cx);
         }
         self.refresh_status(panel, cx);
-        if has_title || batch.exited {
+        let has_command_change = batch.has_command_started || !batch.finished.is_empty();
+        if has_title || batch.exited || has_command_change {
             cx.notify();
         }
         if batch.has_output && self.is_panel_shown(panel) {

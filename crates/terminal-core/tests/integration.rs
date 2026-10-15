@@ -5,7 +5,7 @@ use domain::TerminalSessionId;
 use terminal_core::event::{
     CellColor, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind, SelectionSpan, TerminalEvent,
 };
-use terminal_core::{Side, ViMotion};
+use terminal_core::{BlockStatus, ShellPhase, Side, ViMotion};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
 use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
@@ -228,6 +228,28 @@ fn snapshot_reports_italic_dim_and_strikeout_attributes() {
     assert!(cells[1].is_dim() && !cells[1].is_strikeout());
     assert!(cells[2].is_strikeout() && !cells[2].is_italic());
     assert!(!cells[3].is_italic() && !cells[3].is_dim() && !cells[3].is_strikeout());
+}
+
+#[test]
+fn shell_marks_tag_the_typed_command_and_record_its_outcome() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(20, 4), 100);
+    let mut events = terminal.subscribe();
+    terminal.feed(b"\x1b]133;A\x07$ \x1b]133;B\x07false\r\n\x1b]133;C;cmdline=false\x07oops\r\n\x1b]133;D;1\x07");
+    terminal.feed(b"\x1b]133;A\x07$ \x1b]133;B\x07");
+    let cells = terminal.snapshot_grid().cells;
+    let block = cells[2].block.expect("typed command is tagged");
+    assert!(cells[..2].iter().all(|cell| cell.block.is_none()));
+    assert!(cells[2..7].iter().all(|cell| cell.block == Some(block)));
+    assert!(cells[20..40].iter().all(|cell| cell.block.is_none()));
+    let finished = terminal.with_command_blocks(|blocks| blocks.block(block).cloned()).expect("block recorded");
+    assert_eq!(finished.command, "false");
+    let BlockStatus::Finished(outcome) = finished.status else {
+        panic!("block should be finished");
+    };
+    assert_eq!(outcome.exit_code, Some(1));
+    assert!(matches!(terminal.shell_phase(), ShellPhase::Editing(next) if next != block));
+    assert!(matches!(events.try_recv(), Ok(TerminalEvent::CommandStarted(id)) if id == block));
+    assert!(matches!(events.try_recv(), Ok(TerminalEvent::CommandFinished(done)) if done.id == block));
 }
 
 #[test]

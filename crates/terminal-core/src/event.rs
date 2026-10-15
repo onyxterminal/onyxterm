@@ -1,3 +1,4 @@
+use crate::command_blocks::{BlockId, CommandBlock};
 use alacritty_terminal::term::cell::Flags;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -49,6 +50,8 @@ pub enum TerminalEvent {
     Resized { cols: u16, rows: u16 },
     Exited { code: i32 },
     TitleChanged(String),
+    CommandStarted(BlockId),
+    CommandFinished(CommandBlock),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,11 +68,12 @@ pub struct Cell {
     pub fg: CellColor,
     pub bg: CellColor,
     pub flags: u16,
+    pub block: Option<BlockId>,
 }
 
 impl Cell {
     pub fn empty() -> Self {
-        Self { ch: ' ', fg: CellColor::Default, bg: CellColor::Default, flags: 0 }
+        Self { ch: ' ', fg: CellColor::Default, bg: CellColor::Default, flags: 0, block: None }
     }
 
     pub fn is_bold(&self) -> bool {

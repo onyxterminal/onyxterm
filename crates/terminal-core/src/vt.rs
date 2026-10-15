@@ -2,7 +2,9 @@ use crate::event::{
     Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
     TerminalError, TerminalEvent, TerminalOutput,
 };
+use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
+use crate::shell_marks::{MarkScanner, ShellMark};
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
@@ -11,17 +13,19 @@ use alacritty_terminal::term::cell::Cell as AlacCell;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vi_mode::ViMotion;
-use alacritty_terminal::vte::ansi::{Color, NamedColor, Processor};
+use alacritty_terminal::vte::ansi::{Color, Handler, Hyperlink, NamedColor, Processor};
 use domain::TerminalSessionId;
 use parking_lot::Mutex;
 use std::io::Read;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::broadcast;
 
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
 pub const UNKNOWN_EXIT_CODE: i32 = -1;
 
 const EVENTS_CAPACITY: usize = 1024;
+const BLOCK_LINK_SCHEME: &str = "onyx-block:";
 
 pub struct Terminal {
     inner: Arc<TerminalInner>,
@@ -45,12 +49,69 @@ struct TerminalInner {
     id: TerminalSessionId,
     state: Mutex<TermState>,
     events: broadcast::Sender<TerminalEvent>,
-    parser: Mutex<Processor>,
+    decoder: Mutex<Decoder>,
+}
+
+#[derive(Default)]
+struct Decoder {
+    processor: Processor,
+    scanner: MarkScanner,
 }
 
 struct TermState {
     term: Term<TermListener>,
     grid_size: GridSize,
+    blocks: CommandBlocks,
+}
+
+impl TermState {
+    fn apply_mark(&mut self, mark: ShellMark) -> Option<BlockChange> {
+        let change = self.blocks.apply(mark, Instant::now());
+        let link = match change {
+            Some(BlockChange::InputStarted(id)) => Some(block_link(id)),
+            _ => None,
+        };
+        self.term.set_hyperlink(link);
+        change
+    }
+}
+
+impl TerminalInner {
+    fn process(&self, bytes: &[u8]) -> Vec<BlockChange> {
+        let mut decoder = self.decoder.lock();
+        let marks = decoder.scanner.scan(bytes);
+        let mut state = self.state.lock();
+        let mut changes = Vec::new();
+        let mut start = 0;
+        for scanned in marks {
+            decoder.processor.advance(&mut state.term, &bytes[start..scanned.end]);
+            start = scanned.end;
+            changes.extend(state.apply_mark(scanned.mark));
+        }
+        decoder.processor.advance(&mut state.term, &bytes[start..]);
+        changes
+    }
+
+    fn announce(&self, changes: Vec<BlockChange>) {
+        for change in changes {
+            let event = match change {
+                BlockChange::InputStarted(_) => continue,
+                BlockChange::CommandStarted(id) => TerminalEvent::CommandStarted(id),
+                BlockChange::CommandFinished(block) => TerminalEvent::CommandFinished(block),
+            };
+            let _ = self.events.send(event);
+        }
+    }
+}
+
+fn block_link(id: BlockId) -> Hyperlink {
+    Hyperlink { id: None, uri: format!("{BLOCK_LINK_SCHEME}{}", id.0) }
+}
+
+fn linked_block(cell: &AlacCell) -> Option<BlockId> {
+    cell.extra.as_ref()?;
+    let link = cell.hyperlink()?;
+    link.uri().strip_prefix(BLOCK_LINK_SCHEME)?.parse().ok().map(BlockId)
 }
 
 struct TermListener {
@@ -94,9 +155,9 @@ impl Terminal {
         Self {
             inner: Arc::new(TerminalInner {
                 id,
-                state: Mutex::new(TermState { term, grid_size: size }),
+                state: Mutex::new(TermState { term, grid_size: size, blocks: CommandBlocks::default() }),
                 events: tx,
-                parser: Mutex::new(Processor::new()),
+                decoder: Mutex::new(Decoder::default()),
             }),
         }
     }
@@ -106,9 +167,16 @@ impl Terminal {
     }
 
     pub fn feed(&self, bytes: &[u8]) {
-        let mut parser = self.inner.parser.lock();
-        let mut state = self.inner.state.lock();
-        parser.advance(&mut state.term, bytes);
+        let changes = self.inner.process(bytes);
+        self.inner.announce(changes);
+    }
+
+    pub fn shell_phase(&self) -> ShellPhase {
+        self.inner.state.lock().blocks.phase()
+    }
+
+    pub fn with_command_blocks<R>(&self, read: impl FnOnce(&CommandBlocks) -> R) -> R {
+        read(&self.inner.state.lock().blocks)
     }
 
     pub fn emit_output(&self, bytes: Vec<u8>) {
@@ -357,14 +425,11 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                {
-                    let mut parser = inner.parser.lock();
-                    let mut state = inner.state.lock();
-                    parser.advance(&mut state.term, &buf[..n]);
-                }
+                let changes = inner.process(&buf[..n]);
                 let _ = inner.events.send(TerminalEvent::Output(TerminalOutput {
                     bytes: buf[..n].to_vec(),
                 }));
+                inner.announce(changes);
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
@@ -442,6 +507,7 @@ fn alac_cell_to_cell(c: &AlacCell) -> Cell {
         fg: cell_color(&c.fg),
         bg: cell_color(&c.bg),
         flags: c.flags.bits(),
+        block: linked_block(c),
     }
 }
 
