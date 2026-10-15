@@ -150,6 +150,7 @@ pub struct Shell {
     slider_drag: Option<settings_slider::SliderDrag>,
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
+    installed_fonts: Vec<String>,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -199,6 +200,7 @@ impl Shell {
             slider_drag: None,
             palette_scroll: UniformListScrollHandle::new(),
             font_list_scroll: UniformListScrollHandle::new(),
+            installed_fonts: Vec::new(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}

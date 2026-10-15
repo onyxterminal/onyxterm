@@ -51,7 +51,8 @@ impl Shell {
         if matches!(action, SettingAction::FontPicker) {
             self.state.font_picker_visible = true;
             self.state.font_picker_query.clear();
-            let fonts = self.font_picker_matches(cx);
+            self.installed_fonts = cx.text_system().all_font_names();
+            let fonts = self.font_picker_matches();
             self.state.font_picker_selection = fonts.iter()
                 .position(|name| name == &self.state.settings.font_family).unwrap_or(0);
             self.font_list_scroll.scroll_to_item(self.state.font_picker_selection, ScrollStrategy::Center);
@@ -137,9 +138,9 @@ impl Shell {
         }
     }
 
-    fn font_picker_matches(&self, cx: &Context<Self>) -> Vec<String> {
+    fn font_picker_matches(&self) -> Vec<String> {
         let query = self.state.font_picker_query.text().trim().to_lowercase();
-        let mut fonts = filtered_fonts(&cx.text_system().all_font_names(), &query);
+        let mut fonts = filtered_fonts(&self.installed_fonts, &query);
         if SYSTEM_MONOSPACE_LABEL.to_lowercase().contains(&query) {
             fonts.insert(0, SYSTEM_MONOSPACE.into());
         }
@@ -236,13 +237,13 @@ impl Shell {
         match key.key.as_str() {
             ESCAPE_KEY => self.state.font_picker_visible = false,
             ENTER_KEY => {
-                let fonts = self.font_picker_matches(cx);
+                let fonts = self.font_picker_matches();
                 if let Some(family) = fonts.get(self.state.font_picker_selection).cloned() {
                     self.select_font(family, cx);
                 }
             }
             UP_KEY | DOWN_KEY => {
-                let count = self.font_picker_matches(cx).len();
+                let count = self.font_picker_matches().len();
                 if count > 0 {
                     let (step, strategy) = if key.key == UP_KEY {
                         (count - 1, ScrollStrategy::Top)
@@ -438,7 +439,7 @@ impl Shell {
     fn render_font_picker(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        let fonts = self.font_picker_matches(cx);
+        let fonts = self.font_picker_matches();
         let font_count = fonts.len();
         let list_height = px(FONT_ROW_PX * scale * font_count.min(FONT_ROWS) as f32);
         let font_rows = cx.processor(move |shell, range: Range<usize>, _window, cx| shell.font_rows(&fonts, range, cx));
