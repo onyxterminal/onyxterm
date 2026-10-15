@@ -1,3 +1,4 @@
+use super::toast::ToastTone;
 use super::Shell;
 use crate::document::{document_title, DocumentPane};
 use crate::editor_pane::{EditorPane, OpenDocument};
@@ -204,11 +205,15 @@ impl Shell {
         let Some(pane) = self.editor_pane_mut(panel) else {
             return;
         };
+        let name = pane.find(id).map(|document| document_title(&document.path)).unwrap_or_default();
         match result {
-            Ok(()) => pane.mark_saved(id, saved.version, saved.rope),
+            Ok(()) => {
+                pane.mark_saved(id, saved.version, saved.rope);
+                self.show_toast(format!("Saved {name}"), ToastTone::Success, cx);
+            }
             Err(err) => {
-                let name = pane.find(id).map(|document| document_title(&document.path)).unwrap_or_default();
                 tracing::warn!(%err, document = %name, "save failed");
+                self.show_toast(format!("Couldn't save {name}"), ToastTone::Failure, cx);
             }
         }
         cx.notify();

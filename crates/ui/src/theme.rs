@@ -318,7 +318,7 @@ impl Theme {
             pane_padding_top_px, pane_padding_bottom_px);
         scale!(self.editor, gutter_padding_px, cursor_width_px);
         let shadows = [&mut self.shadow.tab, &mut self.shadow.menu, &mut self.shadow.popover, &mut self.shadow.hint,
-            &mut self.shadow.palette];
+            &mut self.shadow.palette, &mut self.shadow.toast];
         for shadow in shadows.into_iter().flat_map(|layers| layers.iter_mut()) {
             scale!(shadow, x, y, blur, spread);
         }
@@ -696,6 +696,7 @@ pub struct ShadowTokens {
     pub popover: Vec<ShadowLayer>,
     pub hint: Vec<ShadowLayer>,
     pub palette: Vec<ShadowLayer>,
+    pub toast: Vec<ShadowLayer>,
 }
 
 pub fn box_shadows(layers: &[ShadowLayer]) -> Vec<BoxShadow> {

@@ -177,6 +177,11 @@ y = 30.0
 blur = 80.0
 color = "rgba(0,0,0,0.16)"
 
+[[shadow.toast]]
+y = 10.0
+blur = 30.0
+color = "rgba(0,0,0,0.16)"
+
 [font]
 family = "Menlo"
 fallback = "SF Mono, ui-monospace, monospace"

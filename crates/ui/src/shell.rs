@@ -62,6 +62,7 @@ mod copy_mode;
 mod theme_editor;
 mod tab_strip;
 mod text_input;
+mod toast;
 
 use tab_strip::TabDrag;
 use tab_strip::TabField;
@@ -82,6 +83,7 @@ const CLEAR_SCREEN_AND_SCROLLBACK: &[u8] = b"\x1b[H\x1b[2J\x1b[3J";
 const REDRAW_PROMPT: &[u8] = b"\x0c";
 const INTERRUPT: &[u8] = b"\x03";
 const SSH_PROGRAM: &str = "ssh";
+const PANES_EQUALIZED: &str = "Panes equalized";
 
 static FIRST_FRAME: Milestone = Milestone::new("first frame");
 static FIRST_PTY_SPAWNED: Milestone = Milestone::new("first pty spawned");
@@ -168,6 +170,7 @@ pub struct Shell {
     palette_scroll: UniformListScrollHandle,
     font_list_scroll: UniformListScrollHandle,
     installed_fonts: Vec<String>,
+    toast: Option<toast::Toast>,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -218,6 +221,7 @@ impl Shell {
             palette_scroll: UniformListScrollHandle::new(),
             font_list_scroll: UniformListScrollHandle::new(),
             installed_fonts: Vec::new(),
+            toast: None,
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -487,7 +491,7 @@ impl Shell {
             CommandId::ResizePane(direction) => self.resize_pane_toward(direction),
             CommandId::MaximizePane => self.toggle_maximized(),
             CommandId::GridLayout => self.arrange_grid(),
-            CommandId::EqualizePanes => self.equalize_panes(),
+            CommandId::EqualizePanes => self.equalize_panes(cx),
             CommandId::CloseActive => {
                 if !self.request_close_focused_document(cx) {
                     self.request_close_focused(cx);
@@ -1079,9 +1083,10 @@ impl Shell {
         }
     }
 
-    fn equalize_panes(&mut self) {
+    fn equalize_panes(&mut self, cx: &mut Context<Self>) {
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.equalize();
+            self.show_toast(PANES_EQUALIZED, toast::ToastTone::Info, cx);
         }
     }
 
@@ -1373,6 +1378,7 @@ impl Render for Shell {
         let settings_overlay = self.state.settings_visible.then(|| self.render_settings(window, cx));
         let field_input = self.active_field().map(|_| self.field_input_probe(cx));
         let tab_strip = self.render_tab_strip(window.is_fullscreen(), cx);
+        let toast = self.render_toast();
         let theme = &self.state.theme;
         let margin = px(theme.layout.window_margin_px);
         let animation_ms = theme.layout.animation_ms;
@@ -1407,6 +1413,7 @@ impl Render for Shell {
             .children(tab_ghost)
             .children(pane_menu)
             .children(close_prompt.map(|prompt| fade_in(prompt, "confirmation", animation_ms)))
+            .children(toast.map(|toast| fade_in(toast, "toast", animation_ms)))
             .children(settings_overlay)
             .children(field_input)
     }
