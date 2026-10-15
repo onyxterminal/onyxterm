@@ -42,15 +42,6 @@ impl ThemeKind {
             Self::SolarizedLight => "Solarized Light", Self::Custom => "Custom",
         }
     }
-
-    pub fn counterpart(self, current: Appearance) -> Self {
-        match (self, current) {
-            (Self::SolarizedDark, _) => Self::SolarizedLight,
-            (Self::SolarizedLight, _) => Self::SolarizedDark,
-            (_, Appearance::Dark) => Self::Light,
-            (_, Appearance::Light) => Self::Dark,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

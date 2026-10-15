@@ -1142,33 +1142,6 @@ fn custom_theme_inherits_its_base_appearance() {
 }
 
 #[test]
-fn appearance_counterpart_pairs_solarized_and_falls_back_to_apple_and_onyx() {
-    assert_eq!(ThemeKind::SolarizedDark.counterpart(Appearance::Dark), ThemeKind::SolarizedLight);
-    assert_eq!(ThemeKind::SolarizedLight.counterpart(Appearance::Light), ThemeKind::SolarizedDark);
-    assert_eq!(ThemeKind::Light.counterpart(Appearance::Light), ThemeKind::Dark);
-    assert_eq!(ThemeKind::Dark.counterpart(Appearance::Dark), ThemeKind::Light);
-    assert_eq!(ThemeKind::Nord.counterpart(Appearance::Dark), ThemeKind::Light);
-    assert_eq!(ThemeKind::Dracula.counterpart(Appearance::Dark), ThemeKind::Light);
-}
-
-#[test]
-fn custom_theme_toggles_to_its_base_counterpart() {
-    let mut settings = crate::settings::Settings { theme: ThemeKind::SolarizedDark, ..Default::default() };
-    settings.customize_current_theme();
-    let current = settings.theme_tokens().appearance;
-    assert_eq!(settings.base_theme().counterpart(current), ThemeKind::SolarizedLight);
-}
-
-#[test]
-fn toggle_appearance_is_a_keyed_unbound_command() {
-    let registry = CommandRegistry::with_defaults();
-    let command = registry.get(CommandId::ToggleAppearance).expect("registered");
-    assert_eq!(command.title, "Toggle Light / Dark Appearance");
-    assert_eq!(CommandId::from_key("toggle_appearance"), Some(CommandId::ToggleAppearance));
-    assert_eq!(Keymap::default().combo_for(CommandId::ToggleAppearance), None);
-}
-
-#[test]
 fn apple_light_theme_loads_every_redesign_token() {
     let theme = Theme::load_default().unwrap();
     assert_color(theme.surface.subtle, "#F5F5F7");

@@ -59,10 +59,9 @@ pub enum CommandId {
     NextDocument,
     PrevDocument,
     CloseDocument,
-    ToggleAppearance,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 73] = [
+const COMMAND_KEYS: [(CommandId, &str); 72] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -87,7 +86,6 @@ const COMMAND_KEYS: [(CommandId, &str); 73] = [
     (CommandId::ToggleCopyMode, "toggle_copy_mode"), (CommandId::Paste, "paste"),
     (CommandId::ToggleFullScreen, "toggle_full_screen"), (CommandId::Quit, "quit"),
     (CommandId::Minimize, "minimize"), (CommandId::OpenWorkspaceMenu, "open_workspace_menu"),
-    (CommandId::ToggleAppearance, "toggle_appearance"),
     (CommandId::ResizePane(Direction::Left), "resize_pane_left"),
     (CommandId::ResizePane(Direction::Right), "resize_pane_right"),
     (CommandId::ResizePane(Direction::Up), "resize_pane_up"),
@@ -351,7 +349,6 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(Paste, "Paste", "Edit", no_op).build(),
         Command::builder(ToggleFullScreen, "Toggle Full Screen", "Window", no_op).build(),
         Command::builder(Minimize, "Minimize", "Window", no_op).build(),
-        Command::builder(ToggleAppearance, "Toggle Light / Dark Appearance", "Application", no_op).build(),
         Command::builder(Quit, "Quit Onyx", "Application", no_op)
             .enabled_when(always_enabled)
             .build(),
