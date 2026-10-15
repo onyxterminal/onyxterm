@@ -422,11 +422,11 @@ fn palette_lists_required_commands() {
 fn font_family_maps_system_monospace_and_falls_back() {
     let theme = Theme::load_default().unwrap();
     assert_eq!(theme.font.family_candidates(), vec!["SF Mono", "Menlo", "SF Mono", "Menlo", "Menlo"]);
-    let available = vec!["Menlo".to_string(), "Courier".to_string()];
-    assert_eq!(theme.font.resolve_family(&available), "Menlo");
-    let with_sf = vec!["SF Mono".to_string(), "Menlo".to_string()];
-    assert_eq!(theme.font.resolve_family(&with_sf), "SF Mono");
-    assert_eq!(theme.font.resolve_family(&[]), "Menlo");
+    let available = ["Menlo", "Courier"];
+    assert_eq!(theme.font.resolve_family(|name| available.contains(&name)), "Menlo");
+    let with_sf = ["SF Mono", "Menlo"];
+    assert_eq!(theme.font.resolve_family(|name| with_sf.contains(&name)), "SF Mono");
+    assert_eq!(theme.font.resolve_family(|_| false), "Menlo");
 }
 
 #[test]

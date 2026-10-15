@@ -5,8 +5,8 @@ use crate::settings::{filtered_fonts, BundleSide, SettingsPane, CUSTOM_BASE_KEY,
 use crate::terminal_view::TerminalStyle;
 use crate::theme::icons::Icon;
 use crate::theme::menu_chrome::field_text;
-use crate::theme::{box_shadows, Theme, ThemeKind};
-use gpui::{div, prelude::*, px, uniform_list, Context, CursorStyle, Div, FontWeight, Keystroke, Modifiers,
+use crate::theme::{box_shadows, FontTokens, Theme, ThemeKind};
+use gpui::{div, font, prelude::*, px, uniform_list, App, Context, CursorStyle, Div, FontWeight, Keystroke, Modifiers,
     MouseButton, ScrollStrategy, SharedString, Stateful, Window};
 use std::ops::Range;
 
@@ -127,7 +127,7 @@ impl Shell {
 
     pub(super) fn apply_settings(&mut self, cx: &mut Context<Self>) {
         self.state.theme = self.state.settings.theme_tokens();
-        let family = self.state.theme.font.resolve_family(&cx.text_system().all_font_names());
+        let family = resolve_terminal_family(&self.state.theme.font, cx);
         self.style = TerminalStyle::from_theme(&self.state.theme, family);
     }
 
@@ -501,4 +501,12 @@ fn pane_icon(pane: SettingsPane) -> Icon {
 
 fn is_find_shortcut(key: &Keystroke) -> bool {
     key.modifiers == Modifiers::command() && key.key == FIND_KEY
+}
+
+pub(super) fn resolve_terminal_family(tokens: &FontTokens, cx: &App) -> String {
+    let text_system = cx.text_system();
+    tokens.resolve_family(|family| {
+        let resolved = text_system.resolve_font(&font(family.to_string()));
+        text_system.get_font_for_id(resolved).is_some_and(|loaded| loaded.family.as_ref() == family)
+    })
 }

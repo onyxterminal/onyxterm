@@ -454,10 +454,10 @@ impl FontTokens {
             .collect()
     }
 
-    pub fn resolve_family(&self, available: &[String]) -> String {
+    pub fn resolve_family(&self, is_installed: impl Fn(&str) -> bool) -> String {
         self.family_candidates()
             .into_iter()
-            .find(|candidate| available.iter().any(|name| name == candidate))
+            .find(|candidate| is_installed(candidate))
             .unwrap_or_else(|| LAST_RESORT_FONT.to_string())
     }
 }
