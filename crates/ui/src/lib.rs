@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod cell_paint;
 pub mod color_picker;
 pub mod command;
 pub mod confirm;
