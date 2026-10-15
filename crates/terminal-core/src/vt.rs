@@ -4,6 +4,7 @@ use crate::event::{
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
+use crate::search::TextMatch;
 use crate::shell_marks::{MarkScanner, ShellMark};
 use alacritty_terminal::event::{Event as AlacEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
@@ -336,6 +337,18 @@ impl Terminal {
         let total = state.term.grid().total_lines();
         let visible = state.term.grid().screen_lines();
         total.saturating_sub(visible)
+    }
+
+    pub fn find_matches(&self, query: &str, limit: usize) -> Vec<TextMatch> {
+        crate::search::find_in(&self.inner.state.lock().term, query, limit)
+    }
+
+    pub fn reveal_line(&self, line: i32) {
+        let mut state = self.inner.state.lock();
+        let grid = state.term.grid();
+        let current = grid.display_offset();
+        let target = crate::search::offset_revealing(line, current, grid.screen_lines(), grid.history_size());
+        state.term.scroll_display(Scroll::Delta(target as i32 - current as i32));
     }
 
     pub fn set_bracketed_paste(&self, on: bool) {

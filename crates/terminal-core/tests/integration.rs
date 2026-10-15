@@ -497,3 +497,27 @@ fn select_all_covers_scrollback_and_screen() {
     let text = terminal.selection_text().expect("selection");
     assert!(text.contains("first") && text.contains("third"), "got {text:?}");
 }
+
+#[test]
+fn find_walks_scrollback_matches_top_down_ignoring_case() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(20, 3), 100);
+    terminal.feed(b"Error one\r\nok\r\nerror two\r\nfine\r\nERROR three\r\n");
+    let found = terminal.find_matches("error", 100);
+    let lines: Vec<i32> = found.iter().map(|hit| hit.start.line).collect();
+    assert_eq!(found.len(), 3);
+    assert!(lines.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!((found[0].start.col, found[0].end.col), (0, 4));
+    assert!(terminal.find_matches("err.r", 100).is_empty());
+    assert_eq!(terminal.find_matches("error", 2).len(), 2);
+}
+
+#[test]
+fn revealing_a_scrollback_match_scrolls_it_into_view() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(20, 3), 100);
+    terminal.feed(b"needle\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+    let hit = terminal.find_matches("needle", 10)[0];
+    assert!(hit.start.line < 0);
+    terminal.reveal_line(hit.start.line);
+    let row = hit.start.line + terminal.display_offset() as i32;
+    assert!((0..3).contains(&row));
+}
