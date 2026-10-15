@@ -1269,7 +1269,7 @@ impl Shell {
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
         };
         let mut style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
-        style.insets.top += px(document_strip::strip_height(self.state.settings.ui_scale));
+        style.insets.top = px(document_strip::editor_chrome_height(self.state.settings.ui_scale));
         let focus = is_focused.then(|| self.pane_focus(cx));
         let handler = self.editor_pointer_handler(panel, cx);
         editor_canvas(frame, style, document.view.clone(), focus, handler).into_any_element()
@@ -1319,7 +1319,10 @@ impl Shell {
         } else {
             return div().into_any_element();
         };
-        let header = self.render_pane_header(panel, is_focused, cx);
+        let header = match self.editor_pane(panel) {
+            Some(_) => self.render_document_strip(panel, cx),
+            None => Some(self.render_pane_header(panel, is_focused, cx).into_any_element()),
+        };
         let look = self.island_look(panel);
         islands::island_card(&self.state.theme)
             .group(islands::pane_group(panel))
@@ -1334,8 +1337,7 @@ impl Shell {
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
             .child(islands::island_content(content))
-            .child(header)
-            .children(self.render_document_strip(panel, is_focused, cx))
+            .children(header)
             .children(self.render_copy_hint(panel))
             .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))

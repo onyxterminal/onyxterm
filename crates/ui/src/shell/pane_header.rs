@@ -161,7 +161,7 @@ impl Shell {
             .children(cwd)
     }
 
-    fn header_button(&self, id: String, icon: Svg) -> Stateful<gpui::Div> {
+    pub(super) fn header_button(&self, id: String, icon: Svg) -> Stateful<gpui::Div> {
         let header = self.state.theme.pane_header;
         div()
             .id(SharedString::from(id))

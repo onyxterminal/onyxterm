@@ -8,6 +8,7 @@ pub mod command;
 pub mod confirm;
 pub mod copy_mode;
 pub mod document;
+pub mod editor_chrome;
 pub mod editor_keys;
 pub mod editor_pane;
 pub mod editor_view;

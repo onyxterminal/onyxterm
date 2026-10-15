@@ -6,7 +6,8 @@ pub mod menu_chrome;
 pub mod custom;
 pub mod hsv;
 
-use gpui::{point, px, BoxShadow, Hsla, Rgba, WindowBackgroundAppearance};
+use gpui::{font, point, px, BoxShadow, Font, FontFeatures, Hsla, Rgba, WindowBackgroundAppearance};
+use std::sync::Arc;
 use serde::{Deserialize, Deserializer};
 
 const LIGHT_THEME_TOML: &str = include_str!("../../../assets/themes/apple-light.toml");
@@ -433,6 +434,15 @@ impl Theme {
             false => self.layout.traffic_lights_width_px + self.top_bar.leading_gap_px,
         }
     }
+}
+
+const TABULAR_FIGURES: &str = "tnum";
+const FEATURE_ON: u32 = 1;
+
+pub fn tabular_ui_font(theme: &Theme) -> Font {
+    let mut ui = font(theme.ui_font.family.clone());
+    ui.features = FontFeatures(Arc::new(vec![(TABULAR_FIGURES.to_string(), FEATURE_ON)]));
+    ui
 }
 
 const SYSTEM_MONOSPACE: &str = "ui-monospace";
