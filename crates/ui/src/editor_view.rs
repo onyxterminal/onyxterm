@@ -604,6 +604,7 @@ pub struct EditorFrame {
     pub language: Option<Language>,
     pub selections: Arc<Selections>,
     pub is_focused: bool,
+    pub shows_caret: bool,
     pub marked_text: Option<String>,
     pub find: Option<FindPaint>,
 }
@@ -937,7 +938,7 @@ impl<'a> FramePainter<'a> {
             self.paint_hits(laid, y, window);
             self.paint_selections(laid, y, window);
             self.paint_text(laid, y, window, cx);
-            if self.is_focused {
+            if self.frame.shows_caret {
                 self.paint_cursors(laid, y, window);
             }
         }

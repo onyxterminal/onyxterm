@@ -1293,7 +1293,8 @@ impl Shell {
             saved_version: editor.buffer().saved_version(),
             language: Language::from_path(&document.path),
             selections: Arc::new(editor.selections().clone()),
-            is_focused: is_focused && !self.is_find_focused(),
+            is_focused,
+            shows_caret: is_focused && !self.is_find_focused(),
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
             find: self.editor_find_paint(panel, document),
         };
