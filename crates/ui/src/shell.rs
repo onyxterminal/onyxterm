@@ -1331,6 +1331,7 @@ impl Shell {
             .child(islands::island_content(content))
             .child(header)
             .children(self.render_document_strip(panel, is_focused, cx))
+            .children(self.render_copy_hint(panel))
             .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))
             .into_any_element()
