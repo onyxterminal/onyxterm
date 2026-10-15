@@ -210,6 +210,7 @@ impl Shell {
             Ok(()) => {
                 pane.mark_saved(id, saved.version, saved.rope);
                 self.show_toast(format!("Saved {name}"), ToastTone::Success, cx);
+                self.refresh_git_statuses(cx);
             }
             Err(err) => {
                 tracing::warn!(%err, document = %name, "save failed");

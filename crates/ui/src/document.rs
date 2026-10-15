@@ -1,12 +1,15 @@
-use crate::file_tree::FileTree;
+use crate::file_tree::{FileTree, Row};
+use crate::git_status::{GitMark, GitStatus};
 use crate::theme::Theme;
 use domain::{DropZone, PanelKind};
 use editor_core::io::LoadError;
 use fs_service::Entry;
 use gpui::{
-    div, px, AnyElement, IntoElement, ParentElement, ScrollStrategy, SharedString, Styled, UniformListScrollHandle,
+    div, px, AnyElement, IntoElement, ParentElement, ScrollStrategy, SharedString, Styled, Task,
+    UniformListScrollHandle,
 };
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use workspace_service::PanelSnapshot;
 
 const NOT_FOUND: &str = "not found";
@@ -24,6 +27,8 @@ pub struct FileTreePane {
     pub exists: bool,
     pub tree: FileTree,
     pub scroll: UniformListScrollHandle,
+    pub git: Option<Arc<GitStatus>>,
+    pub git_refresh: Option<Task<()>>,
 }
 
 impl DocumentPane {
@@ -60,7 +65,26 @@ impl DocumentPane {
 
 impl FileTreePane {
     fn new(root: PathBuf) -> Self {
-        Self { tree: FileTree::new(root.clone()), root, exists: true, scroll: UniformListScrollHandle::new() }
+        Self {
+            tree: FileTree::new(root.clone()),
+            root,
+            exists: true,
+            scroll: UniformListScrollHandle::new(),
+            git: None,
+            git_refresh: None,
+        }
+    }
+
+    pub fn git_mark(&self, row: &Row) -> Option<GitMark> {
+        let git = self.git.as_ref()?;
+        match row.is_dir {
+            true => git.dir_mark(&row.path, row.is_expanded),
+            false => git.file_mark(&row.path),
+        }
+    }
+
+    pub fn branch(&self) -> Option<&str> {
+        self.git.as_ref()?.branch.as_deref()
     }
 
     pub fn reveal_selection(&self, strategy: ScrollStrategy) {

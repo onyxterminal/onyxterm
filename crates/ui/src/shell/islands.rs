@@ -1,6 +1,7 @@
 use super::Shell;
 use crate::island_look::{IslandLook, IslandLooks, IslandRole};
-use crate::pane_layout::{compute_layout, grid_changes, Gap, PaneLayout, Rect, Spacing};
+use crate::file_tree_view::TREE_WIDTH_PX;
+use crate::pane_layout::{compute_layout, grid_changes, pin_widths, Gap, PaneLayout, Rect, Spacing};
 use crate::pane_motion::{duration_from_ms, transition_for, IslandFrame, PaneMotion, Scene};
 use crate::tabs::SplitSide;
 use crate::terminal_view::island_grid;
@@ -197,7 +198,10 @@ impl Shell {
     fn target_layout(&self, tree: &LayoutNode, viewport: Size<Pixels>) -> PaneLayout {
         let tokens = &self.state.theme.layout;
         let spacing = Spacing { gap: tokens.island_gap_px, min_pane: tokens.min_pane_px };
-        compute_layout(tree, self.stage.area(viewport, tokens.window_margin_px), spacing)
+        let area = self.stage.area(viewport, tokens.window_margin_px);
+        let tree_width = TREE_WIDTH_PX * self.state.settings.ui_scale;
+        let pinned = |panel: PanelId| self.tree_pane(panel).map(|_| tree_width);
+        compute_layout(&pin_widths(tree, area, spacing, &pinned), area, spacing)
     }
 
     fn sync_grids(&self, layout: &PaneLayout, window: &Window) {

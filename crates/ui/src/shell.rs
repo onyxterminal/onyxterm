@@ -297,7 +297,10 @@ impl Shell {
         };
         self.documents.insert(panel, document);
         match tree_root {
-            Some(root) => self.load_tree_dir(panel, root, cx),
+            Some(root) => {
+                self.load_tree_dir(panel, root, cx);
+                self.schedule_git_refresh(panel, cx);
+            }
             None => self.load_editor_documents(panel, cx),
         }
     }
@@ -1245,9 +1248,7 @@ impl Shell {
                 Some(editor) => self.render_editor_canvas(panel, pane.active(), editor, is_focused, cx),
                 None => render_document(document, &self.state.theme),
             },
-            DocumentPane::FileTree(tree_pane) if tree_pane.exists => {
-                self.render_file_tree(panel, tree_pane, is_focused, cx)
-            }
+            DocumentPane::FileTree(tree_pane) if tree_pane.exists => self.render_file_tree(panel, tree_pane, cx),
             _ => render_document(document, &self.state.theme),
         }
     }
@@ -1507,6 +1508,12 @@ pub fn open_shell_window(
     cx.open_window(themed_options, |window, cx| {
         let shell = cx.new(|cx| {
             cx.observe_window_bounds(window, |_shell, _window, cx| cx.notify()).detach();
+            cx.observe_window_activation(window, |shell: &mut Shell, window, cx| {
+                if window.is_window_active() {
+                    shell.refresh_git_statuses(cx);
+                }
+            })
+            .detach();
             Shell::new(state, startup, cx)
         });
         window.focus(&shell.read(cx).focus_handle);

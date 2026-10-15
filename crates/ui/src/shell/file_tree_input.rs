@@ -1,16 +1,23 @@
 use super::Shell;
 use crate::document::{document_title, DocumentPane, FileTreePane};
 use crate::file_tree::TreeAction;
-use crate::file_tree_view::{tree_list, tree_row};
+use crate::file_tree_view::{
+    tree_list, tree_row, RowPaint, TREE_BODY_PADDING_BOTTOM_PX, TREE_BODY_PADDING_TOP_PX, TREE_BODY_PADDING_X_PX,
+};
+use crate::git_status::{read_git_status, GitMark};
 use domain::{Panel, PanelId};
 use gpui::{
-    AnyElement, ClipboardItem, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton,
-    MouseDownEvent, MouseUpEvent, ScrollStrategy, SharedString,
+    div, px, AnyElement, ClipboardItem, Context, Div, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
+    MouseButton, MouseDownEvent, MouseUpEvent, ParentElement, ScrollStrategy, SharedString, Styled,
 };
+use std::collections::HashSet;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 const DOUBLE_CLICK: usize = 2;
+const GIT_REFRESH_DEBOUNCE: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TreeKey {
@@ -63,6 +70,39 @@ impl Shell {
         .detach();
     }
 
+    pub(super) fn refresh_git_statuses(&mut self, cx: &mut Context<Self>) {
+        let trees: Vec<PanelId> = self
+            .documents
+            .iter()
+            .filter(|(_, document)| matches!(document, DocumentPane::FileTree(_)))
+            .map(|(panel, _)| *panel)
+            .collect();
+        for panel in trees {
+            self.schedule_git_refresh(panel, cx);
+        }
+    }
+
+    pub(super) fn schedule_git_refresh(&mut self, panel: PanelId, cx: &mut Context<Self>) {
+        let Some(pane) = self.tree_pane_mut(panel) else {
+            return;
+        };
+        let root = pane.root.clone();
+        pane.git_refresh = Some(cx.spawn(async move |shell, cx| {
+            cx.background_executor().timer(GIT_REFRESH_DEBOUNCE).await;
+            let status = cx.background_executor().spawn(async move { read_git_status(&root).map(Arc::new) }).await;
+            let updated = shell.update(cx, |shell, cx| {
+                if let Some(pane) = shell.tree_pane_mut(panel) {
+                    pane.git = status;
+                    pane.git_refresh = None;
+                }
+                cx.notify();
+            });
+            if let Err(err) = updated {
+                tracing::debug!(?err, "shell dropped before git status finished");
+            }
+        }));
+    }
+
     pub(super) fn send_key_to_tree(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let Some(panel) = self.focused_tree() else {
             return false;
@@ -107,6 +147,13 @@ impl Shell {
         matches!(self.documents.get(&panel), Some(DocumentPane::FileTree(_))).then_some(panel)
     }
 
+    pub(super) fn tree_pane(&self, panel: PanelId) -> Option<&FileTreePane> {
+        match self.documents.get(&panel) {
+            Some(DocumentPane::FileTree(pane)) => Some(pane),
+            _ => None,
+        }
+    }
+
     fn tree_pane_mut(&mut self, panel: PanelId) -> Option<&mut FileTreePane> {
         match self.documents.get_mut(&panel) {
             Some(DocumentPane::FileTree(pane)) => Some(pane),
@@ -145,7 +192,10 @@ impl Shell {
     fn apply_tree_action(&mut self, panel: PanelId, action: TreeAction, cx: &mut Context<Self>) {
         match action {
             TreeAction::None => {}
-            TreeAction::Load(dir) => self.load_tree_dir(panel, dir, cx),
+            TreeAction::Load(dir) => {
+                self.load_tree_dir(panel, dir, cx);
+                self.schedule_git_refresh(panel, cx);
+            }
             TreeAction::Open(path) => self.open_from_tree(path, cx),
         }
     }
@@ -178,28 +228,51 @@ impl Shell {
         &self,
         panel: PanelId,
         pane: &FileTreePane,
-        is_focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = SharedString::from(format!("file-tree-{panel}"));
         let render_rows = cx.processor(move |shell: &mut Shell, range: Range<usize>, _window, cx| {
-            shell.tree_rows(panel, range, is_focused, cx)
+            shell.tree_rows(panel, range, cx)
         });
-        tree_list(id, pane.tree.rows().len(), &pane.scroll, render_rows).into_any_element()
+        let scale = self.state.settings.ui_scale;
+        let header = self.state.theme.layout.pane_header_height_px;
+        div()
+            .size_full()
+            .pt(px(header + TREE_BODY_PADDING_TOP_PX * scale))
+            .px(px(TREE_BODY_PADDING_X_PX * scale))
+            .pb(px(TREE_BODY_PADDING_BOTTOM_PX * scale))
+            .child(tree_list(id, pane.tree.rows().len(), &pane.scroll, render_rows))
+            .into_any_element()
     }
 
-    fn tree_rows(&self, panel: PanelId, range: Range<usize>, is_focused: bool, cx: &mut Context<Self>) -> Vec<Div> {
+    fn tree_rows(&self, panel: PanelId, range: Range<usize>, cx: &mut Context<Self>) -> Vec<Div> {
         let Some(DocumentPane::FileTree(pane)) = self.documents.get(&panel) else {
             return Vec::new();
         };
         let selected = pane.tree.selected_index();
         let theme = &self.state.theme;
+        let scale = self.state.settings.ui_scale;
+        let unsaved = self.unsaved_paths();
         let rows = pane.tree.rows();
         range
             .filter_map(|index| {
                 let row = rows.get(index)?;
-                Some(self.clickable_row(tree_row(row, index == selected, is_focused, theme), panel, index, cx))
+                let is_unsaved = !row.is_dir && unsaved.contains(&row.path);
+                let mark = if is_unsaved { Some(GitMark::Modified) } else { pane.git_mark(row) };
+                let paint = RowPaint { is_selected: index == selected, mark, scale };
+                Some(self.clickable_row(tree_row(row, paint, theme), panel, index, cx))
             })
+            .collect()
+    }
+
+    fn unsaved_paths(&self) -> HashSet<PathBuf> {
+        self.documents
+            .values()
+            .filter_map(|document| match document {
+                DocumentPane::Editor(pane) => Some(pane),
+                DocumentPane::FileTree(_) => None,
+            })
+            .flat_map(|pane| pane.documents().iter().filter(|open| open.is_dirty()).map(|open| open.path.clone()))
             .collect()
     }
 

@@ -51,9 +51,10 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .child(self.status_dot(panel))
-            .child(self.pane_title_element(panel, is_focused));
-        let button_opacity = if is_focused { 1.0 } else { UNFOCUSED_BUTTON_OPACITY };
+            .children(self.tree_pane(panel).is_none().then(|| self.status_dot(panel)))
+            .child(self.header_title_element(panel, is_focused));
+        let is_tree = self.tree_pane(panel).is_some();
+        let button_opacity = if is_focused || is_tree { 1.0 } else { UNFOCUSED_BUTTON_OPACITY };
         div()
             .absolute()
             .top_0()
@@ -71,7 +72,7 @@ impl Shell {
             .child(drag_handle)
             .when(self.is_pane_in_copy_mode(panel), |header| header.child(self.copy_mode_pill()))
             .when(self.is_pane_maximized(panel), |header| header.child(self.maximized_pill()))
-            .child(self.more_button(panel, cx).opacity(button_opacity))
+            .when(!is_tree, |header| header.child(self.more_button(panel, cx).opacity(button_opacity)))
             .child(self.close_button(panel, cx).opacity(button_opacity))
     }
 
@@ -116,6 +117,39 @@ impl Shell {
         div().flex_none().size(px(theme.pane_header.status_dot_px)).rounded_full().bg(color)
     }
 
+    fn header_title_element(&self, panel: PanelId, is_focused: bool) -> Stateful<gpui::Div> {
+        match self.tree_pane(panel) {
+            Some(tree) => self.tree_title_element(panel, tree.branch().map(str::to_string)),
+            None => self.pane_title_element(panel, is_focused),
+        }
+    }
+
+    fn tree_title_element(&self, panel: PanelId, branch: Option<String>) -> Stateful<gpui::Div> {
+        let theme = &self.state.theme;
+        let workspace = self.model.workspace_name(self.model.active_id()).unwrap_or_default().to_string();
+        let title = div().flex_none().text_color(theme.text.default).font_weight(FontWeight::SEMIBOLD).child(workspace);
+        self.title_row(panel).child(title).children(branch.map(|branch| self.header_subtitle(branch)))
+    }
+
+    fn header_subtitle(&self, text: String) -> gpui::Div {
+        let theme = &self.state.theme;
+        div().min_w(px(0.0)).truncate().text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle).child(text)
+    }
+
+    fn title_row(&self, panel: PanelId) -> Stateful<gpui::Div> {
+        let scale = self.state.settings.ui_scale;
+        div()
+            .id(SharedString::from(format!("pane-title-{panel}")))
+            .flex_shrink()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .items_baseline()
+            .gap(px(HEADER_GAP_PX * scale))
+            .overflow_hidden()
+            .whitespace_nowrap()
+    }
+
     fn pane_title_element(&self, panel: PanelId, is_focused: bool) -> Stateful<gpui::Div> {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
@@ -137,19 +171,8 @@ impl Shell {
                 .child(field_text(&field.input, &self.pane_display_title(panel), theme));
         }
         let title_color = if is_focused { theme.text.default } else { theme.text.muted };
-        let cwd = self.pane_cwd_label(panel).map(|cwd| {
-            div().min_w(px(0.0)).truncate().text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle).child(cwd)
-        });
-        div()
-            .id(id)
-            .flex_shrink()
-            .min_w(px(0.0))
-            .flex()
-            .flex_row()
-            .items_baseline()
-            .gap(px(HEADER_GAP_PX * scale))
-            .overflow_hidden()
-            .whitespace_nowrap()
+        let cwd = self.pane_cwd_label(panel).map(|cwd| self.header_subtitle(cwd));
+        self.title_row(panel)
             .tooltip(self.tooltip_builder(self.pane_title_tooltip(panel).into()))
             .child(
                 div()

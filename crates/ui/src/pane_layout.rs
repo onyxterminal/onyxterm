@@ -101,6 +101,49 @@ pub fn compute_layout(node: &LayoutNode, area: Rect, spacing: Spacing) -> PaneLa
     placer.layout
 }
 
+pub type PinnedWidth<'a> = &'a dyn Fn(PanelId) -> Option<f32>;
+
+pub fn pin_widths(node: &LayoutNode, area: Rect, spacing: Spacing, pinned: PinnedWidth) -> LayoutNode {
+    let LayoutNode::Split { axis, ratio, first, second } = node else {
+        return node.clone();
+    };
+    let extent = area.extent(*axis);
+    let ratio = match axis {
+        Axis::Horizontal => pinned_ratio(first, second, extent, spacing, pinned).unwrap_or(*ratio),
+        Axis::Vertical => *ratio,
+    };
+    let lead = first_extent(extent, ratio, spacing);
+    let gap = spacing.gap.min(extent - lead).max(0.0);
+    let first_rect = area.slice(*axis, 0.0, lead);
+    let second_rect = area.slice(*axis, lead + gap, (extent - lead - gap).max(0.0));
+    LayoutNode::Split {
+        axis: *axis,
+        ratio,
+        first: Box::new(pin_widths(first, first_rect, spacing, pinned)),
+        second: Box::new(pin_widths(second, second_rect, spacing, pinned)),
+    }
+}
+
+fn pinned_ratio(
+    first: &LayoutNode,
+    second: &LayoutNode,
+    extent: f32,
+    spacing: Spacing,
+    pinned: PinnedWidth,
+) -> Option<f32> {
+    if extent <= 0.0 {
+        return None;
+    }
+    let width_of = |node: &LayoutNode| match node {
+        LayoutNode::Leaf { panel_id } => pinned(*panel_id),
+        LayoutNode::Split { .. } => None,
+    };
+    if let Some(width) = width_of(first) {
+        return Some(width / extent);
+    }
+    width_of(second).map(|width| (extent - spacing.gap - width) / extent)
+}
+
 const UNIT_AREA: Rect = Rect { x: 0.0, y: 0.0, width: 1.0, height: 1.0 };
 const UNSPACED: Spacing = Spacing { gap: 0.0, min_pane: 0.0 };
 const EDGE_TOLERANCE: f32 = 1e-4;

@@ -1,4 +1,4 @@
-use crate::pane_layout::{compute_layout, first_extent, grid_changes, PaneLayout, Rect, Spacing};
+use crate::pane_layout::{compute_layout, first_extent, grid_changes, pin_widths, PaneLayout, Rect, Spacing};
 use crate::pane_motion::{
     duration_from_ms, ease_out_cubic, progress, transition_for, tween, PaneMotion, Scene, Transition,
 };
@@ -39,6 +39,28 @@ fn single_pane_fills_the_area_without_gaps() {
     assert_eq!(layout.islands[0].rect, AREA);
     assert_eq!(layout.islands[0].collapsed, AREA);
     assert!(layout.gaps.is_empty());
+}
+
+#[test]
+fn pinned_leaves_keep_their_width_on_either_side_of_a_split() {
+    let (tree_panel, editor, terminal) = (PanelId::new(), PanelId::new(), PanelId::new());
+    let bundle = split(Axis::Horizontal, 0.5, LayoutNode::leaf(tree_panel), LayoutNode::leaf(editor));
+    let outer = split(Axis::Horizontal, 0.4, LayoutNode::leaf(terminal), bundle);
+    let pinned = |panel: PanelId| (panel == tree_panel).then_some(236.0);
+    let layout = compute_layout(&pin_widths(&outer, AREA, SPACING, &pinned), AREA, SPACING);
+    assert!((rect_of(&layout, tree_panel).width - 236.0).abs() < 1e-3);
+    assert_eq!(rect_of(&layout, terminal).width, 400.0);
+    let reversed = split(Axis::Horizontal, 0.5, LayoutNode::leaf(editor), LayoutNode::leaf(tree_panel));
+    let layout = compute_layout(&pin_widths(&reversed, AREA, SPACING, &pinned), AREA, SPACING);
+    assert!((rect_of(&layout, tree_panel).width - 236.0).abs() < 1e-3);
+}
+
+#[test]
+fn pinning_leaves_vertical_splits_alone() {
+    let (tree_panel, editor) = (PanelId::new(), PanelId::new());
+    let stacked = split(Axis::Vertical, 0.5, LayoutNode::leaf(tree_panel), LayoutNode::leaf(editor));
+    let pinned = |panel: PanelId| (panel == tree_panel).then_some(236.0);
+    assert_eq!(pin_widths(&stacked, AREA, SPACING, &pinned), stacked);
 }
 
 #[test]
