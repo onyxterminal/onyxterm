@@ -35,7 +35,7 @@ use gpui::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use terminal_core::broadcast::{error::RecvError, Receiver};
 use terminal_core::{GridSize, InMemoryTerminalService, ShellCommand, TerminalEvent, TerminalHandle};
 use workspace_service::{InMemorySshService, PanelSnapshot, RestoredState, WorkspaceStore};
@@ -76,6 +76,7 @@ const DOWN_KEY: &str = "down";
 const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 const UNNAMED_FILE: &str = "This file";
+const OUTPUT_COALESCE_INTERVAL: Duration = Duration::from_millis(8);
 
 struct Pane {
     session: TerminalSessionId,
@@ -89,6 +90,7 @@ struct Pane {
 #[derive(Default)]
 struct EventBatch {
     title: Option<String>,
+    has_output: bool,
     exited: bool,
 }
 
@@ -97,7 +99,7 @@ impl EventBatch {
         match event {
             TerminalEvent::TitleChanged(title) => self.title = Some(title),
             TerminalEvent::Exited { .. } => self.exited = true,
-            TerminalEvent::Output(_) | TerminalEvent::Resized { .. } => {}
+            TerminalEvent::Output(_) | TerminalEvent::Resized { .. } => self.has_output = true,
         }
     }
 }
@@ -137,6 +139,7 @@ pub struct Shell {
     tab_bounds: pane_drag::BoundsMap<usize>,
     tab_scroll: gpui::ScrollHandle,
     visible_tab: std::cell::Cell<Option<(WorkspaceId, usize)>>,
+    is_redraw_pending: bool,
     pane_menu: Option<pane_options::PaneMenu>,
     pane_field: Option<pane_options::PaneField>,
     is_copy_top_pending: bool,
@@ -185,6 +188,7 @@ impl Shell {
             tab_bounds: pane_drag::BoundsMap::default(),
             tab_scroll: gpui::ScrollHandle::new(),
             visible_tab: std::cell::Cell::new(None),
+            is_redraw_pending: false,
             pane_menu: None,
             pane_field: None,
             is_copy_top_pending: false,
@@ -1129,6 +1133,21 @@ impl Shell {
         if has_title || batch.exited {
             cx.notify();
         }
+        if batch.has_output && self.is_panel_shown(panel) {
+            self.request_redraw(cx);
+        }
+    }
+
+    fn is_panel_shown(&self, panel: PanelId) -> bool {
+        self.model.tabs().active().is_some_and(|tab| tab.layout().find_leaf(&mut |id| id == panel).is_some())
+    }
+
+    fn request_redraw(&mut self, cx: &mut Context<Self>) {
+        if self.is_redraw_pending {
+            return;
+        }
+        self.is_redraw_pending = true;
+        cx.notify();
     }
 
     fn select_workspace_by_key(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -1234,6 +1253,7 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.is_redraw_pending = false;
         let now = Instant::now();
         let pane_area = self.render_pane_area(window, now, cx);
         if self.needs_motion_frame(now) {
@@ -1316,9 +1336,13 @@ fn watch_session(panel: PanelId, mut events: Receiver<TerminalEvent>, cx: &mut C
     cx.spawn(async move |shell, cx| loop {
         let batch = next_batch(&mut events).await;
         let exited = batch.exited;
+        let has_output = batch.has_output;
         let updated = shell.update(cx, |shell, cx| shell.apply_batch(panel, batch, cx));
         if exited || updated.is_err() {
             break;
+        }
+        if has_output {
+            cx.background_executor().timer(OUTPUT_COALESCE_INTERVAL).await;
         }
     })
 }
@@ -1327,7 +1351,7 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
     let mut batch = EventBatch::default();
     match events.recv().await {
         Ok(event) => batch.absorb(event),
-        Err(RecvError::Lagged(_)) => {}
+        Err(RecvError::Lagged(_)) => batch.has_output = true,
         Err(RecvError::Closed) => batch.exited = true,
     }
     while let Ok(event) = events.try_recv() {
