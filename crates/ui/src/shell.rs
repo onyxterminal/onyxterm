@@ -77,6 +77,7 @@ const ENTER_KEY: &str = "enter";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
 const RIGHT_KEY: &str = "right";
+const SPACE_KEY: &str = "space";
 const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 const UNNAMED_FILE: &str = "This file";
@@ -693,8 +694,7 @@ impl Shell {
 
     fn handle_confirmation_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
         match keystroke.key.as_str() {
-            ESCAPE_KEY => self.cancel_confirmation(cx),
-            ENTER_KEY => self.accept_confirmation(cx),
+            ESCAPE_KEY | ENTER_KEY | SPACE_KEY => self.cancel_confirmation(cx),
             _ => {}
         }
     }
