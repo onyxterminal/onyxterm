@@ -20,12 +20,10 @@ pub(crate) fn toggle_comment_changes(rope: &Rope, lines: &[usize], token: &str) 
             if skips_blank && line.is_blank {
                 return None;
             }
+            let at = line.indent_end;
             match (is_commented, line.marker_len) {
-                (true, Some(len)) => Some(Change { range: line.indent_end..line.indent_end + len, text: String::new() }),
-                _ => Some(Change {
-                    range: line.indent_end..line.indent_end,
-                    text: format!("{token}{COMMENT_GAP}"),
-                }),
+                (true, Some(len)) => Some(Change { range: at..at + len, text: String::new() }),
+                _ => Some(Change { range: at..at, text: format!("{token}{COMMENT_GAP}") }),
             }
         })
         .collect()
