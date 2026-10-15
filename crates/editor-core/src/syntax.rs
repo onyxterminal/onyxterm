@@ -58,6 +58,22 @@ impl Language {
         }
     }
 
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "Rust",
+            Self::Toml => "TOML",
+            Self::Markdown => "Markdown",
+        }
+    }
+
+    pub fn line_comment(self) -> Option<&'static str> {
+        match self {
+            Self::Rust => Some("//"),
+            Self::Toml => Some("#"),
+            Self::Markdown => None,
+        }
+    }
+
     pub fn highlight_line(self, line: &str, state: LineState) -> Vec<Span> {
         let mut scanner = Scanner::new(line, Vec::new());
         self.lex(&mut scanner, state);
@@ -126,6 +142,16 @@ mod tests {
         assert_eq!(Language::from_path(Path::new("docs/README.MD")), Some(Language::Markdown));
         assert_eq!(Language::from_path(Path::new("notes.txt")), None);
         assert_eq!(Language::from_path(Path::new("Makefile")), None);
+    }
+
+    #[test]
+    fn languages_name_themselves_and_their_line_comment() {
+        assert_eq!(Language::Rust.name(), "Rust");
+        assert_eq!(Language::Toml.name(), "TOML");
+        assert_eq!(Language::Markdown.name(), "Markdown");
+        assert_eq!(Language::Rust.line_comment(), Some("//"));
+        assert_eq!(Language::Toml.line_comment(), Some("#"));
+        assert_eq!(Language::Markdown.line_comment(), None);
     }
 
     #[test]
