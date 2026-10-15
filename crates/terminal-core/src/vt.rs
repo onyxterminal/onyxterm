@@ -9,7 +9,7 @@ use alacritty_terminal::event::{Event as AlacEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
-use alacritty_terminal::term::cell::Cell as AlacCell;
+use alacritty_terminal::term::cell::{Cell as AlacCell, Flags};
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vi_mode::ViMotion;
@@ -26,6 +26,7 @@ pub const UNKNOWN_EXIT_CODE: i32 = -1;
 
 const EVENTS_CAPACITY: usize = 1024;
 const BLOCK_LINK_SCHEME: &str = "onyx-block:";
+const WIDE_SPACERS: Flags = Flags::WIDE_CHAR_SPACER.union(Flags::LEADING_WIDE_CHAR_SPACER);
 
 pub struct Terminal {
     inner: Arc<TerminalInner>,
@@ -177,6 +178,16 @@ impl Terminal {
 
     pub fn with_command_blocks<R>(&self, read: impl FnOnce(&CommandBlocks) -> R) -> R {
         read(&self.inner.state.lock().blocks)
+    }
+
+    pub fn autosuggestion(&self) -> Option<String> {
+        let state = self.inner.state.lock();
+        let ShellPhase::Editing(block) = state.blocks.phase() else {
+            return None;
+        };
+        let input = typed_input(&state.term, block)?;
+        let suggestion = state.blocks.suggestion(&input)?;
+        Some(suggestion[input.len()..].to_string())
     }
 
     pub fn emit_output(&self, bytes: Vec<u8>) {
@@ -478,6 +489,30 @@ fn visible_selection(term: &Term<TermListener>) -> Option<SelectionSpan> {
         GridPoint { row: end_row as u16, col: range.end.column.0 as u16 }
     };
     Some(SelectionSpan { start, end })
+}
+
+fn typed_input(term: &Term<TermListener>, block: BlockId) -> Option<String> {
+    let grid = term.grid();
+    let is_editable = !term.mode().contains(TermMode::VI) && grid.display_offset() == 0;
+    if !is_editable {
+        return None;
+    }
+    let cursor = grid.cursor.point;
+    let mut input = String::new();
+    for line in 0..=cursor.line.0 {
+        let row = &grid[Line(line)];
+        for column in 0..grid.columns() {
+            let cell = &row[Column(column)];
+            let is_typed = linked_block(cell) == Some(block) && !cell.flags.intersects(WIDE_SPACERS);
+            let is_before_cursor = line < cursor.line.0 || column < cursor.column.0;
+            match (is_typed, is_before_cursor) {
+                (true, true) => input.push(cell.c),
+                (true, false) if cell.c != ' ' => return None,
+                _ => {}
+            }
+        }
+    }
+    Some(input)
 }
 
 fn visible_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {

@@ -253,6 +253,33 @@ fn shell_marks_tag_the_typed_command_and_record_its_outcome() {
 }
 
 #[test]
+fn autosuggestion_completes_typed_input_from_pane_history() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(40, 6), 100);
+    let prompt = b"\x1b]133;A\x07$ \x1b]133;B\x07";
+    terminal.feed(prompt);
+    terminal.feed(b"cargo test --workspace\r\n\x1b]133;C;cmdline=cargo test --workspace\x07\x1b]133;D;0\x07");
+    terminal.feed(prompt);
+    assert_eq!(terminal.autosuggestion(), None);
+    terminal.feed(b"cargo t");
+    assert_eq!(terminal.autosuggestion().as_deref(), Some("est --workspace"));
+    terminal.feed(b"x");
+    assert_eq!(terminal.autosuggestion(), None);
+}
+
+#[test]
+fn autosuggestion_needs_the_cursor_at_the_end_of_the_input() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(40, 6), 100);
+    let prompt = b"\x1b]133;A\x07$ \x1b]133;B\x07";
+    terminal.feed(prompt);
+    terminal.feed(b"git status\r\n\x1b]133;C;cmdline=git status\x07\x1b]133;D;0\x07");
+    terminal.feed(prompt);
+    terminal.feed(b"git s\x08\x08");
+    assert_eq!(terminal.autosuggestion(), None);
+    terminal.feed(b"\x1b[C\x1b[C");
+    assert_eq!(terminal.autosuggestion().as_deref(), Some("tatus"));
+}
+
+#[test]
 fn input_modes_track_bracketed_paste_and_app_cursor() {
     let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
     assert_eq!(terminal.input_modes(), InputModes::default());
