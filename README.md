@@ -5,8 +5,12 @@ Onyxterm — a local-first, Rust-native terminal workspace and AI agent control 
 ```
 cargo build
 cargo test
-cargo run -p app
+cargo run --release -p app
 ```
+
+Use `--release` for daily use. Debug builds optimize dependencies but not Onyxterm's own crates,
+so they are best kept for development. Startup phase timings are logged at `info` level
+(`startup phase` and `startup milestone` lines).
 
 ## Build the app
 
