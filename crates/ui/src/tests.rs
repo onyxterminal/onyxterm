@@ -814,6 +814,7 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
         ("Split Down", Some("\u{21e7}\u{2318}D")),
         ("-", None),
         ("Maximize Pane", Some("\u{2318}\u{21a9}")),
+        ("Find\u{2026}", Some("\u{2318}F")),
         ("Clear", Some("\u{2318}K")),
         ("Copy Mode", Some("\u{21e7}\u{2318}C")),
         ("-", None),
@@ -828,9 +829,9 @@ fn pane_menu_lists_items_with_shortcuts_and_a_divider_before_close() {
     assert_eq!(rows, expected);
     let restore = pane_menu_entries(PaneMenuState { is_maximized: true, is_copy_mode: true }, &map);
     assert!(matches!(&restore[3], PaneMenuEntry::Item(item) if item.title == "Restore Pane"));
-    assert!(matches!(&restore[5], PaneMenuEntry::Item(item) if item.title == "Exit Copy Mode"));
+    assert!(matches!(&restore[6], PaneMenuEntry::Item(item) if item.title == "Exit Copy Mode"));
     let commands = selectable_commands(&entries);
-    assert_eq!(commands.len(), 9);
+    assert_eq!(commands.len(), 10);
     assert_eq!(commands.last(), Some(&CommandId::ClosePane));
     let destructive: Vec<&str> = entries
         .iter()
@@ -1495,19 +1496,19 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     map.bind(Combo::new(Modifiers::command_shift(), "left"), CommandId::MoveTabLeft);
     let groups = shortcut_groups(&registry, &map, "");
     let categories: Vec<&str> = groups.iter().map(|group| group.category).collect();
-    assert_eq!(categories, ["Tabs", "Panes", "Files", "Terminal", "Workspaces", "Edit", "Application", "Palette",
+    assert_eq!(categories, ["Edit", "Tabs", "Panes", "Files", "Terminal", "Workspaces", "Application", "Palette",
         "Window"]);
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
     assert_eq!(listed, registry.list().len() - 1);
     assert!(groups.iter().flat_map(|group| &group.shortcuts).all(|shortcut| shortcut.command != CommandId::ClosePalette));
-    let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
+    let tab_titles: Vec<&str> = groups[1].shortcuts.iter().map(|shortcut| shortcut.title).collect();
     assert_eq!(tab_titles[..7], ["New Tab", "Next Tab", "Previous Tab", "Move Tab Left", "Move Tab Right",
         "Rename Tab", "Close Tab"]);
     assert_eq!(tab_titles[7..], ["Select Tab 1", "Select Tab 2", "Select Tab 3", "Select Tab 4", "Select Tab 5",
         "Select Tab 6", "Select Tab 7", "Select Tab 8", "Select Tab 9"]);
-    assert_eq!(groups[0].shortcuts[0].combo, None);
-    assert_eq!(groups[0].shortcuts[3].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
-    let save = groups[2].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
+    assert_eq!(groups[1].shortcuts[0].combo, None);
+    assert_eq!(groups[1].shortcuts[3].combo, Some(Combo::new(Modifiers::command_shift(), "left")));
+    let save = groups[3].shortcuts.iter().find(|shortcut| shortcut.command == CommandId::Save).unwrap();
     assert_eq!(save.combo, Some(Combo::new(Modifiers::command(), "s")));
 }
 

@@ -62,6 +62,7 @@ mod tab_strip;
 mod text_input;
 mod toast;
 mod file_link_open;
+mod find;
 
 use tab_strip::TabDrag;
 use tab_strip::TabField;
@@ -172,6 +173,8 @@ pub struct Shell {
     font_list_scroll: UniformListScrollHandle,
     installed_fonts: Vec<String>,
     toast: Option<toast::Toast>,
+    find: Option<crate::find_bar::FindBar>,
+    find_search: Option<find::FindSearch>,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -223,6 +226,8 @@ impl Shell {
             font_list_scroll: UniformListScrollHandle::new(),
             installed_fonts: Vec::new(),
             toast: None,
+            find: None,
+            find_search: None,
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -552,6 +557,7 @@ impl Shell {
             CommandId::OpenEditorHere => self.open_editor_here(cx),
             CommandId::ToggleFileTree => self.toggle_file_tree(cx),
             CommandId::ToggleEditorBundle => self.toggle_editor_bundle(cx),
+            CommandId::Find => self.open_find(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         self.remember_focused_editor();
@@ -600,6 +606,11 @@ impl Shell {
         }
         if self.state.palette_visible && self.handle_palette_key(keystroke, window, cx) {
             return true;
+        }
+        if !self.state.palette_visible && self.is_find_focused() {
+            if let Some(is_consumed) = self.handle_find_key(keystroke, cx) {
+                return is_consumed || !is_composed_text(keystroke, false);
+            }
         }
         if let Some(id) = self.resolve_combo(event) {
             self.run_command(id, window, cx);
@@ -1204,6 +1215,9 @@ impl Shell {
         if batch.has_output && self.is_panel_shown(panel) {
             self.request_redraw(cx);
         }
+        if batch.has_output {
+            self.refresh_find_for(panel, cx);
+        }
     }
 
     fn is_panel_shown(&self, panel: PanelId) -> bool {
@@ -1268,8 +1282,9 @@ impl Shell {
             saved_version: editor.buffer().saved_version(),
             language: Language::from_path(&document.path),
             selections: Arc::new(editor.selections().clone()),
-            is_focused,
+            is_focused: is_focused && !self.is_find_focused(),
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
+            find: self.editor_find_paint(panel, document),
         };
         let mut style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
         let scale = self.state.settings.ui_scale;
@@ -1322,8 +1337,10 @@ impl Shell {
         let content = if let Some(document) = self.documents.get(&panel) {
             self.render_document_pane(panel, document, is_focused, cx)
         } else if let Some(pane) = self.panes.get(&panel) {
-            terminal_canvas(pane.terminal.clone(), self.style.clone(), is_focused.then(|| self.pane_focus(cx)))
-                .into_any_element()
+            let mut terminal = pane.terminal.clone();
+            terminal.hits = self.terminal_hits(panel);
+            let focus = (is_focused && !self.is_find_focused()).then(|| self.pane_focus(cx));
+            terminal_canvas(terminal, self.style.clone(), focus).into_any_element()
         } else {
             return div().into_any_element();
         };
@@ -1339,6 +1356,7 @@ impl Shell {
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
                     shell.focus_pane(panel);
+                    shell.blur_find();
                     window.focus(&shell.focus_handle);
                     cx.notify();
                 }),
@@ -1347,6 +1365,7 @@ impl Shell {
             .child(islands::island_content(content))
             .children(header)
             .children(self.render_copy_hint(panel))
+            .children(self.render_find_bar(panel, cx))
             .child(islands::island_edge(&self.state.theme, look))
             .children(self.render_drop_highlight(panel))
             .into_any_element()
@@ -1361,6 +1380,7 @@ impl Render for Shell {
             FIRST_OUTPUT_RENDERED.reach();
         }
         self.spawn_terminals_on_tab_change(cx);
+        self.sync_find(cx);
         let now = Instant::now();
         let pane_area = self.render_pane_area(window, now, cx);
         if self.needs_motion_frame(now) {

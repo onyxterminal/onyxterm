@@ -21,6 +21,7 @@ pub(super) enum FieldTarget {
     PaletteQuery,
     ShortcutFilter,
     SettingsQuery,
+    Find,
 }
 
 struct AppClipboard<'a>(&'a mut App);
@@ -63,7 +64,10 @@ impl Shell {
         if self.tab_field.is_some() {
             return Some(FieldTarget::TabName);
         }
-        self.state.palette_visible.then_some(FieldTarget::PaletteQuery)
+        if self.state.palette_visible {
+            return Some(FieldTarget::PaletteQuery);
+        }
+        self.is_find_focused().then_some(FieldTarget::Find)
     }
 
     pub(super) fn field(&self, target: FieldTarget) -> Option<&TextField> {
@@ -77,6 +81,7 @@ impl Shell {
             FieldTarget::PaletteQuery => Some(&self.state.palette_query),
             FieldTarget::ShortcutFilter => Some(&self.state.shortcut_filter),
             FieldTarget::SettingsQuery => Some(&self.state.settings_query),
+            FieldTarget::Find => self.find.as_ref().map(|find| &find.input),
         }
     }
 
@@ -91,6 +96,7 @@ impl Shell {
             FieldTarget::PaletteQuery => Some(&mut self.state.palette_query),
             FieldTarget::ShortcutFilter => Some(&mut self.state.shortcut_filter),
             FieldTarget::SettingsQuery => Some(&mut self.state.settings_query),
+            FieldTarget::Find => self.find.as_mut().map(|find| &mut find.input),
         }
     }
 
@@ -136,6 +142,7 @@ impl Shell {
             }
             FieldTarget::HexColor => self.preview_typed_hex(cx),
             FieldTarget::SettingsQuery => self.state.settings_result_selection = 0,
+            FieldTarget::Find => self.on_find_query_edited(cx),
             FieldTarget::MenuName | FieldTarget::MenuSearch | FieldTarget::PaneName | FieldTarget::TabName
             | FieldTarget::ShortcutFilter => {}
         }

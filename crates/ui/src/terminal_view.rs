@@ -8,7 +8,7 @@ use crate::terminal_annotations::{Annotations, RowLabel, RowLink};
 use crate::pixel_grid::{
     align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point, snap_to_device,
 };
-use crate::theme::Theme;
+use crate::theme::{FindTokens, Theme};
 use gpui::{
     canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, CursorStyle, DispatchPhase, Font,
     FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -18,7 +18,10 @@ use gpui::{
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
-use terminal_core::{Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle};
+use std::sync::Arc;
+use terminal_core::{
+    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle, TextMatch,
+};
 
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
 const WORD_CLICK_COUNT: usize = 2;
@@ -46,6 +49,7 @@ const KEYCAP_PADDING_X_PX: f32 = 4.0;
 const KEYCAP_LINE_HEIGHT_PX: f32 = 16.0;
 const KEYCAP_BORDER_PX: f32 = 1.0;
 const KEYCAP_RADIUS_PX: f32 = 4.0;
+const HIT_RADIUS_PX: f32 = 2.0;
 
 type CellSizeCache = Rc<RefCell<Option<(f32, Size<Pixels>)>>>;
 
@@ -183,13 +187,46 @@ pub type LinkOpener = Rc<dyn Fn(&FileLink, &mut Window, &mut App)>;
 pub struct TerminalPane {
     pub handle: TerminalHandle,
     pub pointer: Rc<RefCell<PointerState>>,
+    pub hits: TerminalHits,
     opener: LinkOpener,
 }
 
 impl TerminalPane {
     pub fn new(handle: TerminalHandle, opener: LinkOpener) -> Self {
-        Self { handle, pointer: Rc::default(), opener }
+        Self { handle, pointer: Rc::default(), hits: TerminalHits::default(), opener }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TerminalHits {
+    pub matches: Arc<Vec<TextMatch>>,
+    pub current: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RowHit {
+    pub row: usize,
+    pub columns: Range<usize>,
+    pub is_current: bool,
+}
+
+pub fn visible_hits(hits: &TerminalHits, display_offset: usize, grid: GridSize) -> Vec<RowHit> {
+    let top = -(display_offset as i32);
+    let bottom = top + i32::from(grid.rows) - 1;
+    let first = hits.matches.partition_point(|hit| hit.end.line < top);
+    hits.matches[first..]
+        .iter()
+        .enumerate()
+        .take_while(|(_, hit)| hit.start.line <= bottom)
+        .flat_map(|(offset, hit)| {
+            let is_current = hits.current == Some(first + offset);
+            (hit.start.line.max(top)..=hit.end.line.min(bottom)).filter_map(move |line| {
+                let columns = hit.columns_on(line, grid.cols)?;
+                let row = (line - top) as usize;
+                Some(RowHit { row, columns: usize::from(columns.start)..usize::from(columns.end), is_current })
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -222,6 +259,7 @@ pub struct TerminalStyle {
     pub selection: Hsla,
     pub caret: Hsla,
     pub annotations: AnnotationColors,
+    pub find: FindTokens,
     pub insets: ContentInsets,
     cell_size_cache: CellSizeCache,
     align_cache: crate::pixel_grid::AlignCache,
@@ -256,6 +294,7 @@ impl TerminalStyle {
             selection: theme.accent.selection,
             caret: theme.accent.primary,
             annotations: AnnotationColors::from_theme(theme),
+            find: theme.find,
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
             align_cache: Rc::default(),
@@ -272,6 +311,7 @@ pub struct Frame {
     snapshot: GridSnapshot,
     cell: Size<Pixels>,
     annotations: Annotations,
+    hits: Vec<RowHit>,
 }
 
 pub type InputRegistration = Box<dyn FnOnce(Bounds<Pixels>, &mut Window, &mut App)>;
@@ -293,11 +333,15 @@ pub fn terminal_canvas(
 ) -> Canvas<(Frame, Hitbox)> {
     let prepare_style = style.clone();
     let prepare_handle = pane.handle.clone();
+    let prepare_hits = pane.hits.clone();
     let is_focused = focus.is_some();
     canvas(
         move |bounds, window, _cx| {
             let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-            (prepare_frame(&prepare_handle, &prepare_style, is_focused, window), hitbox)
+            let mut frame = prepare_frame(&prepare_handle, &prepare_style, is_focused, window);
+            let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
+            frame.hits = visible_hits(&prepare_hits, prepare_handle.terminal().display_offset(), grid);
+            (frame, hitbox)
         },
         move |bounds, (frame, hitbox), window, cx| {
             let bounds = device_aligned_content(bounds, style.insets, window);
@@ -447,7 +491,7 @@ fn scroll_pane(pane: &TerminalPane, delta: f32, line_height: f32) {
 fn prepare_frame(handle: &TerminalHandle, style: &TerminalStyle, is_focused: bool, window: &Window) -> Frame {
     let snapshot = handle.snapshot_grid();
     let annotations = Annotations::read(&snapshot, handle.terminal(), is_focused);
-    Frame { snapshot, cell: style.cell_size(window), annotations }
+    Frame { snapshot, cell: style.cell_size(window), annotations, hits: Vec::new() }
 }
 
 struct FramePainter<'a> {
@@ -472,11 +516,16 @@ struct PaintRow<'a> {
     cells: &'a [Cell],
     baseline_origin: Point<Pixels>,
     links: Vec<Range<usize>>,
+    inked: Option<Range<usize>>,
 }
 
 impl PaintRow<'_> {
     fn is_link(&self, col: usize) -> bool {
         self.links.iter().any(|columns| columns.contains(&col))
+    }
+
+    fn is_inked(&self, col: usize) -> bool {
+        self.inked.as_ref().is_some_and(|columns| columns.contains(&col))
     }
 }
 
@@ -487,12 +536,14 @@ impl FramePainter<'_> {
         }
         self.paint_selection(window);
         let metrics = self.text_metrics(window);
+        self.paint_hits(metrics, window);
         self.paint_caret(metrics, window);
         window.paint_layer(self.grid_bounds(), |window| {
             for (index, cells) in self.rows() {
                 let baseline_origin = self.baseline_origin(index, metrics.baseline, window);
                 let links = self.frame.annotations.link_columns_on(index).collect();
-                let row = PaintRow { index, cells, baseline_origin, links };
+                let inked = self.inked_columns(index);
+                let row = PaintRow { index, cells, baseline_origin, links, inked };
                 self.paint_underlines(&row, metrics.underline_drop, window);
                 self.paint_text(&row, window, cx);
                 self.paint_strikethroughs(&row, metrics.strike_rise, window);
@@ -587,7 +638,26 @@ impl FramePainter<'_> {
         window.paint_quad(fill(bounds, self.style.caret));
     }
 
+    fn paint_hits(&self, metrics: TextMetrics, window: &mut Window) {
+        let text_height = metrics.ascent + metrics.descent;
+        let inset = (self.frame.cell.height - text_height) / 2.0;
+        for hit in &self.frame.hits {
+            let cells = self.cell_bounds(hit.row, hit.columns.start, hit.columns.len());
+            let bounds = Bounds::new(cells.origin + point(px(0.0), inset), size(cells.size.width, text_height));
+            let color = if hit.is_current { self.style.find.hit_current } else { self.style.find.hit };
+            window.paint_quad(fill(bounds, color).corner_radii(px(HIT_RADIUS_PX)));
+        }
+    }
+
+    fn inked_columns(&self, row: usize) -> Option<Range<usize>> {
+        let hit = self.frame.hits.iter().find(|hit| hit.is_current && hit.row == row)?;
+        Some(hit.columns.clone())
+    }
+
     fn cell_color(&self, row: &PaintRow, col: usize, cell: &Cell) -> Hsla {
+        if row.is_inked(col) {
+            return self.style.find.hit_current_ink;
+        }
         if row.is_link(col) {
             return self.style.annotations.link;
         }
@@ -849,4 +919,34 @@ impl GlyphStyle {
 
 fn same_style(a: &TextRun, b: &TextRun) -> bool {
     a.color == b.color && a.font.weight == b.font.weight && a.font.style == b.font.style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use terminal_core::MatchPoint;
+
+    fn hit(line: i32, start: u16, end: u16) -> TextMatch {
+        TextMatch { start: MatchPoint { line, col: start }, end: MatchPoint { line, col: end } }
+    }
+
+    #[test]
+    fn visible_hits_map_scrollback_lines_to_viewport_rows() {
+        let matches = vec![hit(-30, 0, 3), hit(-12, 2, 5), hit(-10, 0, 1), hit(1, 4, 4)];
+        let hits = TerminalHits { matches: Arc::new(matches), current: Some(2) };
+        let rows = visible_hits(&hits, 12, GridSize::new(20, 5));
+        assert_eq!(rows, vec![
+            RowHit { row: 0, columns: 2..6, is_current: false },
+            RowHit { row: 2, columns: 0..2, is_current: true },
+        ]);
+    }
+
+    #[test]
+    fn a_match_wrapping_past_the_row_end_paints_on_both_rows() {
+        let wrapped = TextMatch { start: MatchPoint { line: 0, col: 18 }, end: MatchPoint { line: 1, col: 1 } };
+        let hits = TerminalHits { matches: Arc::new(vec![wrapped]), current: None };
+        let rows = visible_hits(&hits, 0, GridSize::new(20, 5));
+        let columns: Vec<(usize, Range<usize>)> = rows.into_iter().map(|hit| (hit.row, hit.columns)).collect();
+        assert_eq!(columns, vec![(0, 18..20), (1, 0..2)]);
+    }
 }

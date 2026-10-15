@@ -3,7 +3,8 @@
 
 use crate::pixel_grid::{baseline_offset, glyph_aligned_origin, snap_bounds, snap_point};
 use crate::terminal_view::{content_bounds, ContentInsets, PaneFocus};
-use crate::theme::{EditorTokens, SyntaxTokens, Theme};
+use crate::find_bar::hits_on_line;
+use crate::theme::{EditorTokens, FindTokens, SyntaxTokens, Theme};
 use editor_core::syntax::{HighlightSource, Language, LineStates, Span, TokenKind};
 use editor_core::{line_len, DiffSource, HunkKind, LineDiff, LineMark, Rope, Selections, Selection, TAB_WIDTH};
 use gpui::{
@@ -36,6 +37,7 @@ const GUTTER_FONT_SHRINK_PX: f32 = 1.0;
 const GUTTER_MIN_NUMBER_WIDTH_PX: f32 = 26.0;
 const CODE_PADDING_LEFT_PX: f32 = 2.0;
 const CODE_PADDING_RIGHT_PX: f32 = 16.0;
+const HIT_RADIUS_PX: f32 = 2.0;
 pub const SCROLL_PADDING_TOP_PX: f32 = 6.0;
 pub const SCROLL_PADDING_BOTTOM_PX: f32 = 12.0;
 
@@ -502,6 +504,7 @@ pub struct EditorStyle {
     pub text: Hsla,
     pub tokens: EditorTokens,
     pub syntax: SyntaxTokens,
+    pub find: FindTokens,
     pub insets: ContentInsets,
 }
 
@@ -514,6 +517,7 @@ impl EditorStyle {
             text: theme.text.default,
             tokens: theme.editor,
             syntax: theme.syntax,
+            find: theme.find,
             insets: ContentInsets::from_theme(theme),
         }
     }
@@ -601,6 +605,19 @@ pub struct EditorFrame {
     pub selections: Arc<Selections>,
     pub is_focused: bool,
     pub marked_text: Option<String>,
+    pub find: Option<FindPaint>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FindPaint {
+    pub ranges: Arc<Vec<Range<usize>>>,
+    pub current: Option<usize>,
+}
+
+impl FindPaint {
+    fn current_range(&self) -> Option<Range<usize>> {
+        self.ranges.get(self.current?).cloned()
+    }
 }
 
 pub enum PointerEvent {
@@ -649,6 +666,7 @@ pub fn editor_canvas(
                     text_origin,
                     cell,
                     tokens,
+                    find: style.find,
                     line_height,
                     is_focused: focused,
                 };
@@ -794,7 +812,8 @@ fn prepare_state(
     });
     let change_marks = view_ref.line_diff.marks(range.clone());
     let text_width = f32::from(text_rect.size.width);
-    let shaper = LineShaper { rope: &frame.rope, style, cell_width: cell.width, window };
+    let current_hit = frame.find.as_ref().and_then(FindPaint::current_range);
+    let shaper = LineShaper { rope: &frame.rope, style, cell_width: cell.width, window, current_hit };
     let visible = visible_columns(view_ref.scroll_left, text_width, f32::from(cell.width));
     let mut lines: Vec<_> = range.clone().zip(&highlights).map(|(line, spans)| shaper.lay(line, visible, spans)).collect();
     let widest = lines.iter().map(|laid| f32::from(laid.width())).fold(0.0, f32::max);
@@ -850,18 +869,23 @@ struct LineShaper<'a> {
     style: &'a EditorStyle,
     cell_width: Pixels,
     window: &'a Window,
+    current_hit: Option<Range<usize>>,
 }
 
 impl LineShaper<'_> {
     fn lay(&self, line: usize, visible: VisibleColumns, spans: &[Span]) -> LaidLine {
         let len_chars = line_len(self.rope, line);
+        let start_char = self.rope.line_to_char(line);
         let shaped_window = line_window(self.rope.line(line).chunks(), len_chars, visible);
-        let runs = self.text_runs(&shaped_window, spans);
+        let mut runs = self.text_runs(&shaped_window, spans);
+        if let Some(bytes) = self.inked_bytes(start_char, &shaped_window) {
+            runs = recolor_runs(runs, bytes, self.style.find.hit_current_ink);
+        }
         let text: SharedString = shaped_window.display.text.clone().into();
         let shaped = self.window.text_system().shape_line(text, self.style.font_size, &runs, None);
         LaidLine {
             line,
-            start_char: self.rope.line_to_char(line),
+            start_char,
             len_chars,
             window: shaped_window.chars,
             window_columns: shaped_window.columns,
@@ -869,6 +893,15 @@ impl LineShaper<'_> {
             shaped,
             display: shaped_window.display,
         }
+    }
+
+    fn inked_bytes(&self, line_start: usize, shaped_window: &LineWindow) -> Option<Range<usize>> {
+        let hit = self.current_hit.as_ref()?;
+        let window = &shaped_window.chars;
+        let start = hit.start.saturating_sub(line_start).max(window.start);
+        let end = hit.end.saturating_sub(line_start).min(window.end);
+        let display = &shaped_window.display;
+        (start < end).then(|| display.byte_at_char(start - window.start)..display.byte_at_char(end - window.start))
     }
 
     fn text_runs(&self, shaped_window: &LineWindow, spans: &[Span]) -> Vec<TextRun> {
@@ -889,6 +922,7 @@ struct FramePainter<'a> {
     text_origin: Point<Pixels>,
     cell: Size<Pixels>,
     tokens: EditorTokens,
+    find: FindTokens,
     line_height: Pixels,
     is_focused: bool,
 }
@@ -900,6 +934,7 @@ impl<'a> FramePainter<'a> {
             if self.is_focused {
                 self.paint_current_line(laid, y, window);
             }
+            self.paint_hits(laid, y, window);
             self.paint_selections(laid, y, window);
             self.paint_text(laid, y, window, cx);
             if self.is_focused {
@@ -962,6 +997,25 @@ impl<'a> FramePainter<'a> {
         }
     }
 
+    fn paint_hits(&self, laid: &LaidLine, y: Pixels, window: &mut Window) {
+        let Some(find) = self.frame.find.as_ref() else {
+            return;
+        };
+        let line = laid.start_char..laid.start_char + laid.len_chars;
+        let text_height = laid.shaped.ascent + laid.shaped.descent;
+        let top = y + (self.line_height - text_height) / 2.0;
+        for (index, hit) in hits_on_line(&find.ranges, line) {
+            let Some(span) = laid.shaped_span(hit.start - laid.start_char, hit.end - laid.start_char) else {
+                continue;
+            };
+            let x_start = laid.x_at_char(span.start);
+            let width = laid.x_at_char(span.end) - x_start;
+            let color = if find.current == Some(index) { self.find.hit_current } else { self.find.hit };
+            let bounds = Bounds::new(point(self.text_origin.x + x_start, top), size(width, text_height));
+            window.paint_quad(fill(snap_bounds(bounds, window.scale_factor()), color).corner_radii(px(HIT_RADIUS_PX)));
+        }
+    }
+
     fn paint_selections(&self, laid: &LaidLine, y: Pixels, window: &mut Window) {
         for selection in self.frame.selections.as_slice() {
             if selection.is_empty() {
@@ -1014,6 +1068,22 @@ impl<'a> FramePainter<'a> {
     fn glyph_origin(&self, line: &ShapedLine, origin: Point<Pixels>, window: &Window) -> Point<Pixels> {
         glyph_aligned_origin(origin, baseline_offset(line, self.line_height), window.scale_factor())
     }
+}
+
+pub fn recolor_runs(runs: Vec<TextRun>, bytes: Range<usize>, color: Hsla) -> Vec<TextRun> {
+    let mut recolored = Vec::with_capacity(runs.len() + 2);
+    let mut start = 0;
+    for run in runs {
+        let end = start + run.len;
+        let cuts = [start, bytes.start.clamp(start, end), bytes.end.clamp(start, end), end];
+        for piece in cuts.windows(2).filter(|piece| piece[0] < piece[1]) {
+            let is_inked = piece[0] >= bytes.start && piece[1] <= bytes.end;
+            let piece_color = if is_inked { color } else { run.color };
+            recolored.push(TextRun { len: piece[1] - piece[0], color: piece_color, ..run.clone() });
+        }
+        start = end;
+    }
+    recolored
 }
 
 fn fill_on_device_grid(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
@@ -1523,6 +1593,17 @@ mod tests {
         const TAB_SEPARATED_CELL: &str = "\tcell_42";
         let text = TAB_SEPARATED_CELL.repeat(TEN_MEGABYTES / TAB_SEPARATED_CELL.len());
         assert!(median_window_time(&text) < WINDOW_TIME_BUDGET);
+    }
+
+    #[test]
+    fn recoloring_splits_runs_around_the_inked_bytes() {
+        let style = test_style();
+        let ink = style.find.hit_current_ink;
+        let runs = vec![style.text_run(4, Some(TokenKind::Keyword)), style.text_run(6, None)];
+        let recolored = recolor_runs(runs, 2..7, ink);
+        let pieces: Vec<(usize, bool)> = recolored.iter().map(|run| (run.len, run.color == ink)).collect();
+        assert_eq!(pieces, vec![(2, false), (2, true), (3, true), (3, false)]);
+        assert_eq!(recolored[1].font.weight, FontWeight::SEMIBOLD);
     }
 
     #[test]

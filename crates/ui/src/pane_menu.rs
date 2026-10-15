@@ -41,6 +41,7 @@ pub fn pane_menu_entries(state: PaneMenuState, keymap: &Keymap) -> Vec<PaneMenuE
         item(CommandId::SplitDown, "Split Down"),
         PaneMenuEntry::Divider,
         item(CommandId::MaximizePane, maximize_title),
+        item(CommandId::Find, "Find\u{2026}"),
         item(CommandId::ClearTerminal, "Clear"),
         item(CommandId::ToggleCopyMode, copy_mode_title),
         PaneMenuEntry::Divider,

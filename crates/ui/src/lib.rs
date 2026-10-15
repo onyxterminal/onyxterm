@@ -13,6 +13,7 @@ pub mod editor_keys;
 pub mod editor_pane;
 pub mod editor_view;
 pub mod file_links;
+pub mod find_bar;
 pub mod file_tree;
 pub mod file_tree_view;
 pub mod git_status;
