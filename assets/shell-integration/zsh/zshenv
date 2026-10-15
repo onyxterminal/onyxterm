@@ -1,0 +1,11 @@
+if [[ -n ${ONYX_USER_ZDOTDIR+set} ]]; then
+  builtin export ZDOTDIR=$ONYX_USER_ZDOTDIR
+  builtin unset ONYX_USER_ZDOTDIR
+else
+  builtin unset ZDOTDIR
+fi
+typeset -g _onyx_integration=$ONYX_SHELL_INTEGRATION
+builtin unset ONYX_SHELL_INTEGRATION
+[[ -r ${ZDOTDIR:-$HOME}/.zshenv ]] && builtin source ${ZDOTDIR:-$HOME}/.zshenv
+[[ -o interactive && -r $_onyx_integration ]] && builtin source $_onyx_integration
+builtin unset _onyx_integration

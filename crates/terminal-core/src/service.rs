@@ -1,5 +1,6 @@
 use crate::event::{GridSize, TerminalError, TerminalEvent};
 use crate::pty::Pty;
+use crate::shell_integration::ShellIntegration;
 use crate::vt::{Terminal, TerminalHandle, DEFAULT_SCROLLBACK};
 use async_trait::async_trait;
 use domain::TerminalSessionId;
@@ -43,6 +44,7 @@ pub trait TerminalService: Send + Sync {
 }
 
 const TERMINAL_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
+const ZDOTDIR_VAR: &str = "ZDOTDIR";
 
 #[derive(Debug, Clone)]
 pub struct ShellCommand {
@@ -55,6 +57,7 @@ pub struct InMemoryTerminalService {
     pty: Box<dyn Pty>,
     sessions: Mutex<HashMap<TerminalSessionId, TerminalHandle>>,
     scrollback: usize,
+    integration: Option<ShellIntegration>,
 }
 
 impl InMemoryTerminalService {
@@ -63,7 +66,13 @@ impl InMemoryTerminalService {
             pty,
             sessions: Mutex::new(HashMap::new()),
             scrollback: DEFAULT_SCROLLBACK,
+            integration: None,
         }
+    }
+
+    pub fn with_shell_integration(mut self, integration: ShellIntegration) -> Self {
+        self.integration = Some(integration);
+        self
     }
 
     pub fn with_scrollback(mut self, scrollback: usize) -> Self {
@@ -112,10 +121,13 @@ impl InMemoryTerminalService {
         size: GridSize,
     ) -> Result<TerminalSessionId, TerminalError> {
         let id = TerminalSessionId::new();
-        let env = TERMINAL_ENV
+        let mut env: HashMap<String, String> = TERMINAL_ENV
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_string()))
             .collect();
+        if let Some(integration) = &self.integration {
+            env.extend(integration.env_for(&command.program, std::env::var_os(ZDOTDIR_VAR)));
+        }
         let pty_handle = self.pty.spawn(command.program, command.args, command.cwd, env, size)?;
         let terminal = Terminal::new(id, size, self.scrollback);
         let handle = TerminalHandle::attach(terminal, pty_handle)?;

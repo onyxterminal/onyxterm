@@ -4,13 +4,14 @@
 use platform::{FileLock, SingleInstanceLock};
 use std::path::PathBuf;
 use std::sync::Arc;
-use terminal_core::{InMemoryTerminalService, NativePty};
+use terminal_core::{InMemoryTerminalService, NativePty, ShellIntegration};
 use workspace_service::{StoreError, WorkspaceStore};
 
 const EXIT_ALREADY_RUNNING: i32 = 2;
 const EXIT_UI_FAILED: i32 = 1;
 const EXIT_STORE_FAILED: i32 = 3;
 const PROFILE: &str = "default";
+const SHELL_INTEGRATION_DIR: &str = "shell-integration";
 
 fn main() {
     observability::start_clock();
@@ -48,9 +49,23 @@ fn open_startup() -> Result<ui::Startup, StoreError> {
         tracing::warn!(?warning, "restore warning");
     }
     Ok(ui::Startup {
-        terminals: Arc::new(InMemoryTerminalService::new(Box::new(NativePty::new()))),
+        terminals: Arc::new(terminal_service()),
         store,
         restored,
         home: platform::home_dir()?,
     })
+}
+
+fn terminal_service() -> InMemoryTerminalService {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let installed = platform::profile_dir(PROFILE)
+        .map_err(|err| err.to_string())
+        .and_then(|dir| ShellIntegration::install(&dir.join(SHELL_INTEGRATION_DIR)).map_err(|err| err.to_string()));
+    match installed {
+        Ok(integration) => service.with_shell_integration(integration),
+        Err(err) => {
+            tracing::warn!(%err, "shell integration unavailable");
+            service
+        }
+    }
 }
