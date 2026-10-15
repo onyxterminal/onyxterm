@@ -124,8 +124,8 @@ pub(super) fn island_card(theme: &Theme) -> Div {
         .bg(theme.canvas())
 }
 
-pub(super) fn island_content(look: IslandLook, content: impl IntoElement) -> Div {
-    div().size_full().when(look.is_dimmed(), |el| el.opacity(look.content_opacity)).child(content)
+pub(super) fn island_content(content: impl IntoElement) -> Div {
+    div().size_full().child(content)
 }
 
 pub(super) fn island_edge(theme: &Theme, look: IslandLook) -> Div {
@@ -162,10 +162,7 @@ impl Shell {
 
     pub(super) fn island_look(&self, panel: PanelId) -> IslandLook {
         let tab = self.model.tabs().active();
-        let role = IslandRole {
-            is_focused: tab.is_some_and(|tab| tab.focused() == panel),
-            is_split: tab.is_some_and(|tab| !tab.is_maximized() && !matches!(tab.layout(), LayoutNode::Leaf { .. })),
-        };
+        let role = IslandRole { is_focused: tab.is_some_and(|tab| tab.focused() == panel) };
         IslandLook::for_role(&self.state.theme, role)
     }
 
@@ -247,7 +244,6 @@ impl Shell {
     fn render_ghost_island(&self, panel: PanelId) -> impl IntoElement {
         let theme = &self.state.theme;
         let look = self.stage.looks.get(panel).unwrap_or_else(|| self.island_look(panel));
-        let dim = look.content_opacity;
-        island_card(theme).opacity(dim).child(island_edge(theme, look))
+        island_card(theme).opacity(look.opacity).child(island_edge(theme, look))
     }
 }

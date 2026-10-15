@@ -1291,6 +1291,7 @@ impl Shell {
         let look = self.island_look(panel);
         islands::island_card(&self.state.theme)
             .group(islands::pane_group(panel))
+            .when(look.is_dimmed(), |card| card.opacity(look.opacity))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
@@ -1300,7 +1301,7 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .child(islands::island_content(look, content))
+            .child(islands::island_content(content))
             .child(header)
             .children(self.render_document_strip(panel, is_focused, cx))
             .child(islands::island_edge(&self.state.theme, look))

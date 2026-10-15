@@ -162,8 +162,8 @@ fn layout_grid_arranges_existing_panes_into_balanced_rows() {
     }
     let grid = root.to_grid();
     assert_eq!(grid.leaves(), panels);
-    assert_eq!(row_shapes(&grid), vec![3, 2]);
-    assert_ratios(&grid, &[0.5, 1.0 / 3.0, 0.5, 0.5]);
+    assert_eq!(row_shapes(&grid), vec![2, 2, 1]);
+    assert_ratios(&grid, &[1.0 / 3.0, 0.5, 0.5, 0.5]);
     grid.validate().expect("grid is valid");
     let single = domain::LayoutNode::leaf(panels[0]);
     assert_eq!(single.to_grid(), single);

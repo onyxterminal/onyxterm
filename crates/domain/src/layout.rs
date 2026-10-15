@@ -20,6 +20,7 @@ impl Axis {
 pub type SplitRatio = f32;
 
 const DROP_SPLIT_RATIO: SplitRatio = 0.5;
+const GRID_MAX_COLUMNS: usize = 2;
 pub const MIN_SPLIT_RATIO: SplitRatio = 0.1;
 pub const MAX_SPLIT_RATIO: SplitRatio = 0.9;
 
@@ -259,7 +260,7 @@ impl LayoutNode {
 
     pub fn to_grid(&self) -> LayoutNode {
         let leaves: Vec<LayoutNode> = self.leaves().into_iter().map(LayoutNode::leaf).collect();
-        let columns = (leaves.len() as f32).sqrt().ceil() as usize;
+        let columns = leaves.len().clamp(1, GRID_MAX_COLUMNS);
         let rows: Vec<LayoutNode> =
             leaves.chunks(columns).map(|row| chain(row.to_vec(), Axis::Horizontal)).collect();
         let mut grid = chain(rows, Axis::Vertical);

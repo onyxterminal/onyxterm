@@ -1265,34 +1265,30 @@ fn top_bar_leading_inset_drops_traffic_lights_in_fullscreen() {
     assert_eq!(theme.top_bar_leading_inset_px(true), theme.layout.window_margin_px);
 }
 
-fn look_for(is_focused: bool, is_split: bool) -> crate::island_look::IslandLook {
+fn look_for(is_focused: bool) -> crate::island_look::IslandLook {
     use crate::island_look::{IslandLook, IslandRole};
-    IslandLook::for_role(&Theme::load_default().unwrap(), IslandRole { is_focused, is_split })
+    IslandLook::for_role(&Theme::load_default().unwrap(), IslandRole { is_focused })
 }
 
 #[test]
-fn focus_ring_shows_only_on_the_focused_island_of_a_split() {
+fn focus_ring_shows_on_the_focused_island_even_when_alone() {
     let theme = Theme::load_default().unwrap();
-    let ring = look_for(true, true);
+    let ring = look_for(true);
     assert_eq!((ring.edge_px, ring.edge_color), (1.0, theme.border_focus()));
-    for (is_focused, is_split) in [(true, false), (false, true), (false, false)] {
-        let hairline = look_for(is_focused, is_split);
-        assert_eq!((hairline.edge_px, hairline.edge_color), (0.5, theme.border_default()));
-    }
+    let hairline = look_for(false);
+    assert_eq!((hairline.edge_px, hairline.edge_color), (0.5, theme.border_default()));
 }
 
 #[test]
-fn unfocused_content_dims_only_in_a_split_with_dimming_enabled() {
-    let dimmed = look_for(false, true);
+fn unfocused_islands_dim_when_dimming_is_enabled() {
+    let dimmed = look_for(false);
     assert!(dimmed.is_dimmed());
-    assert_eq!(dimmed.content_opacity, 0.8);
-    assert!(!look_for(true, true).is_dimmed());
-    assert!(!look_for(false, false).is_dimmed());
-    assert!(!look_for(true, false).is_dimmed());
+    assert_eq!(dimmed.opacity, 0.8);
+    assert!(!look_for(true).is_dimmed());
 
     let mut theme = Theme::load_default().unwrap();
     theme.island.dim_unfocused = false;
-    let role = crate::island_look::IslandRole { is_focused: false, is_split: true };
+    let role = crate::island_look::IslandRole { is_focused: false };
     assert!(!crate::island_look::IslandLook::for_role(&theme, role).is_dimmed());
 }
 
@@ -1303,11 +1299,11 @@ fn ghost_islands_keep_the_look_they_had_when_they_left_the_layout() {
     let leaving = PanelId::new();
     let staying = PanelId::new();
     let mut looks = IslandLooks::default();
-    looks.remember(HashMap::from([(leaving, look_for(false, true)), (staying, look_for(true, true))]), &[]);
-    looks.remember(HashMap::from([(staying, look_for(true, false))]), &[leaving]);
-    assert_eq!(looks.get(leaving), Some(look_for(false, true)));
-    assert_eq!(looks.get(staying), Some(look_for(true, false)));
-    looks.remember(HashMap::from([(staying, look_for(true, false))]), &[]);
+    looks.remember(HashMap::from([(leaving, look_for(false)), (staying, look_for(true))]), &[]);
+    looks.remember(HashMap::from([(staying, look_for(false))]), &[leaving]);
+    assert_eq!(looks.get(leaving), Some(look_for(false)));
+    assert_eq!(looks.get(staying), Some(look_for(false)));
+    looks.remember(HashMap::from([(staying, look_for(false))]), &[]);
     assert_eq!(looks.get(leaving), None);
 }
 
