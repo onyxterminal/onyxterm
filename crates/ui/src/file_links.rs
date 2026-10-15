@@ -104,7 +104,8 @@ mod tests {
 
     #[test]
     fn finds_rust_panic_locations_with_line_and_column() {
-        assert_eq!(links("  at crates/ui/src/settings.rs:15:9"), vec![link(5..35, "crates/ui/src/settings.rs", 15, Some(9))]);
+        let expected = vec![link(5..35, "crates/ui/src/settings.rs", 15, Some(9))];
+        assert_eq!(links("  at crates/ui/src/settings.rs:15:9"), expected);
     }
 
     #[test]

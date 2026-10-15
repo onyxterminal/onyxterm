@@ -132,7 +132,8 @@ mod tests {
 
     #[test]
     fn parses_each_final_term_mark() {
-        let marks = scan_all(&[b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C;cmdline=ls -la\x07out\x1b]133;D;2\x07"]);
+        let session: &[u8] = b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C;cmdline=ls -la\x07out\x1b]133;D;2\x07";
+        let marks = scan_all(&[session]);
         assert_eq!(marks, vec![
             ShellMark::PromptStart,
             ShellMark::CommandStart,

@@ -93,7 +93,9 @@ impl CommandBlocks {
         match mark {
             ShellMark::PromptStart => self.finish(None, now).map(BlockChange::CommandFinished),
             ShellMark::CommandStart => Some(BlockChange::InputStarted(self.start_input())),
-            ShellMark::CommandExecuted { command } => Some(BlockChange::CommandStarted(self.start_command(command, now))),
+            ShellMark::CommandExecuted { command } => {
+                Some(BlockChange::CommandStarted(self.start_command(command, now)))
+            }
             ShellMark::CommandFinished { exit_code } => self.finish(exit_code, now).map(BlockChange::CommandFinished),
         }
     }
