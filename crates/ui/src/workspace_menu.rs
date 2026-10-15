@@ -185,8 +185,12 @@ fn row_style(group: SharedString) -> MenuRowStyle {
     MenuRowStyle { group, is_highlighted: false, is_destructive: false }
 }
 
+fn clipped_line(text: impl Into<SharedString>) -> Div {
+    div().min_w(px(0.0)).overflow_hidden().whitespace_nowrap().child(text.into())
+}
+
 fn meta_text(text: impl Into<SharedString>, theme: &Theme) -> Div {
-    div().min_w(px(0.0)).truncate().text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle).child(text.into())
+    clipped_line(text).text_size(px(theme.ui_font.hint_px)).text_color(theme.text.subtle)
 }
 
 fn ssh_section(hosts: Vec<SshHost>, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
@@ -218,11 +222,12 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
         .text_color(theme.accent.primary)
         .when(item.is_active, |check| check.child(CHECK_MARK));
     let lines = div()
+        .flex_1()
         .min_w(px(0.0))
         .flex()
         .flex_col()
         .gap(px(ROW_LINE_GAP_PX))
-        .child(div().min_w(px(0.0)).truncate().child(item.name.clone()))
+        .child(clipped_line(item.name.clone()))
         .child(meta_text(workspace_meta(item.tab_count, &item.path), theme));
     let row = menu_row(item.id.clone(), row_style(group), theme)
         .flex_1()
@@ -233,7 +238,6 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| select(&select_id, window, cx))
         .child(check)
         .child(lines)
-        .child(div().flex_1())
         .children(item.shortcut.map(|shortcut| menu_shortcut(shortcut, theme)));
     let delete = match item.can_delete {
         true => delete_button(&item.id, theme, actions.delete.clone()).into_any_element(),

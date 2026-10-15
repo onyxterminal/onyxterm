@@ -410,7 +410,7 @@ impl CommandRegistry {
         let mut scored: Vec<(&Command, usize)> = listed
             .filter_map(|cmd| score_match(cmd, &needle).map(|s| (cmd, s)))
             .collect();
-        scored.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.title.cmp(b.0.title)));
+        scored.sort_by_key(|(_, score)| *score);
         scored.into_iter().map(|(cmd, _)| cmd).collect()
     }
 

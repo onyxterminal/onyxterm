@@ -8,10 +8,8 @@ use gpui::{
     div, prelude::*, px, AnyView, App, Context, FontWeight, Hsla, MouseButton, SharedString, Stateful, Svg, Window,
 };
 
-const MORE_TOOLTIP: &str = "Pane Options";
 const COPY_MODE_LABEL: &str = "Copy mode";
 const MAXIMIZED_LABEL: &str = "Maximized";
-const CLOSE_TOOLTIP: &str = "Close Pane";
 const HEADER_GAP_PX: f32 = 8.0;
 const UNFOCUSED_BUTTON_OPACITY: f32 = 0.45;
 const RENAME_WIDTH_PX: f32 = 180.0;
@@ -165,7 +163,7 @@ impl Shell {
             .children(cwd)
     }
 
-    fn header_button(&self, id: String, tooltip: &'static str, icon: Svg) -> Stateful<gpui::Div> {
+    fn header_button(&self, id: String, icon: Svg) -> Stateful<gpui::Div> {
         let header = self.state.theme.pane_header;
         div()
             .id(SharedString::from(id))
@@ -177,7 +175,6 @@ impl Shell {
             .justify_center()
             .rounded(px(header.icon_button_radius_px))
             .cursor_pointer()
-            .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
             .child(icon)
     }
 
@@ -197,7 +194,7 @@ impl Shell {
     fn more_button(&self, panel: PanelId, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
         let theme = &self.state.theme;
         let icon = Icon::More.sized(theme.pane_header.icon_px, theme.text.subtle);
-        self.header_button(format!("pane-more-{panel}"), MORE_TOOLTIP, icon).on_mouse_down(
+        self.header_button(format!("pane-more-{panel}"), icon).on_mouse_down(
             MouseButton::Left,
             cx.listener(move |shell, _event, window, cx| {
                 cx.stop_propagation();
@@ -209,7 +206,7 @@ impl Shell {
     fn close_button(&self, panel: PanelId, cx: &mut Context<Self>) -> Stateful<gpui::Div> {
         let theme = &self.state.theme;
         let icon = Icon::Close.sized(theme.pane_header.close_icon_px, theme.text.subtle);
-        self.header_button(format!("pane-close-{panel}"), CLOSE_TOOLTIP, icon).on_mouse_down(
+        self.header_button(format!("pane-close-{panel}"), icon).on_mouse_down(
             MouseButton::Left,
             cx.listener(move |shell, _event, window, cx| {
                 cx.stop_propagation();
