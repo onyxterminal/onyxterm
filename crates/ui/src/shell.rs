@@ -1270,6 +1270,33 @@ impl Shell {
         editor_canvas(frame, style, document.view.clone(), focus, handler).into_any_element()
     }
 
+    fn palette_view(&self, cx: &mut Context<Self>) -> palette_render::PaletteView {
+        let select_target = cx.entity().downgrade();
+        let hover_target = cx.entity().downgrade();
+        palette_render::PaletteView {
+            scroll: self.palette_scroll.clone(),
+            on_select: std::rc::Rc::new(move |index, window: &mut Window, cx: &mut gpui::App| {
+                if let Some(shell) = select_target.upgrade() {
+                    shell.update(cx, |shell, cx| {
+                        shell.state.palette_selection = index;
+                        shell.run_palette_selection(window, cx);
+                        cx.notify();
+                    });
+                }
+            }),
+            on_hover: std::rc::Rc::new(move |index, _window: &mut Window, cx: &mut gpui::App| {
+                if let Some(shell) = hover_target.upgrade() {
+                    shell.update(cx, |shell, cx| {
+                        if shell.state.palette_selection != index {
+                            shell.state.palette_selection = index;
+                            cx.notify();
+                        }
+                    });
+                }
+            }),
+        }
+    }
+
     fn field_input_probe(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let register = self.input_registration(cx);
         canvas(|_bounds, _window, _cx| {}, move |bounds, _state, window, cx| register(bounds, window, cx))
@@ -1326,17 +1353,7 @@ impl Render for Shell {
         }
         self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
-        let shell = cx.entity().downgrade();
-        let on_select = std::rc::Rc::new(move |index, window: &mut Window, cx: &mut gpui::App| {
-            if let Some(shell) = shell.upgrade() {
-                shell.update(cx, |shell, cx| {
-                    shell.state.palette_selection = index;
-                    shell.run_palette_selection(window, cx);
-                    cx.notify();
-                });
-            }
-        });
-        let palette_overlay = palette_render::build_overlay(&self.state, theme, &self.palette_scroll, on_select)
+        let palette_overlay = palette_render::build_overlay(&self.state, theme, self.palette_view(cx))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                 close_palette(&mut shell.state);
                 cx.notify();
