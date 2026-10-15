@@ -105,7 +105,11 @@ impl EventBatch {
         match event {
             TerminalEvent::TitleChanged(title) => self.title = Some(title),
             TerminalEvent::Exited { .. } => self.exited = true,
-            TerminalEvent::Output(_) | TerminalEvent::Resized { .. } => self.has_output = true,
+            TerminalEvent::Output(_) => {
+                FIRST_OUTPUT_RECEIVED.reach();
+                self.has_output = true;
+            }
+            TerminalEvent::Resized { .. } => self.has_output = true,
         }
     }
 }
@@ -1144,7 +1148,6 @@ impl Shell {
             cx.notify();
         }
         if batch.has_output && self.is_panel_shown(panel) {
-            FIRST_OUTPUT_RECEIVED.reach();
             self.request_redraw(cx);
         }
     }
