@@ -1153,11 +1153,14 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Option<TerminalSessionId> {
         let shell_name = shell_title(&command);
-        let session = self
-            .terminals
-            .spawn_command(command, INITIAL_GRID)
-            .inspect_err(|err| tracing::error!(?err, "failed to spawn session"))
-            .ok()?;
+        let session = match self.terminals.spawn_command(command, INITIAL_GRID) {
+            Ok(session) => session,
+            Err(err) => {
+                tracing::error!(?err, "failed to spawn session");
+                self.show_toast(format!("Couldn't start {shell_name}"), toast::ToastTone::Failure, cx);
+                return None;
+            }
+        };
         FIRST_PTY_SPAWNED.reach();
         let handle = self.terminals.handle_for(session)?;
         let events = watch_session(panel, handle.subscribe(), cx);
