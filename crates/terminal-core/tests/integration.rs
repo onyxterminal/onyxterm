@@ -220,6 +220,17 @@ fn snapshot_preserves_indexed_and_truecolor_and_cursor() {
 }
 
 #[test]
+fn snapshot_reports_italic_dim_and_strikeout_attributes() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"\x1b[3mI\x1b[0m\x1b[2mD\x1b[0m\x1b[9mS\x1b[0mP");
+    let cells = terminal.snapshot_grid().cells;
+    assert!(cells[0].is_italic() && !cells[0].is_dim());
+    assert!(cells[1].is_dim() && !cells[1].is_strikeout());
+    assert!(cells[2].is_strikeout() && !cells[2].is_italic());
+    assert!(!cells[3].is_italic() && !cells[3].is_dim() && !cells[3].is_strikeout());
+}
+
+#[test]
 fn input_modes_track_bracketed_paste_and_app_cursor() {
     let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
     assert_eq!(terminal.input_modes(), InputModes::default());

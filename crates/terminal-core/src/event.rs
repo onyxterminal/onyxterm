@@ -84,6 +84,18 @@ impl Cell {
         self.has_flag(Flags::UNDERLINE)
     }
 
+    pub fn is_italic(&self) -> bool {
+        self.has_flag(Flags::ITALIC)
+    }
+
+    pub fn is_dim(&self) -> bool {
+        self.has_flag(Flags::DIM)
+    }
+
+    pub fn is_strikeout(&self) -> bool {
+        self.has_flag(Flags::STRIKEOUT)
+    }
+
     fn has_flag(&self, flag: Flags) -> bool {
         Flags::from_bits_truncate(self.flags).contains(flag)
     }
