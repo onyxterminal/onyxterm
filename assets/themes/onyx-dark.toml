@@ -92,6 +92,7 @@ cursor = "#78AFFF"
 diff_added = "#4FB86E"
 diff_modified = "#5B9CFA"
 gutter_padding_px = 12.0
+gutter_padding_right_px = 14.0
 cursor_width_px = 2.0
 
 [syntax]

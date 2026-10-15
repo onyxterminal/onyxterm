@@ -317,7 +317,7 @@ impl Theme {
         scale!(self.dialog, width_px, radius_px, button_height_px, button_radius_px, logo_px);
         scale!(self.island, focus_ring_px, unfocused_border_px, pane_padding_x_px,
             pane_padding_top_px, pane_padding_bottom_px);
-        scale!(self.editor, gutter_padding_px, cursor_width_px);
+        scale!(self.editor, gutter_padding_px, gutter_padding_right_px, cursor_width_px);
         let shadows = [&mut self.shadow.tab, &mut self.shadow.menu, &mut self.shadow.popover, &mut self.shadow.hint,
             &mut self.shadow.palette, &mut self.shadow.toast];
         for shadow in shadows.into_iter().flat_map(|layers| layers.iter_mut()) {
@@ -649,6 +649,7 @@ pub struct EditorTokens {
     #[serde(deserialize_with = "color")]
     pub diff_modified: Hsla,
     pub gutter_padding_px: f32,
+    pub gutter_padding_right_px: f32,
     pub cursor_width_px: f32,
 }
 

@@ -29,7 +29,14 @@ const BITS_PER_BYTE: usize = 8;
 const TAB_BYTES: u64 = 0x0909_0909_0909_0909;
 const LOW_SEVEN_BITS: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 const CHANGE_BAR_WIDTH_PX: f32 = 2.0;
+const CHANGE_BAR_OVERHANG_PX: f32 = 10.0;
 const REVEALED_LINES_ABOVE: usize = 5;
+const GUTTER_FONT_SHRINK_PX: f32 = 1.0;
+const GUTTER_MIN_NUMBER_WIDTH_PX: f32 = 26.0;
+const CODE_PADDING_LEFT_PX: f32 = 2.0;
+const CODE_PADDING_RIGHT_PX: f32 = 16.0;
+pub const SCROLL_PADDING_TOP_PX: f32 = 6.0;
+pub const SCROLL_PADDING_BOTTOM_PX: f32 = 12.0;
 
 #[derive(Debug, Default)]
 pub struct EditorView {
@@ -424,7 +431,7 @@ pub fn max_scroll_top(line_count: usize, line_height: f32) -> f32 {
 }
 
 pub fn max_scroll_left(widest_line_width: f32, cell_width: f32, text_width: f32) -> f32 {
-    (widest_line_width + cell_width - text_width).max(0.0)
+    (widest_line_width + cell_width + CODE_PADDING_RIGHT_PX - text_width).max(0.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -512,6 +519,26 @@ impl EditorStyle {
 
     fn font(&self) -> Font {
         font(self.font_family.clone())
+    }
+
+    fn gutter_font_size(&self) -> Pixels {
+        self.font_size - px(GUTTER_FONT_SHRINK_PX)
+    }
+
+    fn gutter_number_width(&self, columns: usize, window: &Window) -> Pixels {
+        let text_system = window.text_system();
+        let font_id = text_system.resolve_font(&self.font());
+        let size = self.gutter_font_size();
+        let digit = text_system
+            .advance(font_id, size, '0')
+            .map(|advance| advance.width)
+            .unwrap_or(size * FALLBACK_CELL_WIDTH_RATIO);
+        (digit * columns as f32).max(px(GUTTER_MIN_NUMBER_WIDTH_PX))
+    }
+
+    fn gutter_width(&self, columns: usize, window: &Window) -> Pixels {
+        let tokens = self.tokens;
+        px(tokens.gutter_padding_px + tokens.gutter_padding_right_px) + self.gutter_number_width(columns, window)
     }
 
     fn color_of(&self, kind: Option<TokenKind>) -> Hsla {
@@ -729,9 +756,7 @@ fn prepare_state(
     let cell = style.cell_size(window);
     let line_count = frame.rope.len_lines();
     let columns = gutter_columns(line_count);
-    let gutter_padding_px = style.tokens.gutter_padding_px;
-    let gutter_padding = px(gutter_padding_px);
-    let gutter_width = px(columns as f32 * f32::from(cell.width)) + gutter_padding * 2.0;
+    let gutter_width = style.gutter_width(columns, window);
     let gutter_rect = Bounds::new(content.origin, size(gutter_width, content.size.height));
     let text_rect = Bounds::new(
         point(content.origin.x + gutter_width, content.origin.y),
@@ -771,7 +796,7 @@ fn prepare_state(
             *laid = shaper.lay(laid.line, visible, &highlights[laid.line - first_line]);
         }
     }
-    let text_offset_x = -view_ref.scroll_left;
+    let text_offset_x = CODE_PADDING_LEFT_PX - view_ref.scroll_left;
     let text_offset_y = -view_ref.scroll_top % line_height_f;
     let unaligned_origin = point(text_rect.origin.x + px(text_offset_x), text_rect.origin.y + px(text_offset_y));
     let text_origin = snap_point(unaligned_origin, window.scale_factor());
@@ -994,7 +1019,7 @@ fn empty_selection_on_line(selection: &Selection, laid: &LaidLine) -> bool {
 
 fn paint_gutter(layout: &FrameLayout, gutter_rect: Bounds<Pixels>, style: &EditorStyle, window: &mut Window, cx: &mut App) {
     let tokens = style.tokens;
-    let right = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_px);
+    let right = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_right_px);
     window.with_content_mask(Some(ContentMask { bounds: gutter_rect }), |window| {
         for laid in &layout.lines {
             let number = (laid.line + 1).to_string();
@@ -1008,7 +1033,7 @@ fn paint_gutter(layout: &FrameLayout, gutter_rect: Bounds<Pixels>, style: &Edito
                 underline: None,
                 strikethrough: None,
             };
-            let shape = window.text_system().shape_line(number.into(), style.font_size, &[run], None);
+            let shape = window.text_system().shape_line(number.into(), style.gutter_font_size(), &[run], None);
             let baseline = baseline_offset(&shape, layout.line_height);
             let origin = glyph_aligned_origin(point(right - shape.width, layout.row_y(laid)), baseline, window.scale_factor());
             if let Err(err) = shape.paint(origin, layout.line_height, window, cx) {
@@ -1025,7 +1050,7 @@ fn paint_change_marks(
     tokens: EditorTokens,
     window: &mut Window,
 ) {
-    let bar_x = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_px + CHANGE_BAR_WIDTH_PX) / 2.0;
+    let bar_x = change_bar_x(gutter_rect.origin.x + gutter_rect.size.width, px(tokens.gutter_padding_right_px));
     window.with_content_mask(Some(ContentMask { bounds: gutter_rect }), |window| {
         for mark in marks {
             let color = match mark.kind {
@@ -1036,6 +1061,10 @@ fn paint_change_marks(
             fill_on_device_grid(change_bar(bar_x, layout.line_y(mark.line), layout.line_height), color, window);
         }
     });
+}
+
+pub fn change_bar_x(gutter_right: Pixels, gutter_padding_right: Pixels) -> Pixels {
+    gutter_right - gutter_padding_right + px(CHANGE_BAR_OVERHANG_PX - CHANGE_BAR_WIDTH_PX)
 }
 
 fn change_bar(x: Pixels, y: Pixels, line_height: Pixels) -> Bounds<Pixels> {
@@ -1110,8 +1139,8 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_scroll_stops_one_cell_past_the_widest_line() {
-        assert_eq!(max_scroll_left(500.0, 10.0, 300.0), 210.0);
+    fn horizontal_scroll_stops_one_cell_and_the_code_padding_past_the_widest_line() {
+        assert_eq!(max_scroll_left(500.0, 10.0, 300.0), 226.0);
         assert_eq!(max_scroll_left(100.0, 10.0, 300.0), 0.0);
     }
 
@@ -1483,6 +1512,11 @@ mod tests {
         const TAB_SEPARATED_CELL: &str = "\tcell_42";
         let text = TAB_SEPARATED_CELL.repeat(TEN_MEGABYTES / TAB_SEPARATED_CELL.len());
         assert!(median_window_time(&text) < WINDOW_TIME_BUDGET);
+    }
+
+    #[test]
+    fn change_bar_hugs_the_number_cell_ten_pixels_past_the_digits() {
+        assert_eq!(change_bar_x(px(60.0), px(14.0)), px(54.0));
     }
 
     #[test]

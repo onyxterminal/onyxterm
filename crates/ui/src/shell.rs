@@ -5,7 +5,7 @@ use crate::app::AppState;
 use crate::command::{close_palette, open_palette, palette_move, palette_selected, CommandId};
 use crate::document::{document_cwd, document_title, document_zone, render_document, DocumentPane};
 use crate::editor_pane::OpenDocument;
-use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
+use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle, SCROLL_PADDING_BOTTOM_PX, SCROLL_PADDING_TOP_PX};
 use crate::confirm::{
     close_pane_copy, close_tab_copy, delete_workspace_copy, discard_documents_copy, discard_pane_copy, discard_tab_copy,
     quit_copy, ConfirmCopy, Confirmation,
@@ -17,7 +17,9 @@ use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_
 use crate::palette as palette_render;
 use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
 use crate::pane_title::OscTitle;
-use crate::terminal_view::{terminal_canvas, InputRegistration, PaneFocus, TerminalPane, TerminalStyle};
+use crate::terminal_view::{
+    terminal_canvas, ContentInsets, InputRegistration, PaneFocus, TerminalPane, TerminalStyle,
+};
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
 use crate::workspaces::WorkspaceModel;
@@ -1269,7 +1271,12 @@ impl Shell {
             marked_text: is_focused.then(|| self.marked_text.clone()).flatten(),
         };
         let mut style = EditorStyle::from_theme(&self.state.theme, self.style.font_family.clone());
-        style.insets.top = px(document_strip::editor_chrome_height(self.state.settings.ui_scale));
+        let scale = self.state.settings.ui_scale;
+        style.insets = ContentInsets {
+            x: px(0.0),
+            top: px(document_strip::editor_chrome_height(scale) + SCROLL_PADDING_TOP_PX * scale),
+            bottom: px(SCROLL_PADDING_BOTTOM_PX * scale),
+        };
         let focus = is_focused.then(|| self.pane_focus(cx));
         let handler = self.editor_pointer_handler(panel, cx);
         editor_canvas(frame, style, document.view.clone(), focus, handler).into_any_element()
