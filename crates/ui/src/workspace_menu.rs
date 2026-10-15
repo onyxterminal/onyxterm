@@ -231,7 +231,7 @@ fn row_button(
             cx.stop_propagation();
             on_click(window, cx);
         })
-        .child(icon.sized(ROW_ACTION_ICON_PX))
+        .child(icon.sized(ROW_ACTION_ICON_PX, theme.text.on_accent))
 }
 
 fn new_workspace_row(shortcut: Option<String>, theme: &Theme, create: ClickHandler) -> impl IntoElement {

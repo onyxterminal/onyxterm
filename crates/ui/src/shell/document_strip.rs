@@ -152,7 +152,7 @@ impl Shell {
                     cx.notify();
                 }),
             )
-            .child(Icon::Close.sized(CLOSE_ICON_PX * scale))
+            .child(Icon::Close.sized(CLOSE_ICON_PX * scale, self.state.theme.text.subtle))
     }
 }
 

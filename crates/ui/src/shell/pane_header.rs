@@ -133,7 +133,7 @@ impl Shell {
             .text_color(self.state.theme.text.muted)
             .hover(move |style| style.bg(hover_fill))
             .tooltip(self.tooltip_builder(SharedString::from(tooltip)))
-            .child(icon.sized(header.icon_px))
+            .child(icon.sized(header.icon_px, self.state.theme.text.subtle))
     }
 
     pub(super) fn tooltip_builder(&self, text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {

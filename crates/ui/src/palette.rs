@@ -87,7 +87,7 @@ fn search_row(query: &TextField, theme: &Theme) -> Div {
         .border_b_1()
         .border_color(theme.border.muted)
         .text_size(px(theme.ui_font.palette_input_px))
-        .child(Icon::Magnifier.sized(palette.search_icon_px))
+        .child(Icon::Magnifier.sized(palette.search_icon_px, theme.text.muted))
         .child(field_text(query, QUERY_PLACEHOLDER, theme))
 }
 

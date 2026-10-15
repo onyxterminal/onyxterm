@@ -19,6 +19,7 @@ const DOUBLE_CLICK: usize = 2;
 const WORKSPACE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const WORKSPACE_BUTTON_GAP_PX: f32 = 6.0;
 const CHEVRON_PX: f32 = 10.0;
+const CHEVRON_OPACITY: f32 = 0.55;
 const NEW_TAB_GLYPH: &str = "+";
 const NEW_TAB_GLYPH_PX: f32 = 17.0;
 const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
@@ -167,6 +168,7 @@ impl Shell {
     fn render_workspace_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let name = workspace_button_label(self.model.workspace_name(self.model.active_id())).to_string();
+        let chevron_tint = theme.text.default.opacity(CHEVRON_OPACITY);
         strip_button("workspace-menu-button", theme)
             .px(px(WORKSPACE_BUTTON_PADDING_X_PX * self.state.settings.ui_scale))
             .gap(px(WORKSPACE_BUTTON_GAP_PX * self.state.settings.ui_scale))
@@ -182,7 +184,7 @@ impl Shell {
                 }),
             )
             .child(div().min_w(px(0.0)).truncate().font_weight(FontWeight::MEDIUM).text_color(theme.text.default).child(name))
-            .child(Icon::Chevron.sized(CHEVRON_PX * self.state.settings.ui_scale))
+            .child(Icon::Chevron.sized(CHEVRON_PX * self.state.settings.ui_scale, chevron_tint))
     }
 
     fn render_new_tab_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -220,7 +222,7 @@ impl Shell {
                 }),
             )
             .tooltip(self.tooltip_builder("Search commands".into()))
-            .child(Icon::Magnifier.sized(PALETTE_ICON_PX * self.state.settings.ui_scale))
+            .child(Icon::Magnifier.sized(PALETTE_ICON_PX * self.state.settings.ui_scale, theme.text.subtle))
             .children(shortcut)
     }
 

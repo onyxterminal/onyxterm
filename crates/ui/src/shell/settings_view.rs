@@ -337,14 +337,15 @@ impl Shell {
         let scale = self.state.settings.ui_scale;
         let is_selected = self.state.settings_pane == pane;
         let hover_fill = theme.chrome.control_fill;
+        let tint = if is_selected { theme.accent.primary } else { theme.text.muted };
         div().id(("settings-pane", pane as usize)).w(px(TOOLBAR_BUTTON_WIDTH_PX * scale)).py(px(5.0 * scale))
             .flex().flex_col().items_center().gap(px(3.0 * scale))
             .rounded(px(7.0 * scale)).cursor_pointer()
             .text_size(px(TOOLBAR_LABEL_PX * scale))
-            .text_color(if is_selected { theme.accent.primary } else { theme.text.muted })
+            .text_color(tint)
             .when(is_selected, |button| button.bg(hover_fill))
             .hover(move |style| style.bg(hover_fill))
-            .child(pane_icon(pane).sized(TOOLBAR_ICON_PX * scale))
+            .child(pane_icon(pane).sized(TOOLBAR_ICON_PX * scale, tint))
             .child(pane.label())
             .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
                 cx.stop_propagation(); shell.show_settings_pane(pane, cx);
@@ -387,7 +388,7 @@ impl Shell {
             .rounded(px(7.0 * scale)).bg(theme.chrome.control_fill).border_1()
             .border_color(if is_focused { theme.accent.primary } else { gpui::transparent_black() })
             .cursor(CursorStyle::IBeam).text_size(px(CAPTION_PX * scale))
-            .child(Icon::Magnifier.sized(SEARCH_ICON_PX * scale))
+            .child(Icon::Magnifier.sized(SEARCH_ICON_PX * scale, theme.text.muted))
             .child(div().flex_1().min_w(px(0.0)).overflow_hidden().child(text))
             .on_mouse_down(MouseButton::Left, cx.listener(move |shell, _event, _window, cx| {
                 cx.stop_propagation(); shell.focus_settings_field(target, cx);
