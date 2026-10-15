@@ -25,7 +25,6 @@ pub const BUNDLE_SIZE_PERCENT: SliderRange = SliderRange { min: 10.0, max: 90.0,
 pub enum BundleSide {
     Left,
     Right,
-    Top,
     Bottom,
 }
 
@@ -33,7 +32,6 @@ impl BundleSide {
     pub fn from_key(key: &str) -> Self {
         match key {
             "left" => Self::Left,
-            "top" => Self::Top,
             "bottom" => Self::Bottom,
             _ => Self::Right,
         }
@@ -43,7 +41,6 @@ impl BundleSide {
         match self {
             Self::Left => "left",
             Self::Right => "right",
-            Self::Top => "top",
             Self::Bottom => "bottom",
         }
     }
@@ -230,7 +227,7 @@ mod tests {
 
     #[test]
     fn editor_bundle_settings_roundtrip() {
-        for side in [BundleSide::Left, BundleSide::Right, BundleSide::Top, BundleSide::Bottom] {
+        for side in [BundleSide::Left, BundleSide::Right, BundleSide::Bottom] {
             let encoded = serde_json::to_string(&side).unwrap();
             let restored: BundleSide = serde_json::from_str(&encoded).unwrap();
             assert_eq!(restored, side);
@@ -247,6 +244,7 @@ mod tests {
         ]);
         assert_eq!(settings.editor_bundle_side, BundleSide::Bottom);
         assert_eq!(settings.editor_bundle_size, 0.9);
+        assert_eq!(BundleSide::from_key("top"), BundleSide::Right);
     }
 
     #[test]

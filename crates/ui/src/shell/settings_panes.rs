@@ -254,7 +254,7 @@ impl Shell {
         let scale = self.state.settings.ui_scale;
         let side = self.state.settings.editor_bundle_side;
         let editor_share = self.state.settings.editor_bundle_size;
-        let is_stacked = matches!(side, BundleSide::Top | BundleSide::Bottom);
+        let is_stacked = side == BundleSide::Bottom;
         let block = |label: &'static str, share: f32, fill: Hsla, outline: Hsla| {
             let slot = div().p(px(DIAGRAM_BLOCK_GAP_PX * scale));
             let slot = if is_stacked { slot.w_full().h(relative(share)) } else { slot.h_full().w(relative(share)) };
@@ -266,7 +266,7 @@ impl Shell {
         let accent = theme.accent.primary;
         let editor = block("Editor", editor_share, accent.opacity(EDITOR_BLOCK_TINT), accent);
         let (first, second) = match side {
-            BundleSide::Left | BundleSide::Top => (editor, terminal),
+            BundleSide::Left => (editor, terminal),
             BundleSide::Right | BundleSide::Bottom => (terminal, editor),
         };
         div().flex_none().w(px(DIAGRAM_WIDTH_PX * scale)).h(px(DIAGRAM_HEIGHT_PX * scale)).p(px(4.0 * scale))

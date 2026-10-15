@@ -368,7 +368,6 @@ impl Shell {
         let (outer_axis, places_before) = match side {
             BundleSide::Left => (Axis::Horizontal, true),
             BundleSide::Right => (Axis::Horizontal, false),
-            BundleSide::Top => (Axis::Vertical, true),
             BundleSide::Bottom => (Axis::Vertical, false),
         };
 
