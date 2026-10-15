@@ -63,6 +63,7 @@ mod theme_editor;
 mod tab_strip;
 mod text_input;
 mod toast;
+mod file_link_open;
 
 use tab_strip::TabDrag;
 use tab_strip::TabField;
@@ -75,6 +76,7 @@ const ESCAPE_KEY: &str = "escape";
 const ENTER_KEY: &str = "enter";
 const UP_KEY: &str = "up";
 const DOWN_KEY: &str = "down";
+const RIGHT_KEY: &str = "right";
 const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 const UNNAMED_FILE: &str = "This file";
@@ -351,6 +353,10 @@ impl Shell {
             return;
         };
         let cwd = self.panel_cwd(focused);
+        self.spawn_bundle_showing(cwd.clone(), cwd, cx);
+    }
+
+    fn spawn_bundle_showing(&mut self, cwd: PathBuf, document: PathBuf, cx: &mut Context<Self>) {
         let file_tree_panel = Panel::new_file_tree(PanelId::new(), document_title(&cwd));
         let editor_panel = Panel::new_editor(PanelId::new(), UNNAMED_FILE.to_string());
         let file_tree_id = file_tree_panel.id;
@@ -369,7 +375,7 @@ impl Shell {
             panel: editor_panel,
             cwd: cwd.clone(),
             name: None,
-            path: Some(cwd.clone()),
+            path: Some(document),
             documents: Vec::new(),
         });
         self.restore_document(editor_id, cx);
@@ -620,6 +626,11 @@ impl Shell {
         };
         if is_composed_text(keystroke, self.state.theme.input.option_as_meta) {
             return event.is_held && self.repeat_text(handle, keystroke);
+        }
+        if let Some(remainder) = accepted_suggestion(keystroke, handle) {
+            write_to(handle, remainder.as_bytes());
+            cx.notify();
+            return true;
         }
         if let Some(lines) = page_scroll_lines(keystroke, handle.grid_size().rows) {
             handle.terminal().scroll_lines(lines);
@@ -1172,7 +1183,7 @@ impl Shell {
         let events = watch_session(panel, handle.subscribe(), cx);
         self.panes.insert(panel, Pane {
             session,
-            terminal: TerminalPane::new(handle),
+            terminal: TerminalPane::new(handle, self.link_opener(panel, cx)),
             osc: None,
             shell_name,
             status: pane_status::PaneStatus::default(),
@@ -1451,6 +1462,11 @@ async fn next_batch(events: &mut Receiver<TerminalEvent>) -> EventBatch {
         batch.absorb(event);
     }
     batch
+}
+
+fn accepted_suggestion(keystroke: &Keystroke, handle: &TerminalHandle) -> Option<String> {
+    let is_accept_key = keystroke.key == RIGHT_KEY && keystroke.modifiers == gpui::Modifiers::none();
+    is_accept_key.then(|| handle.terminal().autosuggestion()).flatten()
 }
 
 fn write_to(handle: &TerminalHandle, bytes: &[u8]) {
