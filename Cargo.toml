@@ -33,3 +33,6 @@ parking_lot = "=0.12.5"
 [profile.release]
 lto = "thin"
 strip = "symbols"
+
+[profile.dev.package."*"]
+opt-level = 3
