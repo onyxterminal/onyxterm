@@ -1,13 +1,34 @@
 use super::Shell;
 use crate::document::explicit_title;
 use crate::pane_title::{display_title, short_cwd, terminal_title, title_tooltip, TitleSource};
+use crate::theme::Theme;
 use domain::PanelId;
-use gpui::{Context, Task};
+use gpui::{Context, Hsla, Task};
 use std::path::PathBuf;
 use std::time::Duration;
-use terminal_core::{ForegroundJob, TerminalHandle};
+use super::toast::ToastTone;
+use terminal_core::{BlockStatus, CommandBlock, ForegroundJob, ShellPhase, TerminalHandle};
 
 const STATUS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const FAILED_VERB: &str = "failed";
+const FINISHED_VERB: &str = "finished";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum RunState {
+    Idle,
+    Running,
+    Failed,
+}
+
+impl RunState {
+    pub(super) fn color(self, theme: &Theme) -> Hsla {
+        match self {
+            RunState::Idle => theme.status.idle,
+            RunState::Running => theme.status.running,
+            RunState::Failed => theme.status.failed,
+        }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct PaneStatus {
@@ -49,12 +70,54 @@ impl Shell {
         tab.name().map_or_else(|| self.pane_display_title(tab.focused()), str::to_string)
     }
 
-    pub(super) fn is_tab_busy(&self, tab: &crate::tabs::Tab) -> bool {
-        tab.layout().leaves().into_iter().any(|panel| self.is_pane_busy(panel))
+    pub(super) fn tab_run_state(&self, tab: &crate::tabs::Tab) -> RunState {
+        let states = tab.layout().leaves().into_iter().map(|panel| self.pane_run_state(panel));
+        states.max().unwrap_or(RunState::Idle)
     }
 
-    pub(super) fn is_pane_busy(&self, panel: PanelId) -> bool {
-        self.panes.get(&panel).is_some_and(|pane| pane.status.job.is_some())
+    pub(super) fn pane_run_state(&self, panel: PanelId) -> RunState {
+        let Some(pane) = self.panes.get(&panel) else {
+            return RunState::Idle;
+        };
+        let terminal = pane.terminal.handle.terminal();
+        if pane.status.job.is_some() || matches!(terminal.shell_phase(), ShellPhase::Running(_)) {
+            return RunState::Running;
+        }
+        let last_outcome = terminal.with_command_blocks(|blocks| blocks.last_outcome());
+        if last_outcome.is_some_and(|outcome| outcome.is_failure()) {
+            return RunState::Failed;
+        }
+        RunState::Idle
+    }
+
+    pub(super) fn announce_finished_commands(
+        &mut self,
+        panel: PanelId,
+        finished: Vec<CommandBlock>,
+        cx: &mut Context<Self>,
+    ) {
+        let is_focused = self.model.tabs().active().is_some_and(|tab| tab.focused() == panel);
+        let Some(block) = finished.into_iter().rev().find(|block| !block.command.is_empty()) else {
+            return;
+        };
+        let BlockStatus::Finished(outcome) = block.status else {
+            return;
+        };
+        if is_focused || outcome.is_interrupted() {
+            return;
+        }
+        let (verb, tone) = match outcome.is_failure() {
+            true => (FAILED_VERB, ToastTone::Failure),
+            false => (FINISHED_VERB, ToastTone::Success),
+        };
+        let pane_name = self.pane_name(panel);
+        self.show_toast(format!("{} {verb} in {pane_name}", block.command), tone, cx);
+    }
+
+    fn pane_name(&self, panel: PanelId) -> String {
+        let explicit = self.model.panel(panel).and_then(explicit_title);
+        let shell = self.panes.get(&panel).map(|pane| pane.shell_name.clone());
+        explicit.map(str::to_string).or(shell).unwrap_or_default()
     }
 
     pub(super) fn pane_title_tooltip(&self, panel: PanelId) -> String {

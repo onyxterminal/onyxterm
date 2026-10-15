@@ -110,10 +110,8 @@ impl Shell {
         let theme = &self.state.theme;
         let color = if self.documents.get(&panel).is_some_and(DocumentPane::is_dirty) {
             theme.accent.primary
-        } else if self.is_pane_busy(panel) {
-            theme.status.running
         } else {
-            theme.status.idle
+            self.pane_run_state(panel).color(theme)
         };
         div().flex_none().size(px(theme.pane_header.status_dot_px)).rounded_full().bg(color)
     }

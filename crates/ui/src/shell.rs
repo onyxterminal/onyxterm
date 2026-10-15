@@ -1198,6 +1198,7 @@ impl Shell {
         }
         self.refresh_status(panel, cx);
         let has_command_change = batch.has_command_started || !batch.finished.is_empty();
+        self.announce_finished_commands(panel, batch.finished, cx);
         if has_title || batch.exited || has_command_change {
             cx.notify();
         }

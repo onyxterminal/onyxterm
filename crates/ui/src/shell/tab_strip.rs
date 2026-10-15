@@ -1,4 +1,5 @@
 use super::pane_drag::bounds_probe;
+use super::pane_status::RunState;
 use super::{FieldTarget, Shell, ENTER_KEY, ESCAPE_KEY};
 use crate::command::CommandId;
 use crate::pane_drop::{has_left_dead_zone, tab_drop_target};
@@ -63,7 +64,7 @@ struct TabPill {
     index: usize,
     label: TabLabel,
     is_active: bool,
-    is_busy: bool,
+    run_state: RunState,
 }
 
 pub(super) struct TabDrag {
@@ -153,7 +154,7 @@ impl Shell {
                     Some(field) => TabLabel::Editing(field.input.clone()),
                     None => TabLabel::Title(self.tab_title(tab)),
                 };
-                TabPill { index, label, is_active: index == active, is_busy: self.is_tab_busy(tab) }
+                TabPill { index, label, is_active: index == active, run_state: self.tab_run_state(tab) }
             })
             .collect()
     }
@@ -175,8 +176,8 @@ impl Shell {
         if self.is_tab_drop_target(index) || self.is_tab_drag_target(index) {
             shadows.push(drop_ring(theme));
         }
-        let status_dot = pill.is_busy.then(|| {
-            div().flex_none().size(px(TAB_DOT_PX * scale)).rounded_full().bg(theme.status.running)
+        let status_dot = (pill.run_state != RunState::Idle).then(|| {
+            div().flex_none().size(px(TAB_DOT_PX * scale)).rounded_full().bg(pill.run_state.color(theme))
         });
         let pill_body = div()
             .h(px(top_bar.control_height_px))
