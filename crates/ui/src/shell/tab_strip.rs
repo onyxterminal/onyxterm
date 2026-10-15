@@ -25,7 +25,6 @@ const PALETTE_BUTTON_PADDING_X_PX: f32 = 8.0;
 const PALETTE_BUTTON_GAP_PX: f32 = 5.0;
 const PALETTE_ICON_PX: f32 = 12.0;
 const APPEARANCE_ICON_PX: f32 = 14.0;
-const SIGNAL_DOT_PX: f32 = 10.0;
 const DROP_RING_PX: f32 = 1.5;
 const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
@@ -105,7 +104,6 @@ impl Shell {
             .child(self.render_new_tab_button(cx))
             .child(self.render_palette_button(cx))
             .child(self.render_appearance_button(cx))
-            .child(self.render_signal_button(cx))
     }
 
     fn tab_pills(&self) -> Vec<TabPill> {
@@ -247,29 +245,6 @@ impl Shell {
                 }),
             )
             .child(icon.sized(APPEARANCE_ICON_PX * self.state.settings.ui_scale))
-    }
-
-    fn render_signal_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = &self.state.theme;
-        let signal_color = if self.is_signal_red { theme.status.failed } else { theme.status.running };
-        let dot_size = px(SIGNAL_DOT_PX * self.state.settings.ui_scale);
-        strip_button("signal-button", theme)
-            .w(px(theme.top_bar.control_height_px))
-            .justify_center()
-            .ml(px(theme.top_bar.tab_gap_px))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|shell, _event, _window, cx| {
-                    cx.stop_propagation();
-                    shell.toggle_signal(cx);
-                }),
-            )
-            .child(div().size(dot_size).rounded_full().bg(signal_color))
-    }
-
-    fn toggle_signal(&mut self, cx: &mut Context<Self>) {
-        self.is_signal_red = !self.is_signal_red;
-        cx.notify();
     }
 
     fn press_tab_pill(&mut self, index: usize, press: Point<Pixels>, cx: &mut Context<Self>) {
