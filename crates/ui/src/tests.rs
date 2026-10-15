@@ -1107,7 +1107,7 @@ fn every_builtin_theme_has_visible_change_marks() {
     for kind in ThemeKind::ALL {
         let theme = Theme::load(kind).expect("theme loads");
         let editor = theme.editor;
-        for color in [editor.diff_added, editor.diff_modified, editor.diff_deleted] {
+        for color in [editor.diff_added, editor.diff_modified] {
             let ratio = contrast_ratio(color, theme.surface.canvas);
             assert!(ratio >= 3.0, "{kind:?} change mark {color:?} has contrast {ratio}");
         }

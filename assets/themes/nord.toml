@@ -83,7 +83,6 @@ selection = "rgba(136,192,208,0.30)"
 cursor = "#88C0D0"
 diff_added = "#A3BE8C"
 diff_modified = "#81A1C1"
-diff_deleted = "#BF616A"
 gutter_padding_px = 12.0
 cursor_width_px = 2.0
 

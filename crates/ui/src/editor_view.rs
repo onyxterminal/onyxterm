@@ -29,8 +29,6 @@ const BITS_PER_BYTE: usize = 8;
 const TAB_BYTES: u64 = 0x0909_0909_0909_0909;
 const LOW_SEVEN_BITS: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 const CHANGE_BAR_WIDTH_PX: f32 = 2.0;
-const DELETION_TICK_WIDTH_PX: f32 = 6.0;
-const DELETION_TICK_HEIGHT_PX: f32 = 2.0;
 
 #[derive(Debug, Default)]
 pub struct EditorView {
@@ -1025,25 +1023,18 @@ fn paint_change_marks(
     let bar_x = gutter_rect.origin.x + gutter_rect.size.width - px(tokens.gutter_padding_px + CHANGE_BAR_WIDTH_PX) / 2.0;
     window.with_content_mask(Some(ContentMask { bounds: gutter_rect }), |window| {
         for mark in marks {
-            let y = layout.line_y(mark.line);
-            let (bounds, color) = match mark.kind {
-                HunkKind::Added => (change_bar(bar_x, y, layout.line_height), tokens.diff_added),
-                HunkKind::Modified => (change_bar(bar_x, y, layout.line_height), tokens.diff_modified),
-                HunkKind::Deleted => (deletion_tick(bar_x, y), tokens.diff_deleted),
+            let color = match mark.kind {
+                HunkKind::Added => tokens.diff_added,
+                HunkKind::Modified => tokens.diff_modified,
+                HunkKind::Deleted => continue,
             };
-            fill_on_device_grid(bounds, color, window);
+            fill_on_device_grid(change_bar(bar_x, layout.line_y(mark.line), layout.line_height), color, window);
         }
     });
 }
 
 fn change_bar(x: Pixels, y: Pixels, line_height: Pixels) -> Bounds<Pixels> {
     Bounds::new(point(x, y), size(px(CHANGE_BAR_WIDTH_PX), line_height))
-}
-
-fn deletion_tick(bar_x: Pixels, boundary_y: Pixels) -> Bounds<Pixels> {
-    let x = bar_x - px(DELETION_TICK_WIDTH_PX - CHANGE_BAR_WIDTH_PX) / 2.0;
-    let y = boundary_y - px(DELETION_TICK_HEIGHT_PX) / 2.0;
-    Bounds::new(point(x, y), size(px(DELETION_TICK_WIDTH_PX), px(DELETION_TICK_HEIGHT_PX)))
 }
 
 #[cfg(test)]
