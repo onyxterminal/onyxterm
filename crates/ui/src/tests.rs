@@ -1515,3 +1515,13 @@ fn shortcut_filter_matches_title_or_category_ignoring_case() {
     let categories: Vec<&str> = shortcut_groups(&registry, &map, "copy").iter().map(|group| group.category).collect();
     assert_eq!(categories, ["Edit"]);
 }
+
+#[test]
+fn palette_query_keeps_design_order_for_equal_matches() {
+    use crate::palette::palette_entries;
+    let mut state = AppState::new();
+    open_palette(&mut state);
+    palette_type(&mut state, "spl");
+    let titles: Vec<String> = palette_entries(&state).into_iter().map(|row| row.title).collect();
+    assert_eq!(titles[..2], ["Split Right", "Split Down"]);
+}
