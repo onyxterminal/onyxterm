@@ -421,10 +421,10 @@ fn palette_lists_required_commands() {
 #[test]
 fn font_family_maps_system_monospace_and_falls_back() {
     let theme = Theme::load_default().unwrap();
-    assert_eq!(theme.font.family_candidates(), vec!["SF Mono", "Menlo", "SF Mono", "Menlo", "Menlo"]);
+    assert_eq!(theme.font.family_candidates(), vec!["Menlo", "SF Mono", "SF Mono", "Menlo", "Menlo"]);
     let available = ["Menlo", "Courier"];
     assert_eq!(theme.font.resolve_family(|name| available.contains(&name)), "Menlo");
-    let with_sf = ["SF Mono", "Menlo"];
+    let with_sf = ["SF Mono", "Courier"];
     assert_eq!(theme.font.resolve_family(|name| with_sf.contains(&name)), "SF Mono");
     assert_eq!(theme.font.resolve_family(|_| false), "Menlo");
 }
@@ -582,15 +582,15 @@ fn island_insets_place_content_under_header_and_grid_uses_inner_size() {
     let theme = Theme::load_default().unwrap();
     let insets = ContentInsets::from_theme(&theme);
     assert_eq!(theme.layout.pane_header_height_px, 30.0);
-    assert_eq!(theme.island.pane_padding_bottom_px, 12.0);
+    assert_eq!(theme.island.pane_padding_bottom_px, 10.0);
     assert_eq!(theme.layout.island_radius_px, 10.0);
     assert_eq!(theme.layout.island_gap_px, 6.0);
     assert_eq!(theme.layout.window_margin_px, 8.0);
-    assert_eq!(insets, ContentInsets { x: px(14.0), top: px(36.0), bottom: px(12.0) });
+    assert_eq!(insets, ContentInsets { x: px(14.0), top: px(30.0), bottom: px(10.0) });
     let island = gpui::Bounds::new(gpui::point(px(100.0), px(50.0)), gpui::size(px(816.0), px(517.0)));
     let inner = content_bounds(island, insets);
-    assert_eq!(inner.origin, gpui::point(px(114.0), px(86.0)));
-    assert_eq!(inner.size, gpui::size(px(788.0), px(469.0)));
+    assert_eq!(inner.origin, gpui::point(px(114.0), px(80.0)));
+    assert_eq!(inner.size, gpui::size(px(788.0), px(477.0)));
     let cell = gpui::size(px(8.0), px(18.0));
     let style = TerminalStyle::from_theme(&theme, "ui-monospace".into());
     assert_eq!(island_grid(island.size, &style, cell), GridSize::new(98, 26));
@@ -1182,7 +1182,7 @@ fn apple_light_theme_loads_every_redesign_token() {
     assert_eq!((theme.dialog.width_px, theme.dialog.radius_px), (272.0, 14.0));
     assert!(theme.island.dim_unfocused);
     assert_eq!(theme.island.unfocused_opacity, 0.8);
-    assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 6.0));
+    assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 0.0));
     assert_eq!(theme.island.focus_ring_px, 1.0);
 }
 

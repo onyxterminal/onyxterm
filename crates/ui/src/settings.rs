@@ -102,7 +102,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self { theme: ThemeKind::Light, custom_base: ThemeKind::Dark,
             custom_colors: CustomColors::from_theme(&Theme::load(ThemeKind::Dark).expect("built-in dark theme")),
-            font_family: "JetBrains Mono".into(), font_size: 13.0,
+            font_family: "Menlo".into(), font_size: 13.0,
             ui_scale: 1.0, dim_unfocused_panes: true,
             editor_bundle_side: BundleSide::Right, editor_bundle_size: 0.4,
             shortcut_overrides: ShortcutOverrides::default() }
@@ -278,7 +278,7 @@ mod tests {
             (THEME_KEY, "light".to_string()), (UI_SCALE_KEY, "1".to_string()), (DIM_UNFOCUSED_KEY, "true".to_string()),
         ]);
         assert_eq!(pairs(SettingsPane::Terminal), [
-            (FONT_KEY, "JetBrains Mono".to_string()), (FONT_SIZE_KEY, "13".to_string()),
+            (FONT_KEY, "Menlo".to_string()), (FONT_SIZE_KEY, "13".to_string()),
         ]);
         assert_eq!(pairs(SettingsPane::Editor), [
             (EDITOR_BUNDLE_SIDE_KEY, "right".to_string()), (EDITOR_BUNDLE_SIZE_KEY, "0.4".to_string()),
