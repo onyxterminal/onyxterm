@@ -1,4 +1,4 @@
-use gpui::{prelude::*, px, svg, AssetSource, Hsla, SharedString, Svg};
+use gpui::{div, prelude::*, px, svg, AssetSource, Div, Hsla, SharedString, Svg};
 use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,12 +12,19 @@ pub enum Icon {
     Terminal,
     Editor,
     Keyboard,
+    Logo,
+    LogoPrompt,
+    Plus,
+    More,
+    CloseBold,
+    MagnifierBold,
 }
 
 impl Icon {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 15] = [
         Self::Gear, Self::Close, Self::Chevron, Self::Magnifier, Self::Trash,
         Self::Appearance, Self::Terminal, Self::Editor, Self::Keyboard,
+        Self::Logo, Self::LogoPrompt, Self::Plus, Self::More, Self::CloseBold, Self::MagnifierBold,
     ];
 
     fn asset_path(self) -> &'static str {
@@ -31,6 +38,12 @@ impl Icon {
             Icon::Terminal => "icons/ui/terminal.svg",
             Icon::Editor => "icons/ui/editor.svg",
             Icon::Keyboard => "icons/ui/keyboard.svg",
+            Icon::Logo => "icons/ui/logo.svg",
+            Icon::LogoPrompt => "icons/ui/logo-prompt.svg",
+            Icon::Plus => "icons/ui/plus.svg",
+            Icon::More => "icons/ui/more.svg",
+            Icon::CloseBold => "icons/ui/close-bold.svg",
+            Icon::MagnifierBold => "icons/ui/magnifier-bold.svg",
         }
     }
 
@@ -45,12 +58,27 @@ impl Icon {
             Icon::Terminal => include_bytes!("../../../../assets/icons/ui/terminal.svg"),
             Icon::Editor => include_bytes!("../../../../assets/icons/ui/editor.svg"),
             Icon::Keyboard => include_bytes!("../../../../assets/icons/ui/keyboard.svg"),
+            Icon::Logo => include_bytes!("../../../../assets/icons/ui/logo.svg"),
+            Icon::LogoPrompt => include_bytes!("../../../../assets/icons/ui/logo-prompt.svg"),
+            Icon::Plus => include_bytes!("../../../../assets/icons/ui/plus.svg"),
+            Icon::More => include_bytes!("../../../../assets/icons/ui/more.svg"),
+            Icon::CloseBold => include_bytes!("../../../../assets/icons/ui/close-bold.svg"),
+            Icon::MagnifierBold => include_bytes!("../../../../assets/icons/ui/magnifier-bold.svg"),
         }
     }
 
     pub fn sized(self, size_px: f32, color: Hsla) -> Svg {
         svg().path(self.asset_path()).size(px(size_px)).flex_none().text_color(color)
     }
+}
+
+pub fn logo_mark(size_px: f32, fill: Hsla, ink: Hsla) -> Div {
+    div()
+        .relative()
+        .flex_none()
+        .size(px(size_px))
+        .child(Icon::Logo.sized(size_px, fill))
+        .child(Icon::LogoPrompt.sized(size_px, ink).absolute().top_0().left_0())
 }
 
 pub struct IconAssets;
