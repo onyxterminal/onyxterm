@@ -61,9 +61,10 @@ pub enum CommandId {
     ClearTerminal,
     InterruptProcess,
     Find,
+    QuickOpen,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 74] = [
+const COMMAND_KEYS: [(CommandId, &str); 75] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -103,7 +104,7 @@ const COMMAND_KEYS: [(CommandId, &str); 74] = [
     (CommandId::SelectWorkspace(6), "select_workspace_7"), (CommandId::SelectWorkspace(7), "select_workspace_8"),
     (CommandId::SelectWorkspace(8), "select_workspace_9"),
     (CommandId::ClearTerminal, "clear_terminal"), (CommandId::InterruptProcess, "interrupt_process"),
-    (CommandId::Find, "find"),
+    (CommandId::Find, "find"), (CommandId::QuickOpen, "quick_open"),
 ];
 
 const SELECT_TAB_TITLES: [&str; 9] = [
@@ -269,6 +270,7 @@ pub fn palette_selected(state: &AppState) -> Option<CommandId> {
 pub fn default_commands() -> Vec<Command> {
     use CommandId::*;
     let mut commands = vec![
+        Command::builder(QuickOpen, "Quick Open\u{2026}", "Files", no_op).build(),
         Command::builder(Find, "Find", "Edit", no_op).build(),
         Command::builder(NewTab, "New Tab", "Tabs", no_op).build(),
         Command::builder(SplitRight, "Split Right", "Panes", no_op).build(),

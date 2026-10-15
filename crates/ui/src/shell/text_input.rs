@@ -22,6 +22,7 @@ pub(super) enum FieldTarget {
     ShortcutFilter,
     SettingsQuery,
     Find,
+    QuickOpenQuery,
 }
 
 struct AppClipboard<'a>(&'a mut App);
@@ -67,6 +68,9 @@ impl Shell {
         if self.state.palette_visible {
             return Some(FieldTarget::PaletteQuery);
         }
+        if self.quick_open.is_some() {
+            return Some(FieldTarget::QuickOpenQuery);
+        }
         self.is_find_focused().then_some(FieldTarget::Find)
     }
 
@@ -82,6 +86,7 @@ impl Shell {
             FieldTarget::ShortcutFilter => Some(&self.state.shortcut_filter),
             FieldTarget::SettingsQuery => Some(&self.state.settings_query),
             FieldTarget::Find => self.find.as_ref().map(|find| &find.input),
+            FieldTarget::QuickOpenQuery => self.quick_open.as_ref().map(|quick_open| &quick_open.query),
         }
     }
 
@@ -97,6 +102,7 @@ impl Shell {
             FieldTarget::ShortcutFilter => Some(&mut self.state.shortcut_filter),
             FieldTarget::SettingsQuery => Some(&mut self.state.settings_query),
             FieldTarget::Find => self.find.as_mut().map(|find| &mut find.input),
+            FieldTarget::QuickOpenQuery => self.quick_open.as_mut().map(|quick_open| &mut quick_open.query),
         }
     }
 
@@ -143,6 +149,7 @@ impl Shell {
             FieldTarget::HexColor => self.preview_typed_hex(cx),
             FieldTarget::SettingsQuery => self.state.settings_result_selection = 0,
             FieldTarget::Find => self.on_find_query_edited(cx),
+            FieldTarget::QuickOpenQuery => self.rank_quick_open(cx),
             FieldTarget::MenuName | FieldTarget::MenuSearch | FieldTarget::PaneName | FieldTarget::TabName
             | FieldTarget::ShortcutFilter => {}
         }

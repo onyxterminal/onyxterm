@@ -63,6 +63,7 @@ mod text_input;
 mod toast;
 mod file_link_open;
 mod find;
+mod quick_open;
 
 use tab_strip::TabDrag;
 use tab_strip::TabField;
@@ -175,6 +176,8 @@ pub struct Shell {
     toast: Option<toast::Toast>,
     find: Option<crate::find_bar::FindBar>,
     find_search: Option<find::FindSearch>,
+    quick_open: Option<crate::quick_open::QuickOpen>,
+    quick_open_jobs: quick_open::QuickOpenJobs,
     _quit_hook: Subscription,
     _status_poll: Task<()>,
 }
@@ -228,6 +231,8 @@ impl Shell {
             toast: None,
             find: None,
             find_search: None,
+            quick_open: None,
+            quick_open_jobs: quick_open::QuickOpenJobs::default(),
             _quit_hook: cx.on_app_quit(|shell, _cx| {
                 shell.flush();
                 async {}
@@ -458,6 +463,7 @@ impl Shell {
             CommandId::SelectAll if self.has_focused_editor() => self.select_all_in_editor(cx),
             CommandId::Save => self.save_focused_editor(cx),
             CommandId::OpenPalette => {
+                self.quick_open = None;
                 crate::command::CommandRegistry::dispatch(&mut self.state, id);
                 self.scroll_palette_to_top();
             }
@@ -558,6 +564,7 @@ impl Shell {
             CommandId::ToggleFileTree => self.toggle_file_tree(cx),
             CommandId::ToggleEditorBundle => self.toggle_editor_bundle(cx),
             CommandId::Find => self.open_find(cx),
+            CommandId::QuickOpen => self.toggle_quick_open(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         self.remember_focused_editor();
@@ -607,6 +614,9 @@ impl Shell {
         if self.state.palette_visible && self.handle_palette_key(keystroke, window, cx) {
             return true;
         }
+        if self.quick_open.is_some() && self.handle_quick_open_key(keystroke, cx) {
+            return true;
+        }
         if !self.state.palette_visible && self.is_find_focused() {
             if let Some(is_consumed) = self.handle_find_key(keystroke, cx) {
                 return is_consumed || !is_composed_text(keystroke, false);
@@ -616,7 +626,7 @@ impl Shell {
             self.run_command(id, window, cx);
             return true;
         }
-        if self.state.palette_visible {
+        if self.state.palette_visible || self.quick_open.is_some() {
             return !is_composed_text(keystroke, false);
         }
         if self.send_key_to_tree(event, cx) {
@@ -1389,12 +1399,14 @@ impl Render for Shell {
         }
         self.tab_bounds.borrow_mut().clear();
         let theme = &self.state.theme;
-        let palette_overlay = palette_render::build_overlay(&self.state, theme, self.palette_view(cx))
+        let palette_content = palette_render::command_content(&self.state);
+        let palette_overlay = palette_render::build_overlay(palette_content, theme, self.palette_view(cx))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| {
                 close_palette(&mut shell.state);
                 cx.notify();
             }));
         let palette_visible = self.state.palette_visible;
+        let quick_open = self.render_quick_open(cx);
         let workspace_menu = self.is_workspace_menu_open.then(|| self.render_workspace_menu(window.is_fullscreen(), cx));
         let pane_menu = self.render_pane_menu(cx);
         let pane_ghost = self.render_pane_ghost(now);
@@ -1433,6 +1445,7 @@ impl Render for Shell {
             .child(tab_strip)
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
+            .children(quick_open.map(|overlay| fade_in(overlay, "quick-open", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))
             .children(pane_ghost)
             .children(tab_ghost)

@@ -5,7 +5,7 @@ use crate::file_links::FileLink;
 use crate::terminal_view::LinkOpener;
 use domain::PanelId;
 use gpui::Context;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 impl Shell {
@@ -26,14 +26,18 @@ impl Shell {
             self.show_toast(format!("Couldn't find {}", link.path), ToastTone::Failure, cx);
             return;
         }
-        match self.find_bundle() {
-            Some(_) => self.open_file(path.clone(), cx),
-            None => self.spawn_bundle_showing(cwd, path.clone(), cx),
-        }
+        self.show_in_bundle(cwd, path.clone(), cx);
         self.jump_to_document(&path, line_jump(link));
         self.remember_focused_editor();
         self.persist();
         cx.notify();
+    }
+
+    pub(super) fn show_in_bundle(&mut self, cwd: PathBuf, path: PathBuf, cx: &mut Context<Self>) {
+        match self.find_bundle() {
+            Some(_) => self.open_file(path, cx),
+            None => self.spawn_bundle_showing(cwd, path, cx),
+        }
     }
 
     fn jump_to_document(&mut self, path: &Path, jump: LineJump) {

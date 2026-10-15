@@ -18,10 +18,17 @@ pub struct PaletteView {
     pub on_hover: PaletteSelect,
 }
 
-const QUERY_PLACEHOLDER: &str = "Search commands";
+const COMMAND_PLACEHOLDER: &str = "Search commands";
+const COMMAND_VERB: &str = "Run";
+const FILE_PLACEHOLDER: &str = "Go to file";
+const FILE_VERB: &str = "Open";
 const NO_RESULTS: &str = "No Results";
 const RESULTS_ID: &str = "palette-results";
-const FOOTER_HINTS: [(&str, &str); 3] = [("\u{2191}\u{2193}", "Navigate"), ("\u{21b5}", "Run"), ("esc", "Close")];
+const NAVIGATE_KEYS: &str = "\u{2191}\u{2193}";
+const NAVIGATE_LABEL: &str = "Navigate";
+const SELECT_KEY: &str = "\u{21b5}";
+const CLOSE_KEY: &str = "esc";
+const CLOSE_LABEL: &str = "Close";
 const OVERLAY_MARGIN_X_PX: f32 = 16.0;
 const SEARCH_PADDING_X_PX: f32 = 16.0;
 const SEARCH_GAP_PX: f32 = 10.0;
@@ -36,8 +43,32 @@ const FOOTER_KEY_GAP_PX: f32 = 4.0;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteRow {
     pub title: String,
-    pub category: &'static str,
+    pub category: String,
     pub shortcut: Option<String>,
+}
+
+pub struct PaletteContent<'a> {
+    pub query: &'a TextField,
+    pub placeholder: &'static str,
+    pub icon: Icon,
+    pub rows: Vec<PaletteRow>,
+    pub selected: usize,
+    pub verb: &'static str,
+}
+
+pub fn command_content(state: &AppState) -> PaletteContent<'_> {
+    PaletteContent {
+        query: &state.palette_query,
+        placeholder: COMMAND_PLACEHOLDER,
+        icon: Icon::Magnifier,
+        rows: palette_entries(state),
+        selected: state.palette_selection,
+        verb: COMMAND_VERB,
+    }
+}
+
+pub fn file_content(query: &TextField, rows: Vec<PaletteRow>, selected: usize) -> PaletteContent<'_> {
+    PaletteContent { query, placeholder: FILE_PLACEHOLDER, icon: Icon::File, rows, selected, verb: FILE_VERB }
 }
 
 pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
@@ -47,14 +78,15 @@ pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
         .into_iter()
         .map(|cmd| PaletteRow {
             title: cmd.title.to_string(),
-            category: cmd.category,
+            category: cmd.category.to_string(),
             shortcut: state.keymap.combo_for(cmd.id).map(|combo| combo.glyphs()),
         })
         .collect()
 }
 
-pub fn build_overlay(state: &AppState, theme: &Theme, view: PaletteView) -> Div {
+pub fn build_overlay(content: PaletteContent, theme: &Theme, view: PaletteView) -> Div {
     let palette = theme.palette;
+    let verb = content.verb;
     div()
         .absolute()
         .inset_0()
@@ -79,13 +111,13 @@ pub fn build_overlay(state: &AppState, theme: &Theme, view: PaletteView) -> Div 
                 .overflow_hidden()
                 .flex()
                 .flex_col()
-                .child(search_row(&state.palette_query, theme))
-                .child(results(palette_entries(state), state.palette_selection, theme, view))
-                .child(footer(theme)),
+                .child(search_row(&content, theme))
+                .child(results(content.rows, content.selected, theme, view))
+                .child(footer(verb, theme)),
         )
 }
 
-fn search_row(query: &TextField, theme: &Theme) -> Div {
+fn search_row(content: &PaletteContent, theme: &Theme) -> Div {
     let palette = theme.palette;
     div()
         .h(px(palette.search_height_px))
@@ -98,8 +130,8 @@ fn search_row(query: &TextField, theme: &Theme) -> Div {
         .border_b_1()
         .border_color(theme.border.muted)
         .text_size(px(theme.ui_font.palette_input_px))
-        .child(Icon::Magnifier.sized(palette.search_icon_px, theme.text.muted))
-        .child(field_text(query, QUERY_PLACEHOLDER, theme))
+        .child(content.icon.sized(palette.search_icon_px, theme.text.muted))
+        .child(field_text(content.query, content.placeholder, theme))
 }
 
 fn results(rows: Vec<PaletteRow>, selected: usize, theme: &Theme, view: PaletteView) -> Div {
@@ -167,7 +199,7 @@ fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
                 .truncate()
                 .text_size(px(theme.ui_font.category_px))
                 .text_color(theme.text.subtle)
-                .child(row.category),
+                .child(row.category.clone()),
         )
         .child(div().flex_1())
         .children(row.shortcut.clone().map(|shortcut| {
@@ -179,7 +211,8 @@ fn result_row(row: &PaletteRow, is_selected: bool, theme: &Theme) -> Div {
         }))
 }
 
-fn footer(theme: &Theme) -> Div {
+fn footer(verb: &'static str, theme: &Theme) -> Div {
+    let hints = [(NAVIGATE_KEYS, NAVIGATE_LABEL), (SELECT_KEY, verb), (CLOSE_KEY, CLOSE_LABEL)];
     div()
         .h(px(theme.palette.footer_height_px))
         .flex_none()
@@ -192,13 +225,13 @@ fn footer(theme: &Theme) -> Div {
         .border_color(theme.border.muted)
         .text_size(px(theme.ui_font.hint_px))
         .text_color(theme.text.subtle)
-        .children(FOOTER_HINTS.iter().map(|(keys, action)| {
+        .children(hints.into_iter().map(|(keys, action)| {
             div()
                 .flex()
                 .flex_row()
                 .items_center()
                 .gap(px(FOOTER_KEY_GAP_PX))
-                .child(kbd_chip(*keys, theme))
-                .child(*action)
+                .child(kbd_chip(keys, theme))
+                .child(action)
         }))
 }

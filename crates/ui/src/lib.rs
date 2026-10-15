@@ -30,6 +30,7 @@ pub mod pane_menu;
 pub mod pane_motion;
 pub mod pane_title;
 pub mod pixel_grid;
+pub mod quick_open;
 pub mod shell;
 pub mod slider;
 pub mod settings;

@@ -368,6 +368,7 @@ fn bind_application(map: &mut Keymap) {
     map.bind(Combo::new(Modifiers::command_shift(), "y"), ToggleEditorBundle);
     map.bind(Combo::new(cmd, "s"), Save);
     map.bind(Combo::new(cmd, "f"), Find);
+    map.bind(Combo::new(cmd, "p"), QuickOpen);
     map.bind(Combo::new(cmd, ","), OpenSettings);
     map.bind(Combo::new(cmd, "c"), Copy);
     map.bind(Combo::new(cmd, "v"), Paste);
