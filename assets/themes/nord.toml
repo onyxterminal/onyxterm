@@ -192,7 +192,6 @@ option_as_meta = true
 
 [layout]
 tab_strip_height_px = 38
-workspace_rail_width_px = 200
 pane_header_height_px = 26
 border_radius_px = 6
 gap_px = 1
