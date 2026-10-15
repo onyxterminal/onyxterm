@@ -1531,6 +1531,20 @@ fn shortcut_filter_matches_title_or_category_ignoring_case() {
 }
 
 #[test]
+fn palette_lists_the_design_commands_in_design_order() {
+    use crate::palette::palette_entries;
+    let mut state = AppState::new();
+    open_palette(&mut state);
+    let titles: Vec<String> = palette_entries(&state).into_iter().map(|row| row.title).collect();
+    assert_eq!(titles[..12], ["Quick Open\u{2026}", "Find", "New Tab", "Split Right", "Split Down", "Open Editor Here",
+        "Toggle File Tree", "Toggle Editor Bundle", "Save", "Toggle Line Comment", "Next Document", "Clear Terminal"]);
+    let shortcut = |title: &str| palette_entries(&state).into_iter().find(|row| row.title == title).unwrap().shortcut;
+    assert_eq!(shortcut("Quick Open\u{2026}").as_deref(), Some("\u{2318}P"));
+    assert_eq!(shortcut("Find").as_deref(), Some("\u{2318}F"));
+    assert_eq!(shortcut("Toggle Line Comment").as_deref(), Some("\u{2318}/"));
+}
+
+#[test]
 fn palette_query_keeps_design_order_for_equal_matches() {
     use crate::palette::palette_entries;
     let mut state = AppState::new();

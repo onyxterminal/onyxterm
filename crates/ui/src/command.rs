@@ -62,9 +62,10 @@ pub enum CommandId {
     InterruptProcess,
     Find,
     QuickOpen,
+    ToggleLineComment,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 75] = [
+const COMMAND_KEYS: [(CommandId, &str); 76] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -105,6 +106,7 @@ const COMMAND_KEYS: [(CommandId, &str); 75] = [
     (CommandId::SelectWorkspace(8), "select_workspace_9"),
     (CommandId::ClearTerminal, "clear_terminal"), (CommandId::InterruptProcess, "interrupt_process"),
     (CommandId::Find, "find"), (CommandId::QuickOpen, "quick_open"),
+    (CommandId::ToggleLineComment, "toggle_line_comment"),
 ];
 
 const SELECT_TAB_TITLES: [&str; 9] = [
@@ -279,6 +281,7 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(ToggleFileTree, "Toggle File Tree", "Files", no_op).build(),
         Command::builder(ToggleEditorBundle, "Toggle Editor Bundle", "Files", no_op).build(),
         Command::builder(Save, "Save", "Files", no_op).build(),
+        Command::builder(ToggleLineComment, "Toggle Line Comment", "Edit", no_op).build(),
         Command::builder(NextDocument, "Next Document", "Files", no_op).build(),
         Command::builder(ClearTerminal, "Clear Terminal", "Terminal", no_op).build(),
         Command::builder(InterruptProcess, "Interrupt Process", "Terminal", no_op).build(),

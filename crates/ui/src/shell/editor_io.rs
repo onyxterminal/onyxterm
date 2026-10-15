@@ -5,6 +5,7 @@ use crate::editor_pane::{EditorPane, OpenDocument};
 use crate::editor_keys::{key_input, should_defer_to_input_handler};
 use crate::editor_view::{scroll_to_reveal, HorizontalViewport, PointerEvent, PointerHandler};
 use domain::{DocumentId, PanelId};
+use editor_core::syntax::Language;
 use editor_core::{io, standard_action, Buffer, ClickMode, EditorAction, Rope};
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
 use std::path::PathBuf;
@@ -168,6 +169,21 @@ impl Shell {
             return;
         };
         editor.paste(&text, Instant::now());
+        self.reveal_cursor(panel);
+        cx.notify();
+    }
+
+    pub(super) fn toggle_line_comment_in_editor(&mut self, cx: &mut Context<Self>) {
+        let Some((panel, document)) = self.focused_editor_mut() else {
+            return;
+        };
+        let Some(token) = Language::from_path(&document.path).and_then(Language::line_comment) else {
+            return;
+        };
+        let Some(editor) = document.ready_mut() else {
+            return;
+        };
+        editor.toggle_line_comment(token, Instant::now());
         self.reveal_cursor(panel);
         cx.notify();
     }

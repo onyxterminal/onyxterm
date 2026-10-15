@@ -565,6 +565,7 @@ impl Shell {
             CommandId::ToggleEditorBundle => self.toggle_editor_bundle(cx),
             CommandId::Find => self.open_find(cx),
             CommandId::QuickOpen => self.toggle_quick_open(cx),
+            CommandId::ToggleLineComment => self.toggle_line_comment_in_editor(cx),
             _ => crate::command::CommandRegistry::dispatch(&mut self.state, id),
         }
         self.remember_focused_editor();
