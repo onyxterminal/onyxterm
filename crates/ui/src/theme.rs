@@ -81,6 +81,7 @@ struct RawTheme {
     dialog: DialogTokens,
     island: IslandTokens,
     editor: EditorTokens,
+    find: FindTokens,
     syntax: SyntaxTokens,
     shadow: ShadowTokens,
 }
@@ -275,6 +276,7 @@ pub struct Theme {
     pub dialog: DialogTokens,
     pub island: IslandTokens,
     pub editor: EditorTokens,
+    pub find: FindTokens,
     pub syntax: SyntaxTokens,
     pub shadow: ShadowTokens,
 }
@@ -319,7 +321,7 @@ impl Theme {
             pane_padding_top_px, pane_padding_bottom_px);
         scale!(self.editor, gutter_padding_px, gutter_padding_right_px, cursor_width_px);
         let shadows = [&mut self.shadow.tab, &mut self.shadow.menu, &mut self.shadow.popover, &mut self.shadow.hint,
-            &mut self.shadow.palette, &mut self.shadow.toast];
+            &mut self.shadow.palette, &mut self.shadow.toast, &mut self.shadow.find];
         for shadow in shadows.into_iter().flat_map(|layers| layers.iter_mut()) {
             scale!(shadow, x, y, blur, spread);
         }
@@ -399,6 +401,7 @@ impl Theme {
             dialog: raw.dialog,
             island: raw.island,
             editor: raw.editor,
+            find: raw.find,
             syntax: raw.syntax,
             shadow: raw.shadow,
         })
@@ -654,6 +657,16 @@ pub struct EditorTokens {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+pub struct FindTokens {
+    #[serde(deserialize_with = "color")]
+    pub hit: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub hit_current: Hsla,
+    #[serde(deserialize_with = "color")]
+    pub hit_current_ink: Hsla,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct SyntaxTokens {
     #[serde(deserialize_with = "color")]
     pub keyword: Hsla,
@@ -708,6 +721,7 @@ pub struct ShadowTokens {
     pub hint: Vec<ShadowLayer>,
     pub palette: Vec<ShadowLayer>,
     pub toast: Vec<ShadowLayer>,
+    pub find: Vec<ShadowLayer>,
 }
 
 pub fn box_shadows(layers: &[ShadowLayer]) -> Vec<BoxShadow> {

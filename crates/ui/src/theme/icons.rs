@@ -18,13 +18,17 @@ pub enum Icon {
     More,
     CloseBold,
     MagnifierBold,
+    ChevronUp,
+    CloseFind,
+    File,
 }
 
 impl Icon {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 18] = [
         Self::Gear, Self::Close, Self::Chevron, Self::Magnifier, Self::Trash,
         Self::Appearance, Self::Terminal, Self::Editor, Self::Keyboard,
         Self::Logo, Self::LogoPrompt, Self::Plus, Self::More, Self::CloseBold, Self::MagnifierBold,
+        Self::ChevronUp, Self::CloseFind, Self::File,
     ];
 
     fn asset_path(self) -> &'static str {
@@ -44,6 +48,9 @@ impl Icon {
             Icon::More => "icons/ui/more.svg",
             Icon::CloseBold => "icons/ui/close-bold.svg",
             Icon::MagnifierBold => "icons/ui/magnifier-bold.svg",
+            Icon::ChevronUp => "icons/ui/chevron-up.svg",
+            Icon::CloseFind => "icons/ui/close-find.svg",
+            Icon::File => "icons/ui/file.svg",
         }
     }
 
@@ -64,6 +71,9 @@ impl Icon {
             Icon::More => include_bytes!("../../../../assets/icons/ui/more.svg"),
             Icon::CloseBold => include_bytes!("../../../../assets/icons/ui/close-bold.svg"),
             Icon::MagnifierBold => include_bytes!("../../../../assets/icons/ui/magnifier-bold.svg"),
+            Icon::ChevronUp => include_bytes!("../../../../assets/icons/ui/chevron-up.svg"),
+            Icon::CloseFind => include_bytes!("../../../../assets/icons/ui/close-find.svg"),
+            Icon::File => include_bytes!("../../../../assets/icons/ui/file.svg"),
         }
     }
 

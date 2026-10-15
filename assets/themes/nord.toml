@@ -95,6 +95,11 @@ gutter_padding_px = 12.0
 gutter_padding_right_px = 14.0
 cursor_width_px = 2.0
 
+[find]
+hit = "rgba(242,200,120,0.28)"
+hit_current = "rgba(242,200,120,0.7)"
+hit_current_ink = "#242933"
+
 [syntax]
 keyword = "#88A6C6"
 string = "#A3BE8C"
@@ -181,6 +186,11 @@ color = "rgba(0,0,0,0.55)"
 [[shadow.toast]]
 y = 10.0
 blur = 30.0
+color = "rgba(0,0,0,0.55)"
+
+[[shadow.find]]
+y = 8.0
+blur = 24.0
 color = "rgba(0,0,0,0.55)"
 
 [font]
