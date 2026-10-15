@@ -1,7 +1,7 @@
 #![deny(warnings)]
 #![forbid(unsafe_code)]
 
-use crate::app::{AppState, PaletteChoice};
+use crate::app::AppState;
 use crate::keymap::Combo;
 use domain::Direction;
 
@@ -19,7 +19,6 @@ pub enum CommandId {
     SplitDown,
     FocusAdjacent,
     MaximizePane,
-    SwitchWorkspace,
     NewWorkspace,
     RenameWorkspace,
     MoveTabLeft,
@@ -63,7 +62,7 @@ pub enum CommandId {
     InterruptProcess,
 }
 
-const COMMAND_KEYS: [(CommandId, &str); 74] = [
+const COMMAND_KEYS: [(CommandId, &str); 73] = [
     (CommandId::NewTab, "new_tab"), (CommandId::CloseActive, "close"), (CommandId::MoveTabLeft, "move_tab_left"),
     (CommandId::MoveTabRight, "move_tab_right"), (CommandId::ClosePane, "close_pane"),
     (CommandId::OpenPalette, "open_palette"), (CommandId::OpenSettings, "open_settings"),
@@ -81,7 +80,7 @@ const COMMAND_KEYS: [(CommandId, &str); 74] = [
     (CommandId::OpenEditorHere, "open_editor_here"), (CommandId::ToggleFileTree, "toggle_file_tree"),
     (CommandId::ToggleEditorBundle, "toggle_editor_bundle"), (CommandId::Save, "save"),
     (CommandId::NextDocument, "next_document"), (CommandId::PrevDocument, "previous_document"),
-    (CommandId::CloseDocument, "close_document"), (CommandId::SwitchWorkspace, "switch_workspace"),
+    (CommandId::CloseDocument, "close_document"),
     (CommandId::NewWorkspace, "new_workspace"), (CommandId::RenameWorkspace, "rename_workspace"),
     (CommandId::NextWorkspace, "next_workspace"), (CommandId::PrevWorkspace, "previous_workspace"),
     (CommandId::CloseTab, "close_tab"), (CommandId::Copy, "copy"), (CommandId::SelectAll, "select_all"),
@@ -125,11 +124,11 @@ impl CommandId {
     }
 
     pub fn is_rebindable(self) -> bool {
-        !matches!(self, CommandId::ClosePalette | CommandId::SwitchWorkspace)
+        !matches!(self, CommandId::ClosePalette)
     }
 
     pub fn is_listed_in_palette(self) -> bool {
-        !matches!(self, CommandId::SelectTab(_) | CommandId::SelectWorkspace(_) | CommandId::SwitchWorkspace)
+        !matches!(self, CommandId::SelectTab(_) | CommandId::SelectWorkspace(_))
     }
 
     pub fn is_structural(self) -> bool {
@@ -223,36 +222,10 @@ pub fn open_palette(state: &mut AppState) {
     state.palette_visible = true;
     state.palette_query.clear();
     state.palette_selection = 0;
-    state.palette_choices = None;
-}
-
-pub fn open_choice_palette(state: &mut AppState, choices: Vec<PaletteChoice>) {
-    open_palette(state);
-    state.palette_choices = Some(choices);
-}
-
-pub fn filtered_choices(state: &AppState) -> Vec<&PaletteChoice> {
-    let Some(choices) = state.palette_choices.as_ref() else {
-        return Vec::new();
-    };
-    let needle = state.palette_query.text().trim().to_ascii_lowercase();
-    let mut scored: Vec<(&PaletteChoice, usize)> = choices
-        .iter()
-        .filter_map(|choice| fuzzy_score(&choice.title.to_ascii_lowercase(), &needle).map(|score| (choice, score)))
-        .collect();
-    scored.sort_by_key(|(_, score)| *score);
-    scored.into_iter().map(|(choice, _)| choice).collect()
-}
-
-pub fn palette_selected_choice(state: &AppState) -> Option<String> {
-    filtered_choices(state).get(state.palette_selection).map(|choice| choice.key.clone())
 }
 
 fn palette_len(state: &AppState) -> usize {
-    match state.palette_choices {
-        Some(_) => filtered_choices(state).len(),
-        None => state.filtered_commands().len(),
-    }
+    state.filtered_commands().len()
 }
 
 pub fn close_palette(state: &mut AppState) {
@@ -288,9 +261,6 @@ pub fn palette_move(state: &mut AppState, step: isize) {
 }
 
 pub fn palette_selected(state: &AppState) -> Option<CommandId> {
-    if state.palette_choices.is_some() {
-        return None;
-    }
     state.filtered_commands().get(state.palette_selection).copied()
 }
 
@@ -344,7 +314,6 @@ pub fn default_commands() -> Vec<Command> {
         Command::builder(OpenFolder, "Open Folder…", "Files", no_op).build(),
         Command::builder(PrevDocument, "Previous Document", "Files", no_op).build(),
         Command::builder(CloseDocument, "Close Document", "Files", no_op).build(),
-        Command::builder(SwitchWorkspace, "Switch Workspace", "Workspaces", no_op).build(),
         Command::builder(RenameWorkspace, "Rename Workspace\u{2026}", "Workspaces", no_op).build(),
         Command::builder(NextWorkspace, "Next Workspace", "Workspaces", no_op).build(),
         Command::builder(PrevWorkspace, "Previous Workspace", "Workspaces", no_op).build(),

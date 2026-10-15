@@ -41,7 +41,7 @@ pub fn app_menus() -> Vec<Menu> {
             Some((MaximizePane, "Maximize Pane")), None, Some((ToggleFullScreen, "Enter Full Screen")), None,
             Some((OpenPalette, "Command Palette"))]),
         menu("Window", &[Some((Minimize, "Minimize")), Some((Zoom, "Zoom")), None, Some((NextTab, "Next Tab")),
-            Some((PrevTab, "Previous Tab")), None, Some((SwitchWorkspace, "Switch Workspace\u{2026}"))]),
+            Some((PrevTab, "Previous Tab")), None, Some((OpenWorkspaceMenu, "Switch Workspace\u{2026}"))]),
     ]
 }
 

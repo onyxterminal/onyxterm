@@ -2,7 +2,6 @@
 #![forbid(unsafe_code)]
 
 use crate::app::AppState;
-use crate::command::filtered_choices;
 use crate::theme::icons::Icon;
 use crate::text_field::TextField;
 use crate::theme::menu_chrome::{field_text, kbd_chip};
@@ -19,7 +18,6 @@ pub struct PaletteView {
     pub on_hover: PaletteSelect,
 }
 
-pub const CHOICE_CATEGORY: &str = "Workspaces";
 const QUERY_PLACEHOLDER: &str = "Search commands";
 const NO_RESULTS: &str = "No Results";
 const RESULTS_ID: &str = "palette-results";
@@ -43,12 +41,6 @@ pub struct PaletteRow {
 }
 
 pub fn palette_entries(state: &AppState) -> Vec<PaletteRow> {
-    if state.palette_choices.is_some() {
-        return filtered_choices(state)
-            .into_iter()
-            .map(|choice| PaletteRow { title: choice.title.clone(), category: CHOICE_CATEGORY, shortcut: None })
-            .collect();
-    }
     state
         .registry
         .search(state.palette_query.text())

@@ -2,11 +2,7 @@
 #![forbid(unsafe_code)]
 
 use crate::app::AppState;
-use crate::app::PaletteChoice;
-use crate::command::{
-    close_palette, open_choice_palette, open_palette, palette_move, palette_selected, palette_selected_choice,
-    CommandId,
-};
+use crate::command::{close_palette, open_palette, palette_move, palette_selected, CommandId};
 use crate::document::{document_cwd, document_title, document_zone, render_document, DocumentPane};
 use crate::editor_pane::OpenDocument;
 use crate::editor_view::{editor_canvas, EditorFrame, EditorStyle};
@@ -520,7 +516,6 @@ impl Shell {
             }
             CommandId::Copy => self.copy_selection(cx),
             CommandId::Paste => self.paste_clipboard(cx),
-            CommandId::SwitchWorkspace => self.open_workspace_picker(),
             CommandId::NewWorkspace => self.start_new_workspace(cx),
             CommandId::RenameWorkspace => {
                 let id = self.model.active_id();
@@ -682,11 +677,7 @@ impl Shell {
 
     fn run_palette_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let selected = palette_selected(&self.state);
-        let choice = palette_selected_choice(&self.state);
         close_palette(&mut self.state);
-        if let Some(key) = choice {
-            self.select_workspace_by_key(&key, cx);
-        }
         if let Some(id) = selected {
             self.run_command(id, window, cx);
         }
@@ -739,17 +730,6 @@ impl Shell {
                 self.select_workspace(id, cx);
             }
         }
-    }
-
-    fn open_workspace_picker(&mut self) {
-        let choices = self
-            .model
-            .entries()
-            .iter()
-            .map(|entry| PaletteChoice { key: entry.workspace.id.to_string(), title: entry.workspace.name.clone() })
-            .collect();
-        open_choice_palette(&mut self.state, choices);
-        self.scroll_palette_to_top();
     }
 
     fn scroll_palette_to_top(&self) {

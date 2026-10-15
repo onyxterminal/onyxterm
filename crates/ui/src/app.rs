@@ -9,12 +9,6 @@ use crate::settings::{Settings, SettingsPane};
 use crate::settings_search::SettingsRow;
 use crate::text_field::TextField;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PaletteChoice {
-    pub key: String,
-    pub title: String,
-}
-
 #[derive(Debug)]
 pub struct AppState {
     pub theme: Theme,
@@ -40,7 +34,6 @@ pub struct AppState {
     pub palette_visible: bool,
     pub palette_query: TextField,
     pub palette_selection: usize,
-    pub palette_choices: Option<Vec<PaletteChoice>>,
 }
 
 impl AppState {
@@ -73,7 +66,6 @@ impl AppState {
             palette_visible: false,
             palette_query: TextField::default(),
             palette_selection: 0,
-            palette_choices: None,
         }
     }
 

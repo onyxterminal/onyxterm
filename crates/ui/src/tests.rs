@@ -430,30 +430,6 @@ fn font_family_maps_system_monospace_and_falls_back() {
 }
 
 #[test]
-fn workspace_picker_fuzzy_filters_choices_and_returns_key() {
-    use crate::app::PaletteChoice;
-    use crate::command::{filtered_choices, open_choice_palette, palette_selected_choice};
-    let mut state = AppState::new();
-    let choice = |key: &str, title: &str| PaletteChoice { key: key.into(), title: title.into() };
-    open_choice_palette(
-        &mut state,
-        vec![choice("a", "Personal"), choice("b", "Infrastructure"), choice("c", "Backend API")],
-    );
-    assert_eq!(filtered_choices(&state).len(), 3);
-    assert_eq!(palette_selected(&state), None);
-    palette_type(&mut state, "bapi");
-    assert_eq!(palette_selected_choice(&state), Some("c".to_string()));
-    palette_backspace(&mut state);
-    palette_backspace(&mut state);
-    palette_backspace(&mut state);
-    palette_move(&mut state, 1);
-    assert_eq!(filtered_choices(&state).len(), 1);
-    open_palette(&mut state);
-    assert!(state.palette_choices.is_none());
-    assert!(palette_selected(&state).is_some());
-}
-
-#[test]
 fn palette_offers_workspace_commands() {
     let registry = CommandRegistry::with_defaults();
     let titles: Vec<&str> = registry.list().iter().map(|c| c.title).collect();
@@ -1223,9 +1199,7 @@ fn onyx_dark_theme_matches_the_design_board() {
 
 #[test]
 fn palette_rows_carry_category_and_bound_shortcut() {
-    use crate::app::PaletteChoice;
-    use crate::command::open_choice_palette;
-    use crate::palette::{palette_entries, PaletteRow, CHOICE_CATEGORY};
+    use crate::palette::{palette_entries, PaletteRow};
     let mut state = AppState::new();
     open_palette(&mut state);
     let rows = palette_entries(&state);
@@ -1239,11 +1213,6 @@ fn palette_rows_carry_category_and_bound_shortcut() {
     assert_eq!(row("New Workspace").category, "Workspaces");
     assert_eq!(row("New Workspace").shortcut.as_deref(), Some("\u{21e7}\u{2318}N"));
     assert_eq!(row("Rename Tab").shortcut, None);
-    let choice = PaletteChoice { key: "k".into(), title: "Backend".into() };
-    open_choice_palette(&mut state, vec![choice]);
-    let choices = palette_entries(&state);
-    assert_eq!(choices, [PaletteRow { title: "Backend".into(), category: CHOICE_CATEGORY, shortcut: None }]);
-    assert_eq!(CHOICE_CATEGORY, "Workspaces");
 }
 
 #[test]
@@ -1516,7 +1485,7 @@ fn shortcut_groups_follow_registry_category_order_and_list_unbound_commands() {
     assert_eq!(categories, ["Tabs", "Panes", "Files", "Terminal", "Workspaces", "Edit", "Application", "Palette",
         "Window"]);
     let listed: usize = groups.iter().map(|group| group.shortcuts.len()).sum();
-    assert_eq!(listed, registry.list().len() - 2);
+    assert_eq!(listed, registry.list().len() - 1);
     assert!(groups.iter().flat_map(|group| &group.shortcuts).all(|shortcut| shortcut.command != CommandId::ClosePalette));
     let tab_titles: Vec<&str> = groups[0].shortcuts.iter().map(|shortcut| shortcut.title).collect();
     assert_eq!(tab_titles[..7], ["New Tab", "Next Tab", "Previous Tab", "Move Tab Left", "Move Tab Right",
