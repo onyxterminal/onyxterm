@@ -4,6 +4,10 @@
 use std::sync::Once;
 use tracing_subscriber::EnvFilter;
 
+mod startup;
+
+pub use startup::{start_clock, timed, Milestone};
+
 static INIT: Once = Once::new();
 
 pub fn init_tracing() {

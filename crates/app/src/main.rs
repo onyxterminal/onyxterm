@@ -13,6 +13,7 @@ const EXIT_STORE_FAILED: i32 = 3;
 const PROFILE: &str = "default";
 
 fn main() {
+    observability::start_clock();
     observability::init_tracing();
     let lock_path = std::env::var("ONYXTERM_LOCK_PATH")
         .map(PathBuf::from)
@@ -26,7 +27,7 @@ fn main() {
         }
     };
     tracing::info!(version = ui::version(), "starting onyxterm");
-    let startup = match open_startup() {
+    let startup = match observability::timed("store open", open_startup) {
         Ok(startup) => startup,
         Err(err) => {
             tracing::error!(%err, "failed to open workspace store");

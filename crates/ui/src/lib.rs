@@ -64,12 +64,13 @@ pub use shell::Startup;
 pub fn run_app(startup: Startup) -> Result<(), UiError> {
     let app = gpui::Application::new();
     app.run(|cx| {
-        if let Err(err) = cx.text_system().add_fonts(vec![
+        let bundled_fonts = observability::timed("bundled fonts", || cx.text_system().add_fonts(vec![
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf")),
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf")),
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Italic.ttf")),
             Cow::Borrowed(include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-BoldItalic.ttf")),
-        ]) {
+        ]));
+        if let Err(err) = bundled_fonts {
             tracing::error!(?err, "failed to load bundled JetBrains Mono");
         }
         let options = WindowOptions {
@@ -89,7 +90,7 @@ pub fn run_app(startup: Startup) -> Result<(), UiError> {
             show: true,
             ..Default::default()
         };
-        if let Err(err) = shell::open_shell_window(options, startup, cx) {
+        if let Err(err) = observability::timed("window open", || shell::open_shell_window(options, startup, cx)) {
             tracing::error!(?err, "failed to open main window");
             cx.quit();
         }

@@ -6340,6 +6340,7 @@ dependencies = [
  "editor-core",
  "fs-service",
  "gpui",
+ "observability",
  "parking_lot",
  "serde",
  "serde_json",

@@ -32,6 +32,7 @@ use gpui::{
     FocusHandle, IntoElement, KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollStrategy, SharedString,
     Styled, Subscription, Task, TitlebarOptions, UniformListScrollHandle, Window, WindowOptions,
 };
+use observability::Milestone;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -77,6 +78,11 @@ const ABOUT_TITLE: &str = "Onyx";
 const ABOUT_OK: &str = "OK";
 const UNNAMED_FILE: &str = "This file";
 const OUTPUT_COALESCE_INTERVAL: Duration = Duration::from_millis(8);
+
+static FIRST_FRAME: Milestone = Milestone::new("first frame");
+static FIRST_PTY_SPAWNED: Milestone = Milestone::new("first pty spawned");
+static FIRST_OUTPUT_RECEIVED: Milestone = Milestone::new("first pty output received");
+static FIRST_OUTPUT_RENDERED: Milestone = Milestone::new("first pty output rendered");
 
 struct Pane {
     session: TerminalSessionId,
@@ -157,7 +163,8 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(state: AppState, startup: Startup, cx: &mut Context<Self>) -> Self {
-        let font_family = settings_view::resolve_terminal_family(&state.theme.font, cx);
+        let font_family =
+            observability::timed("terminal font resolve", || settings_view::resolve_terminal_family(&state.theme.font, cx));
         tracing::info!(%font_family, "terminal font resolved");
         let Startup { terminals, store, restored, home } = startup;
         let ssh = Arc::new(InMemorySshService::new(&home));
@@ -207,7 +214,7 @@ impl Shell {
             }),
             _status_poll: pane_status::poll_pane_statuses(cx),
         };
-        shell.show_active_workspace(cx);
+        observability::timed("workspace restore", || shell.show_active_workspace(cx));
         shell
     }
 
@@ -1104,6 +1111,7 @@ impl Shell {
             .spawn_command(command, INITIAL_GRID)
             .inspect_err(|err| tracing::error!(?err, "failed to spawn session"))
             .ok()?;
+        FIRST_PTY_SPAWNED.reach();
         let handle = self.terminals.handle_for(session)?;
         let events = watch_session(panel, handle.subscribe(), cx);
         self.panes.insert(panel, Pane {
@@ -1136,6 +1144,7 @@ impl Shell {
             cx.notify();
         }
         if batch.has_output && self.is_panel_shown(panel) {
+            FIRST_OUTPUT_RECEIVED.reach();
             self.request_redraw(cx);
         }
     }
@@ -1256,6 +1265,10 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.is_redraw_pending = false;
+        FIRST_FRAME.reach();
+        if FIRST_OUTPUT_RECEIVED.is_reached() {
+            FIRST_OUTPUT_RENDERED.reach();
+        }
         let now = Instant::now();
         let pane_area = self.render_pane_area(window, now, cx);
         if self.needs_motion_frame(now) {
