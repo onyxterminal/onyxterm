@@ -1144,19 +1144,21 @@ fn custom_theme_inherits_its_base_appearance() {
 #[test]
 fn apple_light_theme_loads_every_redesign_token() {
     let theme = Theme::load_default().unwrap();
-    assert_color(theme.surface.window, "#F5F5F7");
+    assert_color(theme.surface.window, "#ECECEF");
     assert_color(theme.surface.settings_window, "#F2F2F4");
     assert_color(theme.surface.canvas, "#FFFFFF");
     assert_color(theme.text.default, "#1D1D1F");
     assert_color(theme.text.muted, "#6E6E73");
-    assert_color(theme.text.subtle, "#86868B");
+    assert_color(theme.text.subtle, "#8A8A90");
     assert_color(theme.accent.primary, "#007AFF");
     assert_color(theme.chrome.destructive, "#D70015");
-    assert_color(theme.status.running, "#34C759");
-    assert_color(theme.status.idle, "#C7C7CC");
-    assert!((theme.border.muted.a - 0.08).abs() < 1e-3);
-    assert!((theme.border.default.a - 0.10).abs() < 1e-3);
-    assert!((theme.chrome.menu_fill.a - 0.94).abs() < 1e-3);
+    assert_color(theme.status.running, "#248A3D");
+    assert_color(theme.status.idle, "#B4B4B9");
+    assert!((theme.border.muted.a - 0.07).abs() < 1e-3);
+    assert!((theme.border.default.a - 0.11).abs() < 1e-3);
+    assert!((theme.border.focus.a - 0.5).abs() < 1e-3);
+    assert!((theme.accent.selection.a - 0.12).abs() < 1e-3);
+    assert!((theme.chrome.menu_fill.a - 0.985).abs() < 1e-3);
     assert_eq!(theme.ui_font.family, ".SystemUIFont");
     assert_eq!(
         [theme.ui_font.tab_px, theme.ui_font.pane_title_px, theme.ui_font.menu_px, theme.ui_font.palette_input_px],
@@ -1171,7 +1173,7 @@ fn apple_light_theme_loads_every_redesign_token() {
     assert_eq!(theme.palette.row_height_px, 32.0);
     assert_eq!(theme.dialog.radius_px, 12.0);
     assert!(theme.island.dim_unfocused);
-    assert_eq!(theme.island.unfocused_opacity, 0.82);
+    assert_eq!(theme.island.unfocused_opacity, 0.8);
     assert_eq!((theme.island.pane_padding_x_px, theme.island.pane_padding_top_px), (14.0, 6.0));
     assert_eq!(theme.island.focus_ring_px, 1.0);
 }
@@ -1184,13 +1186,29 @@ fn shadow_tokens_become_layered_box_shadows() {
     assert_eq!(tab.len(), 2);
     assert_eq!(tab[0].spread_radius, px(0.5));
     assert_eq!(tab[0].blur_radius, px(0.0));
-    assert!((tab[0].color.a - 0.10).abs() < 1e-3);
+    assert!((tab[0].color.a - 0.11).abs() < 1e-3);
     assert_eq!(tab[1].offset, gpui::point(px(0.0), px(1.0)));
     assert_eq!(tab[1].blur_radius, px(2.0));
     let menu = box_shadows(&theme.shadow.menu);
     assert_eq!((menu[0].offset.y, menu[0].blur_radius), (px(12.0), px(32.0)));
     let palette = box_shadows(&theme.shadow.palette);
-    assert_eq!((palette[0].offset.y, palette[0].blur_radius), (px(18.0), px(48.0)));
+    assert_eq!((palette[0].offset.y, palette[0].blur_radius), (px(30.0), px(80.0)));
+}
+
+#[test]
+fn onyx_dark_theme_matches_the_design_board() {
+    let theme = Theme::load(ThemeKind::Dark).unwrap();
+    assert_color(theme.surface.window, "#151517");
+    assert_color(theme.surface.canvas, "#1E1E20");
+    assert_color(theme.surface.raised, "#2C2C2E");
+    assert_color(theme.surface.settings_window, "#232325");
+    assert_color(theme.text.default, "#E8EAEE");
+    assert_color(theme.text.subtle, "#7D838F");
+    assert_color(theme.chrome.destructive, "#FF6961");
+    assert_color(theme.status.failed, "#FF453A");
+    assert!((theme.accent.selection.a - 0.18).abs() < 1e-3);
+    assert!((theme.border.default.a - 0.12).abs() < 1e-3);
+    assert!((theme.border.muted.a - 0.07).abs() < 1e-3);
 }
 
 #[test]
@@ -1257,7 +1275,7 @@ fn focus_ring_shows_only_on_the_focused_island_of_a_split() {
 fn unfocused_content_dims_only_in_a_split_with_dimming_enabled() {
     let dimmed = look_for(false, true);
     assert!(dimmed.is_dimmed());
-    assert_eq!(dimmed.content_opacity, 0.82);
+    assert_eq!(dimmed.content_opacity, 0.8);
     assert!(!look_for(true, true).is_dimmed());
     assert!(!look_for(false, false).is_dimmed());
     assert!(!look_for(true, false).is_dimmed());

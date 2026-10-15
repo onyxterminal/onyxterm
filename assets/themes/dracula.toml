@@ -14,12 +14,12 @@ settings_window = "#282A36"
 default = "#F8F8F2"
 muted = "#C9C9D2"
 subtle = "#A1A2B0"
-on_accent = "#24212F"
+on_accent = "#1E1630"
 
 [border]
 default = "rgba(248,248,242,0.17)"
-muted = "rgba(248,248,242,0.10)"
-focus = "#BD93F9"
+muted = "rgba(248,248,242,0.12)"
+focus = "rgba(189,147,249,0.5)"
 
 [accent]
 primary = "#BD93F9"
@@ -30,21 +30,21 @@ selection = "rgba(189,147,249,0.18)"
 [status]
 running = "#34C759"
 exited = "#828996"
-failed = "#D70015"
+failed = "#FF453A"
 stopping = "#FF9500"
 starting = "#78AFFF"
 unknown = "#C7C7CC"
-idle = "#C7C7CC"
+idle = "#5A5A5F"
 
 [chrome]
-control_fill = "rgba(255,255,255,0.07)"
+control_fill = "rgba(248,248,242,0.08)"
 icon_hover_fill = "rgba(255,255,255,0.08)"
 menu_fill = "rgba(52,55,70,0.98)"
 selected_shortcut = "rgba(36,33,47,0.78)"
 destructive = "#FF6961"
 on_destructive = "#2A0B0B"
 warning = "#FFB340"
-backdrop = "rgba(0,0,0,0.48)"
+backdrop = "rgba(0,0,0,0.42)"
 
 [ui_font]
 family = ".SystemUIFont"
@@ -78,10 +78,10 @@ icon_button_radius_px = 5.0
 icon_px = 12.0
 
 [editor]
-gutter_text = "rgba(255,255,255,0.28)"
-gutter_text_active = "rgba(255,255,255,0.72)"
-current_line = "rgba(255,255,255,0.04)"
-selection = "rgba(189,147,249,0.30)"
+gutter_text = "rgba(255,255,255,0.24)"
+gutter_text_active = "rgba(255,255,255,0.7)"
+current_line = "rgba(255,255,255,0.035)"
+selection = "rgba(189,147,249,0.32)"
 cursor = "#BD93F9"
 diff_added = "#50FA7B"
 diff_modified = "#8BE9FD"
@@ -132,29 +132,29 @@ button_radius_px = 6.0
 focus_ring_px = 1.0
 unfocused_border_px = 0.5
 dim_unfocused = true
-unfocused_opacity = 0.82
+unfocused_opacity = 0.8
 pane_padding_x_px = 14.0
 pane_padding_top_px = 6.0
 pane_padding_bottom_px = 12.0
 
 [[shadow.tab]]
 spread = 0.5
-color = "rgba(255,255,255,0.13)"
+color = "rgba(248,248,242,0.17)"
 
 [[shadow.tab]]
 y = 1.0
 blur = 2.0
-color = "rgba(255,255,255,0.08)"
+color = "rgba(0,0,0,0.3)"
 
 [[shadow.menu]]
 y = 12.0
 blur = 32.0
-color = "rgba(0,0,0,0.14)"
+color = "rgba(0,0,0,0.55)"
 
 [[shadow.palette]]
-y = 18.0
-blur = 48.0
-color = "rgba(0,0,0,0.48)"
+y = 30.0
+blur = 80.0
+color = "rgba(0,0,0,0.55)"
 
 [font]
 family = "ui-monospace"

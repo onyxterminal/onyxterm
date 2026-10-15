@@ -4,7 +4,7 @@ version = "2"
 kind = "light"
 
 [surface]
-window = "#F5F5F7"
+window = "#ECECEF"
 canvas = "#FFFFFF"
 raised = "#FFFFFF"
 sunken = "#F5F5F7"
@@ -13,13 +13,13 @@ settings_window = "#F2F2F4"
 [text]
 default = "#1D1D1F"
 muted = "#6E6E73"
-subtle = "#86868B"
+subtle = "#8A8A90"
 on_accent = "#FFFFFF"
 
 [border]
-default = "rgba(0,0,0,0.10)"
-muted = "rgba(0,0,0,0.08)"
-focus = "#007AFF"
+default = "rgba(0,0,0,0.11)"
+muted = "rgba(0,0,0,0.07)"
+focus = "rgba(0,122,255,0.5)"
 
 [accent]
 primary = "#007AFF"
@@ -28,23 +28,23 @@ primary_active = "#0062CC"
 selection = "rgba(0,122,255,0.12)"
 
 [status]
-running = "#34C759"
+running = "#248A3D"
 exited = "#86868B"
 failed = "#D70015"
 stopping = "#FF9500"
 starting = "#007AFF"
 unknown = "#C7C7CC"
-idle = "#C7C7CC"
+idle = "#B4B4B9"
 
 [chrome]
-control_fill = "rgba(0,0,0,0.05)"
+control_fill = "rgba(0,0,0,0.045)"
 icon_hover_fill = "rgba(0,0,0,0.06)"
-menu_fill = "rgba(255,255,255,0.94)"
+menu_fill = "rgba(255,255,255,0.985)"
 selected_shortcut = "rgba(255,255,255,0.82)"
 destructive = "#D70015"
 on_destructive = "#FFFFFF"
 warning = "#A35200"
-backdrop = "rgba(0,0,0,0.18)"
+backdrop = "rgba(0,0,0,0.16)"
 
 [ui_font]
 family = ".SystemUIFont"
@@ -80,11 +80,11 @@ icon_px = 12.0
 [editor]
 gutter_text = "rgba(0,0,0,0.28)"
 gutter_text_active = "rgba(0,0,0,0.72)"
-current_line = "rgba(0,0,0,0.04)"
-selection = "rgba(0,122,255,0.30)"
+current_line = "rgba(0,0,0,0.03)"
+selection = "rgba(0,122,255,0.32)"
 cursor = "#007AFF"
-diff_added = "#248A3D"
-diff_modified = "#007AFF"
+diff_added = "#2DA44E"
+diff_modified = "#0969DA"
 gutter_padding_px = 12.0
 cursor_width_px = 2.0
 
@@ -96,7 +96,7 @@ type = "#946200"
 function = "#0B62CC"
 macro = "#127A82"
 comment = "#737378"
-punctuation = "#57606A"
+punctuation = "#6E6E73"
 heading = "#0B62CC"
 
 [menu]
@@ -132,29 +132,29 @@ button_radius_px = 6.0
 focus_ring_px = 1.0
 unfocused_border_px = 0.5
 dim_unfocused = true
-unfocused_opacity = 0.82
+unfocused_opacity = 0.8
 pane_padding_x_px = 14.0
 pane_padding_top_px = 6.0
 pane_padding_bottom_px = 12.0
 
 [[shadow.tab]]
 spread = 0.5
-color = "rgba(0,0,0,0.10)"
+color = "rgba(0,0,0,0.11)"
 
 [[shadow.tab]]
 y = 1.0
 blur = 2.0
-color = "rgba(0,0,0,0.06)"
+color = "rgba(0,0,0,0.08)"
 
 [[shadow.menu]]
 y = 12.0
 blur = 32.0
-color = "rgba(0,0,0,0.14)"
+color = "rgba(0,0,0,0.16)"
 
 [[shadow.palette]]
-y = 18.0
-blur = 48.0
-color = "rgba(0,0,0,0.18)"
+y = 30.0
+blur = 80.0
+color = "rgba(0,0,0,0.16)"
 
 [font]
 family = "ui-monospace"
@@ -168,12 +168,12 @@ max_lines = 100000
 
 [ansi]
 black = "#24292F"
-red = "#CF222E"
+red = "#C4231C"
 green = "#1A7F37"
-yellow = "#9A6700"
-blue = "#0969DA"
-magenta = "#8250DF"
-cyan = "#1B7C83"
+yellow = "#946200"
+blue = "#0B62CC"
+magenta = "#8032C9"
+cyan = "#127A82"
 white = "#6E7781"
 bright_black = "#57606A"
 bright_red = "#A40E26"
