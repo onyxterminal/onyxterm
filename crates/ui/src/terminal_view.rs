@@ -3,10 +3,12 @@
 
 use crate::cell_paint::{merged_spans, CellGlyph, GlyphCache, GlyphKey};
 use crate::input::wheel_bytes;
-use crate::pixel_grid::{align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point};
+use crate::pixel_grid::{
+    align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point, snap_to_device,
+};
 use crate::theme::Theme;
 use gpui::{
-    canvas, fill, font, outline, point, px, size, App, BorderStyle, Bounds, Canvas, ContentMask, DispatchPhase, Font,
+    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, DispatchPhase, Font,
     FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Styled, TextRun,
     UnderlineStyle, Window,
@@ -30,6 +32,9 @@ const UNDERLINE_DESCENT_RATIO: f32 = 0.618;
 const STRIKE_RISE_RATIO: f32 = 0.27;
 const DIM_TEXT_OPACITY: f32 = 0.66;
 const DECORATION_THICKNESS_PX: f32 = 1.0;
+const CARET_WIDTH_PX: f32 = 1.0;
+const COPY_LINE_BLEED_PX: f32 = 4.0;
+const COPY_LINE_RADIUS_PX: f32 = 3.0;
 
 type CellSizeCache = Rc<RefCell<Option<(f32, Size<Pixels>)>>>;
 
@@ -178,6 +183,7 @@ pub struct TerminalStyle {
     pub font_size: Pixels,
     pub line_height: Pixels,
     pub selection: Hsla,
+    pub caret: Hsla,
     pub insets: ContentInsets,
     cell_size_cache: CellSizeCache,
     align_cache: crate::pixel_grid::AlignCache,
@@ -210,6 +216,7 @@ impl TerminalStyle {
             font_size: px(theme.font.size_px),
             line_height: px((theme.font.size_px * theme.font.line_height).round()),
             selection: theme.accent.selection,
+            caret: theme.accent.primary,
             insets: ContentInsets::from_theme(theme),
             cell_size_cache: Rc::new(RefCell::new(None)),
             align_cache: Rc::default(),
@@ -255,6 +262,7 @@ pub fn terminal_canvas(
             let bounds = device_aligned_content(bounds, style.insets, window);
             let is_focused = focus.is_some();
             let painter = FramePainter { frame: &frame, origin: bounds.origin, style: &style, is_focused };
+            painter.paint_copy_line(window);
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
                 painter.paint(window, cx);
                 if let Some(text) = focus.as_ref().and_then(|focus| focus.marked_text.as_deref()) {
@@ -370,6 +378,8 @@ struct FramePainter<'a> {
 #[derive(Clone, Copy)]
 struct TextMetrics {
     baseline: Pixels,
+    ascent: Pixels,
+    descent: Pixels,
     underline_drop: Pixels,
     strike_rise: Pixels,
 }
@@ -386,8 +396,8 @@ impl FramePainter<'_> {
             self.paint_backgrounds(row_index, row, window);
         }
         self.paint_selection(window);
-        self.paint_cursor(window);
         let metrics = self.text_metrics(window);
+        self.paint_caret(metrics, window);
         window.paint_layer(self.grid_bounds(), |window| {
             for (index, cells) in self.rows() {
                 let baseline_origin = self.baseline_origin(index, metrics.baseline, window);
@@ -446,6 +456,17 @@ impl FramePainter<'_> {
         }
     }
 
+    fn paint_copy_line(&self, window: &mut Window) {
+        let snapshot = &self.frame.snapshot;
+        let Some(cursor) = snapshot.cursor.filter(|_| snapshot.is_vi_mode) else {
+            return;
+        };
+        let row = self.cell_bounds(usize::from(cursor.row), 0, usize::from(snapshot.cols));
+        let bleed = px(COPY_LINE_BLEED_PX);
+        let bounds = Bounds::new(row.origin - point(bleed, px(0.0)), row.size + size(bleed * 2.0, px(0.0)));
+        window.paint_quad(fill(bounds, self.style.selection).corner_radii(px(COPY_LINE_RADIUS_PX)));
+    }
+
     fn paint_selection(&self, window: &mut Window) {
         let Some(span) = self.frame.snapshot.selection else {
             return;
@@ -460,25 +481,19 @@ impl FramePainter<'_> {
         }
     }
 
-    fn paint_cursor(&self, window: &mut Window) {
-        let Some(cursor) = self.frame.snapshot.cursor else {
+    fn paint_caret(&self, metrics: TextMetrics, window: &mut Window) {
+        let Some(cursor) = self.frame.snapshot.cursor.filter(|_| self.is_focused) else {
             return;
         };
-        let bounds = self.cell_bounds(usize::from(cursor.row), usize::from(cursor.col), 1);
-        let color = self.style.colors.foreground;
-        if self.is_focused {
-            window.paint_quad(fill(bounds, color));
-            return;
-        }
-        window.paint_quad(outline(bounds, color, BorderStyle::Solid));
+        let cell = self.cell_bounds(usize::from(cursor.row), usize::from(cursor.col), 1);
+        let row_origin = self.baseline_origin(usize::from(cursor.row), metrics.baseline, window);
+        let top = row_origin.y - metrics.ascent;
+        let origin = point(snap_to_device(cell.origin.x, window.scale_factor()), top);
+        let bounds = Bounds::new(origin, size(px(CARET_WIDTH_PX), metrics.ascent + metrics.descent));
+        window.paint_quad(fill(bounds, self.style.caret));
     }
 
-    fn text_color(&self, row_index: usize, col: usize, cell: &Cell) -> Hsla {
-        let cursor = self.frame.snapshot.cursor.filter(|_| self.is_focused);
-        let is_cursor_cell = cursor.is_some_and(|c| usize::from(c.row) == row_index && usize::from(c.col) == col);
-        if is_cursor_cell {
-            return self.style.colors.background;
-        }
+    fn text_color(&self, cell: &Cell) -> Hsla {
         let color = self.style.colors.foreground_of(cell);
         if cell.is_dim() {
             return color.opacity(DIM_TEXT_OPACITY);
@@ -492,6 +507,8 @@ impl FramePainter<'_> {
         let line = window.text_system().shape_line(reference.into(), self.style.font_size, &[run], None);
         TextMetrics {
             baseline: baseline_offset(&line, self.frame.cell.height),
+            ascent: line.ascent,
+            descent: line.descent,
             underline_drop: line.descent * UNDERLINE_DESCENT_RATIO,
             strike_rise: self.style.font_size * STRIKE_RISE_RATIO,
         }
@@ -503,9 +520,7 @@ impl FramePainter<'_> {
     }
 
     fn paint_underlines(&self, row: &PaintRow, underline_drop: Pixels, window: &mut Window) {
-        let colors = row.cells.iter().enumerate().map(|(col, cell)| {
-            cell.is_underline().then(|| self.text_color(row.index, col, cell))
-        });
+        let colors = row.cells.iter().map(|cell| cell.is_underline().then(|| self.text_color(cell)));
         let cell_width = self.frame.cell.width;
         for (span, color) in merged_spans(colors) {
             let origin = row.baseline_origin + point(cell_width * span.start as f32, underline_drop);
@@ -515,9 +530,7 @@ impl FramePainter<'_> {
     }
 
     fn paint_strikethroughs(&self, row: &PaintRow, strike_rise: Pixels, window: &mut Window) {
-        let colors = row.cells.iter().enumerate().map(|(col, cell)| {
-            cell.is_strikeout().then(|| self.text_color(row.index, col, cell))
-        });
+        let colors = row.cells.iter().map(|cell| cell.is_strikeout().then(|| self.text_color(cell)));
         let cell_width = self.frame.cell.width;
         for (span, color) in merged_spans(colors) {
             let origin = row.baseline_origin + point(cell_width * span.start as f32, -strike_rise);
@@ -550,7 +563,7 @@ impl FramePainter<'_> {
         let painted = if glyph.is_emoji {
             window.paint_emoji(origin, glyph.font_id, glyph.glyph_id, font_size)
         } else {
-            let color = self.text_color(row.index, col, cell);
+            let color = self.text_color(cell);
             window.paint_glyph(origin, glyph.font_id, glyph.glyph_id, font_size, color)
         };
         if let Err(err) = painted {
@@ -587,7 +600,7 @@ impl FramePainter<'_> {
         for col in span {
             let cell = &row.cells[col];
             let ch = if cell.ch < ' ' { ' ' } else { cell.ch };
-            let run = self.text_run(GlyphStyle::of(cell), self.text_color(row.index, col, cell), ch.len_utf8());
+            let run = self.text_run(GlyphStyle::of(cell), self.text_color(cell), ch.len_utf8());
             text.push(ch);
             match runs.last_mut() {
                 Some(last) if same_style(last, &run) => last.len += run.len,

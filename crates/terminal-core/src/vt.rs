@@ -137,7 +137,8 @@ impl Terminal {
         }
         let cursor = visible_cursor(&state.term);
         let selection = visible_selection(&state.term);
-        GridSnapshot { rows, cols, cells, cursor, selection }
+        let is_vi_mode = state.term.mode().contains(TermMode::VI);
+        GridSnapshot { rows, cols, cells, cursor, selection, is_vi_mode }
     }
 
     pub fn input_modes(&self) -> InputModes {

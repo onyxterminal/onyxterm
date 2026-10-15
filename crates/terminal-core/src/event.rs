@@ -152,6 +152,7 @@ pub struct GridSnapshot {
     pub cells: Vec<Cell>,
     pub cursor: Option<CursorPosition>,
     pub selection: Option<SelectionSpan>,
+    pub is_vi_mode: bool,
 }
 
 impl GridSnapshot {
@@ -163,6 +164,7 @@ impl GridSnapshot {
             cells: vec![Cell::empty(); count],
             cursor: None,
             selection: None,
+            is_vi_mode: false,
         }
     }
 }
