@@ -33,7 +33,6 @@ impl Shell {
         };
         let actions = WorkspaceMenuActions {
             select: self.menu_handler(cx, |shell, key, cx| shell.select_workspace_by_key(key, cx)),
-            rename: self.menu_handler(cx, |shell, key, cx| shell.start_rename_workspace(key, cx)),
             delete: self.menu_handler(cx, |shell, key, cx| shell.request_delete_workspace(key, cx)),
             create: {
                 let shell = cx.entity().downgrade();
@@ -72,7 +71,6 @@ impl Shell {
                 name: entry.workspace.name.clone().into(),
                 tab_count: entry.tabs.len(),
                 is_active: entry.workspace.id == active,
-                can_rename: true,
                 can_delete: !entry.is_scratch,
             })
             .collect()

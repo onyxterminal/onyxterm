@@ -7,7 +7,6 @@ pub enum Icon {
     Close,
     Chevron,
     Magnifier,
-    Pencil,
     Trash,
     Appearance,
     Terminal,
@@ -19,7 +18,6 @@ const GEAR_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/gear.svg");
 const CLOSE_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/close.svg");
 const CHEVRON_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/chevron.svg");
 const MAGNIFIER_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/magnifier.svg");
-const PENCIL_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/pencil.svg");
 const TRASH_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/trash.svg");
 const APPEARANCE_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/appearance.svg");
 const TERMINAL_SVG: &[u8] = include_bytes!("../../../../assets/icons/ui/terminal.svg");
@@ -34,7 +32,6 @@ static GEAR: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(GEAR_SVG));
 static CLOSE: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(CLOSE_SVG));
 static CHEVRON: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(CHEVRON_SVG));
 static MAGNIFIER: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(MAGNIFIER_SVG));
-static PENCIL: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(PENCIL_SVG));
 static TRASH: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(TRASH_SVG));
 static APPEARANCE: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(APPEARANCE_SVG));
 static TERMINAL: LazyLock<Arc<Image>> = LazyLock::new(|| svg_image(TERMINAL_SVG));
@@ -48,7 +45,6 @@ impl Icon {
             Icon::Close => &CLOSE,
             Icon::Chevron => &CHEVRON,
             Icon::Magnifier => &MAGNIFIER,
-            Icon::Pencil => &PENCIL,
             Icon::Trash => &TRASH,
             Icon::Appearance => &APPEARANCE,
             Icon::Terminal => &TERMINAL,

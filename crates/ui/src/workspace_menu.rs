@@ -19,7 +19,6 @@ const NAME_PLACEHOLDER: &str = "Workspace name";
 const SEARCH_PLACEHOLDER: &str = "Filter workspaces";
 const CHECK_MARK: &str = "\u{2713}";
 const CHECK_COLUMN_PX: f32 = 18.0;
-const ROW_ACTION_GAP_PX: f32 = 2.0;
 const ROW_ACTION_ICON_PX: f32 = 13.0;
 const NEW_WORKSPACE_GROUP: &str = "new-workspace";
 const SEARCH_GROUP: &str = "workspace-search";
@@ -30,7 +29,6 @@ pub struct WorkspaceMenuItem {
     pub name: SharedString,
     pub tab_count: usize,
     pub is_active: bool,
-    pub can_rename: bool,
     pub can_delete: bool,
 }
 
@@ -55,7 +53,6 @@ pub type ClickHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 #[derive(Clone)]
 pub struct WorkspaceMenuActions {
     pub select: SelectHandler,
-    pub rename: SelectHandler,
     pub delete: SelectHandler,
     pub create: ClickHandler,
 }
@@ -173,13 +170,10 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
     let group = SharedString::from(format!("workspace-row-{}", item.id));
     let style = row_style(group.clone());
     let count = menu_shortcut(tab_count_label(item.tab_count), &style, theme);
-    let has_actions = item.can_rename || item.can_delete;
-    let trailing = if has_actions {
-        let button_count = (item.can_rename as u8 + item.can_delete as u8) as f32;
-        let width = theme.pane_header.icon_button_px * button_count + ROW_ACTION_GAP_PX * (button_count - 1.0).max(0.0);
+    let trailing = if item.can_delete {
         div()
             .relative()
-            .w(px(width))
+            .w(px(theme.pane_header.icon_button_px))
             .h(px(theme.pane_header.icon_button_px))
             .flex_none()
             .child(
@@ -190,7 +184,7 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
                     .justify_end()
                     .child(count.group_hover(group.clone(), |style| style.invisible())),
             )
-            .child(row_actions(&item.id, group, theme, &actions, item.can_rename, item.can_delete))
+            .child(row_actions(&item.id, group, theme, &actions))
             .into_any_element()
     } else {
         count.into_any_element()
@@ -204,29 +198,17 @@ fn workspace_row(item: WorkspaceMenuItem, theme: &Theme, actions: WorkspaceMenuA
         .child(trailing)
 }
 
-fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions, can_rename: bool, can_delete: bool) -> Div {
-    let (rename, delete) = (actions.rename.clone(), actions.delete.clone());
-    let (rename_id, delete_id) = (id.clone(), id.clone());
-    let mut row = div()
+fn row_actions(id: &SharedString, group: SharedString, theme: &Theme, actions: &WorkspaceMenuActions) -> Div {
+    let (delete, delete_id) = (actions.delete.clone(), id.clone());
+    div()
         .absolute()
         .inset_0()
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(ROW_ACTION_GAP_PX))
         .invisible()
-        .group_hover(group, |style| style.visible());
-    if can_rename {
-        row = row.child(row_button(format!("rename-{id}"), Icon::Pencil, theme, move |window, cx| {
-            rename(&rename_id, window, cx)
-        }));
-    }
-    if can_delete {
-        row = row.child(row_button(format!("delete-{id}"), Icon::Trash, theme, move |window, cx| {
-            delete(&delete_id, window, cx)
-        }));
-    }
-    row
+        .group_hover(group, |style| style.visible())
+        .child(row_button(format!("delete-{id}"), Icon::Trash, theme, move |window, cx| delete(&delete_id, window, cx)))
 }
 
 fn row_button(
@@ -295,14 +277,13 @@ mod paint_tests {
     fn workspace_actions_survive_hover_during_paint() {
         let mut app = TestAppContext::single();
         let theme = Theme::load_default().expect("theme");
-        let rename_count = Rc::new(Cell::new(0));
+        let delete_count = Rc::new(Cell::new(0));
         let model = WorkspaceMenuModel {
             items: vec![WorkspaceMenuItem {
                 id: "workspace-1".into(),
                 name: "Project".into(),
                 tab_count: 2,
                 is_active: true,
-                can_rename: true,
                 can_delete: true,
             }],
             ssh_hosts: Vec::new(),
@@ -312,11 +293,10 @@ mod paint_tests {
         };
         let actions = WorkspaceMenuActions {
             select: Rc::new(|_, _, _| {}),
-            rename: {
-                let rename_count = rename_count.clone();
-                Rc::new(move |_, _, _| rename_count.set(rename_count.get() + 1))
+            delete: {
+                let delete_count = delete_count.clone();
+                Rc::new(move |_, _, _| delete_count.set(delete_count.get() + 1))
             },
-            delete: Rc::new(|_, _, _| {}),
             create: Rc::new(|_, _| {}),
         };
         let row_y = theme.menu.padding_px
@@ -327,12 +307,11 @@ mod paint_tests {
         let action_x = theme.menu.width_px
             - theme.menu.padding_px
             - theme.menu.row_padding_x_px
-            - theme.pane_header.icon_button_px * 1.5
-            - ROW_ACTION_GAP_PX;
+            - theme.pane_header.icon_button_px * 0.5;
         let (_menu, cx) = app.add_window_view(|_, _| TestMenu { model, theme, actions });
         cx.simulate_mouse_move(point(px(action_x), px(row_y)), None, Modifiers::default());
         cx.simulate_mouse_down(point(px(action_x), px(row_y)), MouseButton::Left, Modifiers::default());
-        assert_eq!(rename_count.get(), 1);
+        assert_eq!(delete_count.get(), 1);
         cx.simulate_mouse_move(point(px(390.0), px(290.0)), None, Modifiers::default());
     }
 }
