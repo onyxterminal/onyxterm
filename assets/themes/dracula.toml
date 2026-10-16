@@ -223,6 +223,7 @@ bright_white = "#FFFFFF"
 
 [input]
 option_as_meta = true
+copy_on_select = true
 
 [layout]
 tab_strip_height_px = 40

@@ -9,9 +9,9 @@ use crate::terminal_annotations::{Annotations, RowLabel, RowLink};
 use crate::pixel_grid::{
     align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point, snap_to_device,
 };
-use crate::theme::{FindTokens, Theme};
+use crate::theme::{FindTokens, InputTokens, Theme};
 use gpui::{
-    canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, CursorStyle, DispatchPhase, Font,
+    canvas, fill, font, point, px, size, App, Bounds, Canvas, ClipboardItem, ContentMask, CursorStyle, DispatchPhase, Font,
     FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Styled, TextRun,
     UnderlineStyle, Window,
@@ -263,6 +263,7 @@ pub struct TerminalStyle {
     pub annotations: AnnotationColors,
     pub find: FindTokens,
     pub insets: ContentInsets,
+    pub input: InputTokens,
     cell_size_cache: CellSizeCache,
     align_cache: crate::pixel_grid::AlignCache,
     glyph_cache: GlyphCache,
@@ -298,6 +299,7 @@ impl TerminalStyle {
             annotations: AnnotationColors::from_theme(theme),
             find: theme.find,
             insets: ContentInsets::from_theme(theme),
+            input: theme.input,
             cell_size_cache: Rc::new(RefCell::new(None)),
             align_cache: Rc::default(),
             glyph_cache: Rc::default(),
@@ -379,7 +381,8 @@ pub fn terminal_canvas(
             }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
             let links = Rc::new(frame.annotations.links);
-            register_mouse_handlers(pane, PaneArea { bounds, cell: frame.cell, grid, hitbox, links }, window);
+            let area = PaneArea { bounds, cell: frame.cell, grid, hitbox, links, input: style.input };
+            register_mouse_handlers(pane, area, window);
         },
     )
     .size_full()
@@ -405,6 +408,7 @@ struct PaneArea {
     grid: GridSize,
     hitbox: Hitbox,
     links: Rc<Vec<RowLink>>,
+    input: InputTokens,
 }
 
 impl PaneArea {
@@ -511,15 +515,25 @@ fn handle_mouse_up(pane: &TerminalPane, area: &PaneArea, event: &MouseUpEvent, w
     if event.button != MouseButton::Left {
         return;
     }
-    let pressed = {
+    let (pressed, was_selecting) = {
         let mut pointer = pane.pointer.borrow_mut();
-        pointer.is_selecting = false;
-        pointer.pressed_link.take()
+        let was_selecting = std::mem::take(&mut pointer.is_selecting);
+        (pointer.pressed_link.take(), was_selecting)
     };
     let released = area.link_at(event.position, window);
     if let Some(link) = pressed.filter(|pressed| Some(pressed) == released.as_ref()) {
         pane.handle.terminal().clear_selection();
         (pane.opener)(&link.link, window, cx);
+        return;
+    }
+    if was_selecting && area.input.copy_on_select {
+        copy_selection(pane, cx);
+    }
+}
+
+fn copy_selection(pane: &TerminalPane, cx: &mut App) {
+    if let Some(text) = pane.handle.terminal().selection_text() {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
 }
 

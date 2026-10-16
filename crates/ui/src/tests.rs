@@ -807,6 +807,11 @@ fn theme_defaults_option_to_meta() {
 }
 
 #[test]
+fn theme_defaults_to_copy_on_select() {
+    assert!(Theme::load_default().unwrap().input.copy_on_select);
+}
+
+#[test]
 fn split_ratio_follows_the_pointer_and_clamps_to_minimum_pane_size() {
     use crate::tabs::clamp_split_ratio;
     assert!((clamp_split_ratio(300.0, 1000.0, 120.0) - 0.3).abs() < 1e-6);
