@@ -468,7 +468,12 @@ fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEven
         return;
     }
     let (point, side) = area.point_at(event.position);
-    pane.handle.terminal().start_selection(selection_kind_for(event.click_count), point, side);
+    let terminal = pane.handle.terminal();
+    if event.modifiers.shift && terminal.has_selection() {
+        terminal.update_selection(point, side);
+    } else {
+        terminal.start_selection(selection_kind_for(event.click_count), point, side);
+    }
     let mut pointer = pane.pointer.borrow_mut();
     pointer.is_selecting = true;
     pointer.pressed_link = area.link_at(event.position, window);

@@ -328,6 +328,10 @@ impl Terminal {
         }
     }
 
+    pub fn has_selection(&self) -> bool {
+        self.inner.state.lock().term.selection.is_some()
+    }
+
     pub fn select_all(&self) {
         let mut state = self.inner.state.lock();
         let grid = state.term.grid();

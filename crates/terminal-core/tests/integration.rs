@@ -611,3 +611,13 @@ fn kitty_keyboard_flags_follow_push_query_and_pop() {
     terminal.feed(b"\x1b[<u");
     assert_eq!(terminal.input_modes().kitty, KittyKeyboard::default());
 }
+
+#[test]
+fn has_selection_tracks_started_and_cleared_selections() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    assert!(!terminal.has_selection());
+    terminal.start_selection(SelectionKind::Simple, GridPoint { row: 0, col: 0 }, Side::Left);
+    assert!(terminal.has_selection());
+    terminal.clear_selection();
+    assert!(!terminal.has_selection());
+}
