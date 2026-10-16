@@ -1,20 +1,20 @@
 use crate::event::{
-    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
-    TerminalError, TerminalEvent, TerminalOutput,
+    Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes,
+    SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
 use crate::search::TextMatch;
 use crate::shell_marks::{MarkScanner, ShellMark};
-use alacritty_terminal::event::{Event as AlacEvent, EventListener};
+use alacritty_terminal::event::{Event as AlacEvent, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Grid, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::{Cell as AlacCell, Flags};
 use alacritty_terminal::term::test::TermSize;
-use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+use alacritty_terminal::term::{ClipboardType, Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vi_mode::ViMotion;
-use alacritty_terminal::vte::ansi::{Color, Handler, Hyperlink, NamedColor, Processor};
+use alacritty_terminal::vte::ansi::{Color, Handler, Hyperlink, NamedColor, Processor, Rgb};
 use domain::TerminalSessionId;
 use parking_lot::Mutex;
 use std::io::Read;
@@ -52,6 +52,16 @@ struct TerminalInner {
     state: Mutex<TermState>,
     events: broadcast::Sender<TerminalEvent>,
     decoder: Mutex<Decoder>,
+    requests: Arc<Mutex<Vec<TermRequest>>>,
+}
+
+type ColorFormatter = Arc<dyn Fn(Rgb) -> String + Sync + Send>;
+type SizeFormatter = Arc<dyn Fn(WindowSize) -> String + Sync + Send>;
+
+enum TermRequest {
+    Write(String),
+    Color(usize, ColorFormatter),
+    TextAreaSize(SizeFormatter),
 }
 
 #[derive(Default)]
@@ -64,6 +74,8 @@ struct TermState {
     term: Term<TermListener>,
     grid_size: GridSize,
     blocks: CommandBlocks,
+    palette: Option<ColorPalette>,
+    cell_pixels: CellPixels,
 }
 
 impl TermState {
@@ -75,6 +87,27 @@ impl TermState {
         };
         self.term.set_hyperlink(link);
         change
+    }
+
+    fn answer(&self, request: TermRequest) -> Option<String> {
+        match request {
+            TermRequest::Write(text) => Some(text),
+            TermRequest::Color(index, format) => self.color_at(index).map(|color| format(color)),
+            TermRequest::TextAreaSize(format) => Some(format(self.window_size())),
+        }
+    }
+
+    fn color_at(&self, index: usize) -> Option<Rgb> {
+        self.term.colors()[index].or_else(|| self.palette?.color_at(index))
+    }
+
+    fn window_size(&self) -> WindowSize {
+        WindowSize {
+            num_lines: self.grid_size.rows,
+            num_cols: self.grid_size.cols,
+            cell_width: self.cell_pixels.width,
+            cell_height: self.cell_pixels.height,
+        }
     }
 }
 
@@ -104,6 +137,12 @@ impl TerminalInner {
             let _ = self.events.send(event);
         }
     }
+
+    fn take_replies(&self) -> Vec<u8> {
+        let state = self.state.lock();
+        let requests = std::mem::take(&mut *self.requests.lock());
+        requests.into_iter().filter_map(|request| state.answer(request)).flat_map(String::into_bytes).collect()
+    }
 }
 
 fn block_link(id: BlockId) -> Hyperlink {
@@ -118,6 +157,7 @@ fn linked_block(cell: &AlacCell) -> Option<BlockId> {
 
 struct TermListener {
     events: broadcast::Sender<TerminalEvent>,
+    requests: Arc<Mutex<Vec<TermRequest>>>,
 }
 
 impl EventListener for TermListener {
@@ -129,6 +169,12 @@ impl EventListener for TermListener {
             AlacEvent::Exit => {
                 let _ = self.events.send(TerminalEvent::Exited { code: UNKNOWN_EXIT_CODE });
             }
+            AlacEvent::ClipboardStore(ClipboardType::Clipboard, text) => {
+                let _ = self.events.send(TerminalEvent::ClipboardStore(text));
+            }
+            AlacEvent::PtyWrite(text) => self.requests.lock().push(TermRequest::Write(text)),
+            AlacEvent::ColorRequest(index, format) => self.requests.lock().push(TermRequest::Color(index, format)),
+            AlacEvent::TextAreaSizeRequest(format) => self.requests.lock().push(TermRequest::TextAreaSize(format)),
             _ => {}
         }
     }
@@ -147,7 +193,8 @@ impl Terminal {
 
     pub fn new(id: TerminalSessionId, size: GridSize, scrollback: usize) -> Self {
         let (tx, _rx) = broadcast::channel(EVENTS_CAPACITY);
-        let listener = TermListener { events: tx.clone() };
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let listener = TermListener { events: tx.clone(), requests: requests.clone() };
         let cfg = TermConfig {
             scrolling_history: scrollback.max(1),
             ..TermConfig::default()
@@ -157,9 +204,16 @@ impl Terminal {
         Self {
             inner: Arc::new(TerminalInner {
                 id,
-                state: Mutex::new(TermState { term, grid_size: size, blocks: CommandBlocks::default() }),
+                state: Mutex::new(TermState {
+                    term,
+                    grid_size: size,
+                    blocks: CommandBlocks::default(),
+                    palette: None,
+                    cell_pixels: CellPixels::default(),
+                }),
                 events: tx,
                 decoder: Mutex::new(Decoder::default()),
+                requests,
             }),
         }
     }
@@ -171,6 +225,18 @@ impl Terminal {
     pub fn feed(&self, bytes: &[u8]) {
         let changes = self.inner.process(bytes);
         self.inner.announce(changes);
+    }
+
+    pub fn take_replies(&self) -> Vec<u8> {
+        self.inner.take_replies()
+    }
+
+    pub fn set_palette(&self, palette: ColorPalette) {
+        self.inner.state.lock().palette = Some(palette);
+    }
+
+    pub fn set_cell_pixels(&self, cell_pixels: CellPixels) {
+        self.inner.state.lock().cell_pixels = cell_pixels;
     }
 
     pub fn shell_phase(&self) -> ShellPhase {
@@ -450,6 +516,7 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
             Ok(0) => break,
             Ok(n) => {
                 let changes = inner.process(&buf[..n]);
+                write_replies(&inner, &pty);
                 let _ = inner.events.send(TerminalEvent::Output(TerminalOutput {
                     bytes: buf[..n].to_vec(),
                 }));
@@ -461,6 +528,16 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
     }
     let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
     let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn write_replies(inner: &TerminalInner, pty: &PtyHandle) {
+    let replies = inner.take_replies();
+    if replies.is_empty() {
+        return;
+    }
+    if let Err(err) = pty.write(&replies) {
+        tracing::warn!(?err, "pty reply write failed");
+    }
 }
 
 fn selection_type(kind: SelectionKind) -> SelectionType {

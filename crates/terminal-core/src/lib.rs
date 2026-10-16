@@ -11,12 +11,13 @@ pub mod shell_marks;
 pub mod vt;
 
 pub use event::{
-    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes, SelectionKind, SelectionSpan,
-    TerminalError, TerminalEvent, TerminalOutput,
+    xterm_indexed_rgb, Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot,
+    InputModes, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 pub use command_blocks::{BlockId, BlockOutcome, BlockStatus, CommandBlock, CommandBlocks, ShellPhase};
 pub use alacritty_terminal::index::Side;
 pub use alacritty_terminal::vi_mode::ViMotion;
+pub use alacritty_terminal::vte::ansi::Rgb;
 pub use search::{MatchPoint, TextMatch};
 pub use pty::{ForegroundJob, NativePty, Pty, PtyHandle};
 pub use tokio::sync::broadcast;

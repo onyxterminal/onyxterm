@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use domain::TerminalSessionId;
 use terminal_core::event::{
-    CellColor, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind, SelectionSpan, TerminalEvent,
+    CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind,
+    SelectionSpan, TerminalEvent,
 };
-use terminal_core::{BlockStatus, ShellPhase, Side, ViMotion};
+use terminal_core::{BlockStatus, Rgb, ShellPhase, Side, ViMotion};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
 use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
@@ -520,4 +521,72 @@ fn revealing_a_scrollback_match_scrolls_it_into_view() {
     terminal.reveal_line(hit.start.line);
     let row = hit.start.line + terminal.display_offset() as i32;
     assert!((0..3).contains(&row));
+}
+
+fn gray(level: u8) -> Rgb {
+    Rgb { r: level, g: level, b: level }
+}
+
+#[test]
+fn cursor_position_and_device_attribute_queries_queue_replies() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"ab\x1b[6n\x1b[c");
+    assert_eq!(terminal.take_replies(), b"\x1b[1;3R\x1b[?6c".to_vec());
+    assert!(terminal.take_replies().is_empty());
+}
+
+#[test]
+fn color_queries_answer_from_the_palette_and_osc_overrides() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.set_palette(ColorPalette {
+        foreground: gray(0xee),
+        background: gray(0x11),
+        cursor: gray(0x80),
+        ansi: [gray(1); 16],
+    });
+    terminal.feed(b"\x1b]11;?\x07\x1b]4;196;?\x07\x1b]10;#123456\x07\x1b]10;?\x07");
+    let replies = String::from_utf8(terminal.take_replies()).expect("utf8");
+    assert_eq!(
+        replies,
+        "\x1b]11;rgb:1111/1111/1111\x07\x1b]4;196;rgb:ffff/0000/0000\x07\x1b]10;rgb:1212/3434/5656\x07"
+    );
+}
+
+#[test]
+fn text_area_size_query_reports_pixels() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.set_cell_pixels(CellPixels { width: 8, height: 16 });
+    terminal.feed(b"\x1b[14t");
+    assert_eq!(terminal.take_replies(), b"\x1b[4;48;80t".to_vec());
+}
+
+#[test]
+fn osc52_copy_surfaces_a_clipboard_event_and_paste_queries_stay_unanswered() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    let mut events = terminal.subscribe();
+    terminal.feed(b"\x1b]52;c;aGVsbG8=\x07\x1b]52;c;?\x07");
+    assert!(matches!(events.try_recv(), Ok(TerminalEvent::ClipboardStore(text)) if text == "hello"));
+    assert!(terminal.take_replies().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_writes_query_replies_back_to_the_pty() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let script = "stty raw -echo; printf '\\033[6n'; reply=$(dd bs=1 count=6 2>/dev/null); \
+                  printf 'reply:%s:end' \"$(printf %s \"$reply\" | tr '\\033' E)\"; sleep 1";
+    let command = ShellCommand {
+        program: PathBuf::from(SHELL),
+        args: vec!["-c".to_string(), script.to_string()],
+        cwd: cwd(),
+    };
+    let id = service.spawn_command(command, GridSize::new(20, 5)).expect("spawn");
+    let mut rx = service.events(id).expect("events receiver");
+    let mut output = String::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !output.contains(":end") {
+        if let Ok(Ok(TerminalEvent::Output(out))) = timeout(Duration::from_millis(500), rx.recv()).await {
+            output.push_str(&String::from_utf8_lossy(&out.bytes));
+        }
+    }
+    assert!(output.contains("reply:E[1;1R:end"), "unexpected output: {output:?}");
 }

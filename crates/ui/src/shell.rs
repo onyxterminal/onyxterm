@@ -110,6 +110,7 @@ struct EventBatch {
     exited: bool,
     has_command_started: bool,
     finished: Vec<CommandBlock>,
+    clipboard: Option<String>,
 }
 
 impl EventBatch {
@@ -124,6 +125,7 @@ impl EventBatch {
             TerminalEvent::Resized { .. } => self.has_output = true,
             TerminalEvent::CommandStarted(_) => self.has_command_started = true,
             TerminalEvent::CommandFinished(block) => self.finished.push(block),
+            TerminalEvent::ClipboardStore(text) => self.clipboard = Some(text),
         }
     }
 }
@@ -1213,6 +1215,9 @@ impl Shell {
             if let Some(record) = self.model.panel_mut(panel) {
                 record.panel.title = title;
             }
+        }
+        if let Some(text) = batch.clipboard {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
         if batch.exited {
             self.close_pane(panel, cx);

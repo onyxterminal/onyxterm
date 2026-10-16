@@ -1,7 +1,17 @@
 use crate::command_blocks::{BlockId, CommandBlock};
 use alacritty_terminal::term::cell::Flags;
+use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+const ANSI_COLOR_COUNT: usize = 16;
+const LAST_INDEXED_COLOR: usize = 255;
+const FOREGROUND_INDEX: usize = NamedColor::Foreground as usize;
+const BACKGROUND_INDEX: usize = NamedColor::Background as usize;
+const CURSOR_INDEX: usize = NamedColor::Cursor as usize;
+const CUBE_START: u8 = 16;
+const GRAYSCALE_START: u8 = 232;
+const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
 #[derive(Debug, Error)]
 pub enum TerminalError {
@@ -52,6 +62,44 @@ pub enum TerminalEvent {
     TitleChanged(String),
     CommandStarted(BlockId),
     CommandFinished(CommandBlock),
+    ClipboardStore(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColorPalette {
+    pub foreground: Rgb,
+    pub background: Rgb,
+    pub cursor: Rgb,
+    pub ansi: [Rgb; 16],
+}
+
+impl ColorPalette {
+    pub fn color_at(&self, index: usize) -> Option<Rgb> {
+        match index {
+            0..ANSI_COLOR_COUNT => Some(self.ansi[index]),
+            ANSI_COLOR_COUNT..=LAST_INDEXED_COLOR => Some(xterm_indexed_rgb(index as u8)),
+            FOREGROUND_INDEX => Some(self.foreground),
+            BACKGROUND_INDEX => Some(self.background),
+            CURSOR_INDEX => Some(self.cursor),
+            _ => None,
+        }
+    }
+}
+
+pub fn xterm_indexed_rgb(index: u8) -> Rgb {
+    if index >= GRAYSCALE_START {
+        let level = 8 + (index - GRAYSCALE_START) * 10;
+        return Rgb { r: level, g: level, b: level };
+    }
+    let cube = index.saturating_sub(CUBE_START);
+    let level = |n: u8| CUBE_LEVELS[(n % 6) as usize];
+    Rgb { r: level(cube / 36), g: level(cube / 6), b: level(cube) }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CellPixels {
+    pub width: u16,
+    pub height: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
