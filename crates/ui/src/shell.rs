@@ -1192,6 +1192,7 @@ impl Shell {
         };
         FIRST_PTY_SPAWNED.reach();
         let handle = self.terminals.handle_for(session)?;
+        handle.terminal().set_palette(self.style.color_palette());
         let events = watch_session(panel, handle.subscribe(), cx);
         self.panes.insert(panel, Pane {
             session,

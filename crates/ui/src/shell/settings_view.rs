@@ -130,6 +130,10 @@ impl Shell {
         self.state.theme = self.state.settings.theme_tokens();
         let family = resolve_terminal_family(&self.state.theme.font, cx);
         self.style = TerminalStyle::from_theme(&self.state.theme, family);
+        let palette = self.style.color_palette();
+        for pane in self.panes.values() {
+            pane.terminal.handle.terminal().set_palette(palette);
+        }
     }
 
     pub(super) fn save_setting(&mut self, key: &str, value: &str) {

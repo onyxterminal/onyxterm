@@ -206,6 +206,7 @@ impl Shell {
 
     fn sync_grids(&self, layout: &PaneLayout, window: &Window) {
         let cell = self.style.cell_size(window);
+        let cell_pixels = self.style.cell_pixels(window);
         let current = |panel| self.panes.get(&panel).map(|pane| pane.terminal.handle.grid_size());
         let grid_for = |rect: Rect| island_grid(size(px(rect.width), px(rect.height)), &self.style, cell);
         for (panel, grid) in grid_changes(&layout.islands, current, grid_for) {
@@ -213,6 +214,7 @@ impl Shell {
                 continue;
             };
             tracing::debug!(%panel, rows = grid.rows, cols = grid.cols, "pty resize");
+            pane.terminal.handle.terminal().set_cell_pixels(cell_pixels);
             if let Err(err) = pane.terminal.handle.resize(grid.rows, grid.cols) {
                 tracing::warn!(?err, "terminal resize failed");
             }

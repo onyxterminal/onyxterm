@@ -20,7 +20,8 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 use terminal_core::{
-    Cell, CellColor, CursorPosition, GridPoint, GridSize, GridSnapshot, SelectionKind, Side, TerminalHandle, TextMatch,
+    Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, Rgb, SelectionKind,
+    Side, TerminalHandle, TextMatch,
 };
 
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
@@ -29,9 +30,6 @@ const LINE_CLICK_COUNT: usize = 3;
 const MIN_COLS: u16 = 2;
 const MIN_ROWS: u16 = 1;
 const ANSI_COLOR_COUNT: u8 = 16;
-const CUBE_START: u8 = 16;
-const GRAYSCALE_START: u8 = 232;
-const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 const REFERENCE_GLYPH: char = 'm';
 const UNDERLINE_DESCENT_RATIO: f32 = 0.618;
 const STRIKE_RISE_RATIO: f32 = 0.27;
@@ -99,13 +97,14 @@ impl TerminalColors {
 }
 
 pub fn xterm_indexed_rgb(index: u8) -> u32 {
-    if index >= GRAYSCALE_START {
-        let level = 8 + (index - GRAYSCALE_START) * 10;
-        return pack_rgb(level, level, level);
-    }
-    let cube = index.saturating_sub(CUBE_START);
-    let level = |n: u8| CUBE_LEVELS[(n % 6) as usize];
-    pack_rgb(level(cube / 36), level(cube / 6), level(cube))
+    let color = terminal_core::xterm_indexed_rgb(index);
+    pack_rgb(color.r, color.g, color.b)
+}
+
+fn rgb_of(color: Hsla) -> Rgb {
+    let rgba = color.to_rgb();
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Rgb { r: channel(rgba.r), g: channel(rgba.g), b: channel(rgba.b) }
 }
 
 fn pack_rgb(r: u8, g: u8, b: u8) -> u32 {
@@ -300,6 +299,21 @@ impl TerminalStyle {
             align_cache: Rc::default(),
             glyph_cache: Rc::default(),
         }
+    }
+
+    pub fn color_palette(&self) -> ColorPalette {
+        ColorPalette {
+            foreground: rgb_of(self.colors.foreground),
+            background: rgb_of(self.colors.background),
+            cursor: rgb_of(self.caret),
+            ansi: self.colors.ansi.map(rgb_of),
+        }
+    }
+
+    pub fn cell_pixels(&self, window: &Window) -> CellPixels {
+        let cell = self.cell_size(window);
+        let device = |length: Pixels| (f32::from(length) * window.scale_factor()).round() as u16;
+        CellPixels { width: device(cell.width), height: device(cell.height) }
     }
 
     fn font(&self) -> Font {
