@@ -19,6 +19,7 @@ use alacritty_terminal::vte::ansi::{Color, Handler, Hyperlink, NamedColor, Proce
 use domain::TerminalSessionId;
 use parking_lot::Mutex;
 use std::io::Read;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -161,6 +162,16 @@ impl TerminalInner {
             };
             let _ = self.events.send(event);
         }
+    }
+
+    fn sync_deadline(&self) -> Option<Instant> {
+        self.decoder.lock().processor.sync_timeout().sync_timeout()
+    }
+
+    fn flush_sync(&self) {
+        let mut decoder = self.decoder.lock();
+        let mut state = self.state.lock();
+        decoder.processor.stop_sync(&mut state.term);
     }
 
     fn take_replies(&self) -> Vec<u8> {
@@ -547,6 +558,15 @@ impl TerminalHandle {
 
 fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, pty: PtyHandle) {
     let mut buf = [0u8; 8192];
+    let mut announced_deadline = None;
+    let (deadlines, pending_deadlines) = mpsc::channel();
+    let (flusher, flusher_pty) = (inner.clone(), pty.clone());
+    let spawned = std::thread::Builder::new()
+        .name(format!("term-sync-{}", inner.id))
+        .spawn(move || run_sync_flusher(flusher, pending_deadlines, flusher_pty));
+    if let Err(err) = spawned {
+        tracing::warn!(?err, "sync flusher spawn failed");
+    }
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
@@ -557,6 +577,11 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
                     bytes: buf[..n].to_vec(),
                 }));
                 inner.announce(changes);
+                let deadline = inner.sync_deadline();
+                if let Some(pending) = deadline.filter(|_| deadline != announced_deadline) {
+                    let _ = deadlines.send(pending);
+                }
+                announced_deadline = deadline;
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(_) => break,
@@ -564,6 +589,19 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
     }
     let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
     let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn run_sync_flusher(inner: Arc<TerminalInner>, deadlines: mpsc::Receiver<Instant>, pty: PtyHandle) {
+    while let Ok(deadline) = deadlines.recv() {
+        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        let is_expired = inner.sync_deadline().is_some_and(|pending| pending <= Instant::now());
+        if !is_expired {
+            continue;
+        }
+        inner.flush_sync();
+        write_replies(&inner, &pty);
+        let _ = inner.events.send(TerminalEvent::Output(TerminalOutput::empty()));
+    }
 }
 
 fn mouse_modes(mode: &TermMode) -> MouseModes {

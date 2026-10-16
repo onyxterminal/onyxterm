@@ -654,3 +654,20 @@ fn cursor_style_defaults_to_a_steady_beam_and_follows_decscusr() {
     terminal.feed(b"\x1b[0 q");
     assert_eq!(terminal.snapshot_grid().cursor_style, DEFAULT_CURSOR_STYLE);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unterminated_synchronized_update_flushes_after_its_timeout() {
+    let service = InMemoryTerminalService::new(Box::new(NativePty::new()));
+    let script = r"printf '\033[?2026hstuck-sync'; sleep 3";
+    let args = vec!["-c".to_string(), script.to_string()];
+    let command = ShellCommand { program: PathBuf::from(SHELL), args, cwd: cwd() };
+    let id = service.spawn_command(command, GridSize::new(20, 5)).expect("spawn");
+    let handle = service.handle_for(id).expect("handle");
+    let first_row = || handle.snapshot_grid().cells.iter().take(10).map(|cell| cell.ch).collect::<String>();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && first_row() != "stuck-sync" {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(first_row(), "stuck-sync");
+    service.terminate_session(id).expect("terminate");
+}
