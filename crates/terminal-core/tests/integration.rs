@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use domain::TerminalSessionId;
 use terminal_core::event::{
-    CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, InputModes, SelectionKind,
-    SelectionSpan, TerminalEvent,
+    CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, InputModes, KittyKeyboard,
+    SelectionKind, SelectionSpan, TerminalEvent,
 };
 use terminal_core::{BlockStatus, Rgb, ShellPhase, Side, ViMotion};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
@@ -589,4 +589,15 @@ async fn session_writes_query_replies_back_to_the_pty() {
         }
     }
     assert!(output.contains("reply:E[1;1R:end"), "unexpected output: {output:?}");
+}
+
+#[test]
+fn kitty_keyboard_flags_follow_push_query_and_pop() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"\x1b[>9u\x1b[?u");
+    let expected = KittyKeyboard { disambiguate: true, report_all_keys: true, ..KittyKeyboard::default() };
+    assert_eq!(terminal.input_modes().kitty, expected);
+    assert_eq!(terminal.take_replies(), b"\x1b[?9u".to_vec());
+    terminal.feed(b"\x1b[<u");
+    assert_eq!(terminal.input_modes().kitty, KittyKeyboard::default());
 }

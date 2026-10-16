@@ -165,6 +165,16 @@ pub struct InputModes {
     pub bracketed_paste: bool,
     pub alt_screen: bool,
     pub mouse_reporting: bool,
+    pub kitty: KittyKeyboard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct KittyKeyboard {
+    pub disambiguate: bool,
+    pub report_event_types: bool,
+    pub report_alternate_keys: bool,
+    pub report_all_keys: bool,
+    pub report_associated_text: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

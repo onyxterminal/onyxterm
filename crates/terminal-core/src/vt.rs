@@ -1,6 +1,6 @@
 use crate::event::{
     Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes,
-    SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    KittyKeyboard, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
@@ -197,6 +197,7 @@ impl Terminal {
         let listener = TermListener { events: tx.clone(), requests: requests.clone() };
         let cfg = TermConfig {
             scrolling_history: scrollback.max(1),
+            kitty_keyboard: true,
             ..TermConfig::default()
         };
         let dim = TermSize::new(size.cols as usize, size.rows as usize);
@@ -295,6 +296,7 @@ impl Terminal {
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
             alt_screen: mode.contains(TermMode::ALT_SCREEN),
             mouse_reporting: mode.intersects(TermMode::MOUSE_MODE),
+            kitty: kitty_keyboard(mode),
         }
     }
 
@@ -528,6 +530,16 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
     }
     let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
     let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn kitty_keyboard(mode: &TermMode) -> KittyKeyboard {
+    KittyKeyboard {
+        disambiguate: mode.contains(TermMode::DISAMBIGUATE_ESC_CODES),
+        report_event_types: mode.contains(TermMode::REPORT_EVENT_TYPES),
+        report_alternate_keys: mode.contains(TermMode::REPORT_ALTERNATE_KEYS),
+        report_all_keys: mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC),
+        report_associated_text: mode.contains(TermMode::REPORT_ASSOCIATED_TEXT),
+    }
 }
 
 fn write_replies(inner: &TerminalInner, pty: &PtyHandle) {
