@@ -14,7 +14,7 @@ use crate::terminal_view::{
 };
 use domain::{Axis, LayoutNode, PanelId};
 use gpui::{px, Modifiers};
-use terminal_core::{Cell, CellColor, GridPoint, GridSize, InputModes, SelectionKind, Side};
+use terminal_core::{Cell, CellColor, GridPoint, GridSize, InputModes, KittyKeyboard, SelectionKind, Side};
 
 #[test]
 fn theme_loads_from_assets() {
@@ -152,7 +152,114 @@ fn input_encodes_control_letters_and_option_as_meta() {
     assert_eq!(encode(Modifiers::control(), "c", None), Some(vec![0x03]));
     assert_eq!(encode(Modifiers::control(), "[", None), Some(vec![0x1b]));
     assert_eq!(encode(Modifiers::alt(), "b", Some("\u{222b}")), Some(b"\x1bb".to_vec()));
-    assert_eq!(encode(Modifiers::alt(), "left", None), Some(b"\x1b\x1b[D".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "backspace", None), Some(b"\x1b\x7f".to_vec()));
+}
+
+fn kitty_modes() -> InputModes {
+    InputModes { kitty: KittyKeyboard { disambiguate: true, ..KittyKeyboard::default() }, ..InputModes::default() }
+}
+
+fn encode_kitty(modifiers: Modifiers, key: &str, key_char: Option<&str>) -> Option<Vec<u8>> {
+    crate::input::encode_keystroke(&keystroke(modifiers, key, key_char), kitty_modes())
+}
+
+#[test]
+fn input_shift_and_option_enter_send_escaped_return_in_legacy_mode() {
+    assert_eq!(encode(Modifiers::shift(), "enter", Some("\n")), Some(b"\x1b\r".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "enter", Some("\n")), Some(b"\x1b\r".to_vec()));
+    assert_eq!(encode(Modifiers::alt() | Modifiers::shift(), "enter", Some("\n")), Some(b"\x1b\r".to_vec()));
+}
+
+#[test]
+fn input_option_left_and_right_jump_words_in_legacy_mode() {
+    assert_eq!(encode(Modifiers::alt(), "left", None), Some(b"\x1bb".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "right", None), Some(b"\x1bf".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "up", None), Some(b"\x1b[1;3A".to_vec()));
+}
+
+#[test]
+fn input_modified_cursor_and_editing_keys_use_xterm_modifier_parameters() {
+    assert_eq!(encode(Modifiers::shift(), "left", None), Some(b"\x1b[1;2D".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "right", None), Some(b"\x1b[1;5C".to_vec()));
+    assert_eq!(encode(Modifiers::alt() | Modifiers::shift(), "left", None), Some(b"\x1b[1;4D".to_vec()));
+    assert_eq!(encode(Modifiers::control() | Modifiers::shift(), "up", None), Some(b"\x1b[1;6A".to_vec()));
+    assert_eq!(encode(Modifiers::shift(), "home", None), Some(b"\x1b[1;2H".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "end", None), Some(b"\x1b[1;5F".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "pageup", None), Some(b"\x1b[5;5~".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "pagedown", None), Some(b"\x1b[6;3~".to_vec()));
+    assert_eq!(encode(Modifiers::shift(), "delete", None), Some(b"\x1b[3;2~".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "insert", None), Some(b"\x1b[2;5~".to_vec()));
+    assert_eq!(encode(Modifiers::none(), "delete", None), Some(b"\x1b[3~".to_vec()));
+}
+
+#[test]
+fn input_encodes_function_keys_with_and_without_modifiers() {
+    let none = Modifiers::none();
+    let unmodified = [
+        ("f1", "\x1bOP"), ("f2", "\x1bOQ"), ("f3", "\x1bOR"), ("f4", "\x1bOS"), ("f5", "\x1b[15~"),
+        ("f6", "\x1b[17~"), ("f7", "\x1b[18~"), ("f8", "\x1b[19~"), ("f9", "\x1b[20~"), ("f10", "\x1b[21~"),
+        ("f11", "\x1b[23~"), ("f12", "\x1b[24~"),
+    ];
+    for (key, expected) in unmodified {
+        assert_eq!(encode(none, key, None), Some(expected.as_bytes().to_vec()), "{key}");
+    }
+    assert_eq!(encode(Modifiers::shift(), "f1", None), Some(b"\x1b[1;2P".to_vec()));
+    assert_eq!(encode(Modifiers::control(), "f4", None), Some(b"\x1b[1;5S".to_vec()));
+    assert_eq!(encode(Modifiers::alt(), "f5", None), Some(b"\x1b[15;3~".to_vec()));
+    assert_eq!(encode(Modifiers::control() | Modifiers::shift(), "f12", None), Some(b"\x1b[24;6~".to_vec()));
+}
+
+#[test]
+fn input_home_and_end_honor_app_cursor_mode() {
+    let app_cursor = InputModes { app_cursor: true, ..InputModes::default() };
+    let encode_in = |key: &str, modes| crate::input::encode_keystroke(&keystroke(Modifiers::none(), key, None), modes);
+    assert_eq!(encode_in("home", InputModes::default()), Some(b"\x1b[H".to_vec()));
+    assert_eq!(encode_in("end", InputModes::default()), Some(b"\x1b[F".to_vec()));
+    assert_eq!(encode_in("home", app_cursor), Some(b"\x1bOH".to_vec()));
+    assert_eq!(encode_in("end", app_cursor), Some(b"\x1bOF".to_vec()));
+}
+
+#[test]
+fn input_command_arrows_and_backspace_edit_the_line() {
+    let cmd = Modifiers::command();
+    assert_eq!(encode(cmd, "left", None), Some(vec![0x01]));
+    assert_eq!(encode(cmd, "right", None), Some(vec![0x05]));
+    assert_eq!(encode(cmd, "backspace", None), Some(vec![0x15]));
+    assert_eq!(encode(Modifiers::command_shift(), "left", None), None);
+}
+
+#[test]
+fn input_kitty_disambiguate_encodes_modified_keys_as_csi_u() {
+    let none = Modifiers::none();
+    assert_eq!(encode_kitty(Modifiers::shift(), "enter", Some("\n")), Some(b"\x1b[13;2u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::alt(), "enter", Some("\n")), Some(b"\x1b[13;3u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::shift(), "tab", Some("\t")), Some(b"\x1b[9;2u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control(), "backspace", None), Some(b"\x1b[127;5u".to_vec()));
+    assert_eq!(encode_kitty(none, "escape", None), Some(b"\x1b[27u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::shift(), "escape", None), Some(b"\x1b[27;2u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control(), "a", None), Some(b"\x1b[97;5u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control() | Modifiers::shift(), "a", None), Some(b"\x1b[97;6u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::alt(), "b", Some("\u{222b}")), Some(b"\x1b[98;3u".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control(), "space", Some(" ")), Some(b"\x1b[32;5u".to_vec()));
+}
+
+#[test]
+fn input_kitty_disambiguate_keeps_plain_keys_legacy() {
+    let none = Modifiers::none();
+    assert_eq!(encode_kitty(none, "enter", Some("\n")), Some(b"\r".to_vec()));
+    assert_eq!(encode_kitty(none, "tab", Some("\t")), Some(b"\t".to_vec()));
+    assert_eq!(encode_kitty(none, "backspace", None), Some(vec![0x7f]));
+    assert_eq!(encode_kitty(Modifiers::shift(), "a", Some("A")), Some(b"A".to_vec()));
+    assert_eq!(encode_kitty(none, "up", None), Some(b"\x1b[A".to_vec()));
+}
+
+#[test]
+fn input_kitty_disambiguate_uses_xterm_forms_for_modified_functional_keys() {
+    assert_eq!(encode_kitty(Modifiers::alt(), "left", None), Some(b"\x1b[1;3D".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control(), "home", None), Some(b"\x1b[1;5H".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::none(), "f3", None), Some(b"\x1b[13~".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::control(), "f3", None), Some(b"\x1b[13;5~".to_vec()));
+    assert_eq!(encode_kitty(Modifiers::shift(), "f5", None), Some(b"\x1b[15;2~".to_vec()));
 }
 
 #[test]
