@@ -12,7 +12,7 @@ pub mod vt;
 
 pub use event::{
     xterm_indexed_rgb, Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot,
-    InputModes, KittyKeyboard, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    InputModes, KittyKeyboard, MouseModes, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 pub use command_blocks::{BlockId, BlockOutcome, BlockStatus, CommandBlock, CommandBlocks, ShellPhase};
 pub use alacritty_terminal::index::Side;

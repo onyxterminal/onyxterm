@@ -164,8 +164,25 @@ pub struct InputModes {
     pub app_cursor: bool,
     pub bracketed_paste: bool,
     pub alt_screen: bool,
-    pub mouse_reporting: bool,
+    pub alternate_scroll: bool,
+    pub focus_reporting: bool,
+    pub mouse: MouseModes,
     pub kitty: KittyKeyboard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MouseModes {
+    pub report_click: bool,
+    pub report_drag: bool,
+    pub report_motion: bool,
+    pub sgr: bool,
+    pub utf8: bool,
+}
+
+impl MouseModes {
+    pub fn is_reporting(&self) -> bool {
+        self.report_click || self.report_drag || self.report_motion
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

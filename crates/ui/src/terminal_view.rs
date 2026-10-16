@@ -493,7 +493,7 @@ fn scroll_pane(pane: &TerminalPane, delta: f32, line_height: f32) {
         return;
     }
     let modes = pane.handle.input_modes();
-    if !(modes.alt_screen || modes.mouse_reporting) {
+    if !(modes.alt_screen || modes.mouse.is_reporting()) {
         pane.handle.terminal().scroll_lines(lines);
         return;
     }

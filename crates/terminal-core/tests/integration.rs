@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use domain::TerminalSessionId;
 use terminal_core::event::{
     CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, InputModes, KittyKeyboard,
-    SelectionKind, SelectionSpan, TerminalEvent,
+    MouseModes, SelectionKind, SelectionSpan, TerminalEvent,
 };
 use terminal_core::{BlockStatus, Rgb, ShellPhase, Side, ViMotion};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
@@ -283,7 +283,7 @@ fn autosuggestion_needs_the_cursor_at_the_end_of_the_input() {
 #[test]
 fn input_modes_track_bracketed_paste_and_app_cursor() {
     let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
-    assert_eq!(terminal.input_modes(), InputModes::default());
+    assert_eq!(terminal.input_modes(), InputModes { alternate_scroll: true, ..InputModes::default() });
     terminal.feed(b"\x1b[?2004h\x1b[?1h");
     let modes = terminal.input_modes();
     assert!(modes.bracketed_paste);
@@ -408,7 +408,17 @@ fn input_modes_track_alt_screen_and_mouse_reporting() {
     terminal.feed(b"\x1b[?1049h\x1b[?1000h");
     let modes = terminal.input_modes();
     assert!(modes.alt_screen);
-    assert!(modes.mouse_reporting);
+    assert!(modes.mouse.is_reporting());
+}
+
+#[test]
+fn input_modes_track_mouse_protocol_focus_and_alternate_scroll() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"\x1b[?1003h\x1b[?1006h\x1b[?1004h\x1b[?1007l");
+    let modes = terminal.input_modes();
+    assert_eq!(modes.mouse, MouseModes { report_motion: true, sgr: true, ..MouseModes::default() });
+    assert!(modes.focus_reporting);
+    assert!(!modes.alternate_scroll);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,6 +1,6 @@
 use crate::event::{
     Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes,
-    KittyKeyboard, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    KittyKeyboard, MouseModes, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
@@ -295,7 +295,9 @@ impl Terminal {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
             alt_screen: mode.contains(TermMode::ALT_SCREEN),
-            mouse_reporting: mode.intersects(TermMode::MOUSE_MODE),
+            alternate_scroll: mode.contains(TermMode::ALTERNATE_SCROLL),
+            focus_reporting: mode.contains(TermMode::FOCUS_IN_OUT),
+            mouse: mouse_modes(mode),
             kitty: kitty_keyboard(mode),
         }
     }
@@ -530,6 +532,16 @@ fn run_event_loop(inner: Arc<TerminalInner>, mut reader: Box<dyn Read + Send>, p
     }
     let code = pty.wait_exit_code().unwrap_or(UNKNOWN_EXIT_CODE);
     let _ = inner.events.send(TerminalEvent::Exited { code });
+}
+
+fn mouse_modes(mode: &TermMode) -> MouseModes {
+    MouseModes {
+        report_click: mode.contains(TermMode::MOUSE_REPORT_CLICK),
+        report_drag: mode.contains(TermMode::MOUSE_DRAG),
+        report_motion: mode.contains(TermMode::MOUSE_MOTION),
+        sgr: mode.contains(TermMode::SGR_MOUSE),
+        utf8: mode.contains(TermMode::UTF8_MOUSE),
+    }
 }
 
 fn kitty_keyboard(mode: &TermMode) -> KittyKeyboard {
