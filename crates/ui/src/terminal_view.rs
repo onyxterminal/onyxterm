@@ -3,7 +3,7 @@
 
 use crate::cell_paint::{merged_spans, CellGlyph, GlyphCache, GlyphKey};
 use crate::file_links::FileLink;
-use crate::input::wheel_bytes;
+use crate::input::{paste_bytes, wheel_bytes};
 use crate::mouse_report::{mouse_report_bytes, wheel_report_bytes, MouseAction, MouseReport, ReportedButton};
 use crate::terminal_annotations::{Annotations, RowLabel, RowLink};
 use crate::pixel_grid::{
@@ -437,9 +437,9 @@ impl PaneArea {
 
 fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Window) {
     let (down, down_area) = (pane.clone(), area.clone());
-    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _cx| {
+    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
         if phase == DispatchPhase::Bubble {
-            handle_mouse_down(&down, &down_area, event, window);
+            handle_mouse_down(&down, &down_area, event, window, cx);
         }
     });
     let (moved, moved_area) = (pane.clone(), area.clone());
@@ -464,7 +464,7 @@ fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Wind
     });
 }
 
-fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEvent, window: &mut Window) {
+fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEvent, window: &mut Window, cx: &App) {
     if !area.is_hovered(event.position, window) {
         return;
     }
@@ -476,6 +476,10 @@ fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEven
     if is_reporting_mouse(pane, event.modifiers) {
         report_press(pane, area, event);
         window.refresh();
+        return;
+    }
+    if event.button == MouseButton::Middle {
+        paste_clipboard(&pane.handle, cx);
         return;
     }
     if event.button != MouseButton::Left {
@@ -536,6 +540,16 @@ fn handle_mouse_up(pane: &TerminalPane, area: &PaneArea, event: &MouseUpEvent, w
     }
     if was_selecting && area.input.copy_on_select {
         copy_selection(pane, cx);
+    }
+}
+
+pub fn paste_clipboard(handle: &TerminalHandle, cx: &App) {
+    let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+        return;
+    };
+    handle.terminal().scroll_to_bottom();
+    if let Err(err) = handle.write(&paste_bytes(&text, handle.input_modes())) {
+        tracing::warn!(?err, "pty paste write failed");
     }
 }
 

@@ -13,12 +13,12 @@ use crate::confirm::{
 use crate::menus::{install_menus, RunCommand};
 use crate::motion::fade_in;
 use crate::open_target::RecentEditors;
-use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, paste_bytes};
+use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines};
 use crate::palette as palette_render;
 use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
 use crate::pane_title::OscTitle;
 use crate::terminal_view::{
-    terminal_canvas, ContentInsets, InputRegistration, PaneFocus, TerminalPane, TerminalStyle,
+    paste_clipboard, terminal_canvas, ContentInsets, InputRegistration, PaneFocus, TerminalPane, TerminalStyle,
 };
 use crate::text_field::TextField;
 use crate::workspace_menu::MenuField;
@@ -819,13 +819,9 @@ impl Shell {
     }
 
     fn paste_clipboard(&self, cx: &mut Context<Self>) {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
-        let Some(handle) = self.focused_handle() else {
-            return;
-        };
-        write_to(handle, &paste_bytes(&text, handle.input_modes()));
+        if let Some(handle) = self.focused_handle() {
+            paste_clipboard(handle, cx);
+        }
     }
 
     fn clear_terminal(&self) {
