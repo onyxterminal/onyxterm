@@ -4,6 +4,7 @@
 use crate::cell_paint::{merged_spans, CellGlyph, GlyphCache, GlyphKey};
 use crate::file_links::FileLink;
 use crate::input::wheel_bytes;
+use crate::mouse_report::{mouse_report_bytes, wheel_report_bytes, MouseAction, MouseReport, ReportedButton};
 use crate::terminal_annotations::{Annotations, RowLabel, RowLink};
 use crate::pixel_grid::{
     align_glyphs_to_cells, baseline_offset, glyph_aligned_origin, snap_cell_length, snap_point, snap_to_device,
@@ -11,8 +12,8 @@ use crate::pixel_grid::{
 use crate::theme::{FindTokens, Theme};
 use gpui::{
     canvas, fill, font, point, px, size, App, Bounds, Canvas, ContentMask, CursorStyle, DispatchPhase, Font,
-    FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Styled, TextRun,
+    FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Styled, TextRun,
     UnderlineStyle, Window,
 };
 use std::cell::RefCell;
@@ -178,6 +179,8 @@ pub struct PointerState {
     is_selecting: bool,
     hovered_link: Option<RowLink>,
     pressed_link: Option<RowLink>,
+    reported_button: Option<ReportedButton>,
+    reported_cell: Option<GridPoint>,
 }
 
 pub type LinkOpener = Rc<dyn Fn(&FileLink, &mut Window, &mut App)>;
@@ -409,8 +412,12 @@ impl PaneArea {
         grid_point_at(position, self.bounds.origin, self.cell, self.grid)
     }
 
+    fn is_hovered(&self, position: Point<Pixels>, window: &Window) -> bool {
+        self.bounds.contains(&position) && self.hitbox.is_hovered(window)
+    }
+
     fn link_at(&self, position: Point<Pixels>, window: &Window) -> Option<RowLink> {
-        if !self.bounds.contains(&position) || !self.hitbox.is_hovered(window) {
+        if !self.is_hovered(position, window) {
             return None;
         }
         let (point, _) = self.point_at(position);
@@ -420,50 +427,22 @@ impl PaneArea {
 }
 
 fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Window) {
-    let down = pane.clone();
-    let down_area = area.clone();
+    let (down, down_area) = (pane.clone(), area.clone());
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _cx| {
-        let is_inside = down_area.bounds.contains(&event.position) && down_area.hitbox.is_hovered(window);
-        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !is_inside {
-            return;
+        if phase == DispatchPhase::Bubble {
+            handle_mouse_down(&down, &down_area, event, window);
         }
-        let (point, side) = down_area.point_at(event.position);
-        down.handle.terminal().start_selection(selection_kind_for(event.click_count), point, side);
-        let mut pointer = down.pointer.borrow_mut();
-        pointer.is_selecting = true;
-        pointer.pressed_link = down_area.link_at(event.position, window);
-        window.refresh();
     });
-    let drag = pane.clone();
-    let drag_area = area.clone();
+    let (moved, moved_area) = (pane.clone(), area.clone());
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
-        if phase != DispatchPhase::Bubble {
-            return;
+        if phase == DispatchPhase::Bubble {
+            handle_mouse_move(&moved, &moved_area, event, window);
         }
-        track_hovered_link(&drag, drag_area.link_at(event.position, window), window);
-        let is_dragging = event.pressed_button == Some(MouseButton::Left) && drag.pointer.borrow().is_selecting;
-        if !is_dragging {
-            return;
-        }
-        let (point, side) = drag_area.point_at(event.position);
-        drag.handle.terminal().update_selection(point, side);
-        window.refresh();
     });
-    let up = pane.clone();
-    let up_area = area.clone();
+    let (up, up_area) = (pane.clone(), area.clone());
     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
-        if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
-            return;
-        }
-        let pressed = {
-            let mut pointer = up.pointer.borrow_mut();
-            pointer.is_selecting = false;
-            pointer.pressed_link.take()
-        };
-        let released = up_area.link_at(event.position, window);
-        if let Some(link) = pressed.filter(|pressed| Some(pressed) == released.as_ref()) {
-            up.handle.terminal().clear_selection();
-            (up.opener)(&link.link, window, cx);
+        if phase == DispatchPhase::Bubble {
+            handle_mouse_up(&up, &up_area, event, window, cx);
         }
     });
     window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, _cx| {
@@ -471,10 +450,127 @@ fn register_mouse_handlers(pane: TerminalPane, area: PaneArea, window: &mut Wind
         if phase != DispatchPhase::Bubble || !is_over_pane {
             return;
         }
-        let delta = f32::from(event.delta.pixel_delta(area.cell.height).y);
-        scroll_pane(&pane, delta, f32::from(area.cell.height));
+        scroll_pane(&pane, &area, event);
         window.refresh();
     });
+}
+
+fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEvent, window: &mut Window) {
+    if !area.is_hovered(event.position, window) {
+        return;
+    }
+    if is_reporting_mouse(pane, event.modifiers) {
+        report_press(pane, area, event);
+        window.refresh();
+        return;
+    }
+    if event.button != MouseButton::Left {
+        return;
+    }
+    let (point, side) = area.point_at(event.position);
+    pane.handle.terminal().start_selection(selection_kind_for(event.click_count), point, side);
+    let mut pointer = pane.pointer.borrow_mut();
+    pointer.is_selecting = true;
+    pointer.pressed_link = area.link_at(event.position, window);
+    window.refresh();
+}
+
+fn handle_mouse_move(pane: &TerminalPane, area: &PaneArea, event: &MouseMoveEvent, window: &mut Window) {
+    track_hovered_link(pane, area.link_at(event.position, window), window);
+    let (reported_button, is_selecting) = {
+        let pointer = pane.pointer.borrow();
+        (pointer.reported_button, pointer.is_selecting)
+    };
+    if let Some(button) = reported_button {
+        report_motion(pane, area, event, button);
+        return;
+    }
+    if is_selecting && event.pressed_button == Some(MouseButton::Left) {
+        let (point, side) = area.point_at(event.position);
+        pane.handle.terminal().update_selection(point, side);
+        window.refresh();
+        return;
+    }
+    let is_hovering = event.pressed_button.is_none() && area.is_hovered(event.position, window);
+    if is_hovering && is_reporting_mouse(pane, event.modifiers) {
+        report_motion(pane, area, event, ReportedButton::None);
+    }
+}
+
+fn handle_mouse_up(pane: &TerminalPane, area: &PaneArea, event: &MouseUpEvent, window: &mut Window, cx: &mut App) {
+    if let Some(button) = take_reported_button(pane, event.button) {
+        let (point, _) = area.point_at(event.position);
+        send_report(pane, MouseReport { button, action: MouseAction::Release, point, modifiers: event.modifiers });
+        return;
+    }
+    if event.button != MouseButton::Left {
+        return;
+    }
+    let pressed = {
+        let mut pointer = pane.pointer.borrow_mut();
+        pointer.is_selecting = false;
+        pointer.pressed_link.take()
+    };
+    let released = area.link_at(event.position, window);
+    if let Some(link) = pressed.filter(|pressed| Some(pressed) == released.as_ref()) {
+        pane.handle.terminal().clear_selection();
+        (pane.opener)(&link.link, window, cx);
+    }
+}
+
+fn is_reporting_mouse(pane: &TerminalPane, modifiers: Modifiers) -> bool {
+    !modifiers.shift && pane.handle.input_modes().mouse.is_reporting()
+}
+
+fn reported_button_for(button: MouseButton) -> Option<ReportedButton> {
+    match button {
+        MouseButton::Left => Some(ReportedButton::Left),
+        MouseButton::Middle => Some(ReportedButton::Middle),
+        MouseButton::Right => Some(ReportedButton::Right),
+        MouseButton::Navigate(_) => None,
+    }
+}
+
+fn report_press(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEvent) {
+    let Some(button) = reported_button_for(event.button) else {
+        return;
+    };
+    let (point, _) = area.point_at(event.position);
+    {
+        let mut pointer = pane.pointer.borrow_mut();
+        pointer.reported_button = Some(button);
+        pointer.reported_cell = Some(point);
+    }
+    pane.handle.terminal().clear_selection();
+    send_report(pane, MouseReport { button, action: MouseAction::Press, point, modifiers: event.modifiers });
+}
+
+fn report_motion(pane: &TerminalPane, area: &PaneArea, event: &MouseMoveEvent, button: ReportedButton) {
+    let (point, _) = area.point_at(event.position);
+    {
+        let mut pointer = pane.pointer.borrow_mut();
+        if pointer.reported_cell == Some(point) {
+            return;
+        }
+        pointer.reported_cell = Some(point);
+    }
+    send_report(pane, MouseReport { button, action: MouseAction::Motion, point, modifiers: event.modifiers });
+}
+
+fn take_reported_button(pane: &TerminalPane, released: MouseButton) -> Option<ReportedButton> {
+    let mut pointer = pane.pointer.borrow_mut();
+    let button = pointer.reported_button.filter(|&button| Some(button) == reported_button_for(released))?;
+    pointer.reported_button = None;
+    Some(button)
+}
+
+fn send_report(pane: &TerminalPane, report: MouseReport) {
+    let Some(bytes) = mouse_report_bytes(report, pane.handle.input_modes()) else {
+        return;
+    };
+    if let Err(err) = pane.handle.write(&bytes) {
+        tracing::warn!(?err, "pty mouse report write failed");
+    }
 }
 
 fn track_hovered_link(pane: &TerminalPane, hovered: Option<RowLink>, window: &mut Window) {
@@ -485,21 +581,43 @@ fn track_hovered_link(pane: &TerminalPane, hovered: Option<RowLink>, window: &mu
     }
 }
 
-fn scroll_pane(pane: &TerminalPane, delta: f32, line_height: f32) {
-    let mut pointer = pane.pointer.borrow_mut();
-    let (lines, remainder) = split_scroll(pointer.scroll_remainder + delta, line_height);
-    pointer.scroll_remainder = remainder;
+fn scroll_pane(pane: &TerminalPane, area: &PaneArea, event: &ScrollWheelEvent) {
+    let delta = f32::from(vertical_delta(event, area.cell.height));
+    let lines = take_whole_lines(pane, delta, f32::from(area.cell.height));
     if lines == 0 {
         return;
     }
     let modes = pane.handle.input_modes();
-    if !(modes.alt_screen || modes.mouse.is_reporting()) {
+    let is_app_scroll = modes.alt_screen || modes.mouse.is_reporting();
+    if event.modifiers.shift || !is_app_scroll {
         pane.handle.terminal().scroll_lines(lines);
         return;
     }
-    if let Err(err) = pane.handle.write(&wheel_bytes(lines, modes)) {
+    let bytes = if modes.mouse.is_reporting() {
+        wheel_report_bytes(lines, area.point_at(event.position).0, event.modifiers, modes)
+    } else if modes.alternate_scroll {
+        wheel_bytes(lines, modes)
+    } else {
+        return;
+    };
+    if let Err(err) = pane.handle.write(&bytes) {
         tracing::warn!(?err, "pty wheel write failed");
     }
+}
+
+fn vertical_delta(event: &ScrollWheelEvent, line_height: Pixels) -> Pixels {
+    let delta = event.delta.pixel_delta(line_height);
+    if event.modifiers.shift && delta.y == px(0.0) {
+        return delta.x;
+    }
+    delta.y
+}
+
+fn take_whole_lines(pane: &TerminalPane, delta: f32, line_height: f32) -> i32 {
+    let mut pointer = pane.pointer.borrow_mut();
+    let (lines, remainder) = split_scroll(pointer.scroll_remainder + delta, line_height);
+    pointer.scroll_remainder = remainder;
+    lines
 }
 
 fn prepare_frame(handle: &TerminalHandle, style: &TerminalStyle, is_focused: bool, window: &Window) -> Frame {
