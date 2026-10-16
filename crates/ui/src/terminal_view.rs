@@ -20,9 +20,10 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_core::{
-    Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, Rgb, SelectionKind,
-    Side, TerminalHandle, TextMatch,
+    Cell, CellColor, CellPixels, ColorPalette, CursorPosition, CursorShape, GridPoint, GridSize, GridSnapshot, Rgb,
+    SelectionKind, Side, TerminalHandle, TextMatch, DEFAULT_CURSOR_STYLE,
 };
 
 const FALLBACK_CELL_WIDTH_RATIO: f32 = 0.6;
@@ -37,6 +38,8 @@ const STRIKE_RISE_RATIO: f32 = 0.27;
 const DIM_TEXT_OPACITY: f32 = 0.66;
 const DECORATION_THICKNESS_PX: f32 = 1.0;
 const CARET_WIDTH_PX: f32 = 1.0;
+const CARET_UNDERLINE_PX: f32 = 2.0;
+const BLINK_HALF_PERIOD_MS: u128 = 530;
 const COPY_LINE_BLEED_PX: f32 = 4.0;
 const COPY_LINE_RADIUS_PX: f32 = 3.0;
 const LABEL_TEXT_PX: f32 = 10.5;
@@ -187,6 +190,7 @@ pub struct PointerState {
     pressed_link: Option<RowLink>,
     reported_button: Option<ReportedButton>,
     reported_cell: Option<GridPoint>,
+    is_blink_frame_scheduled: bool,
 }
 
 pub type LinkOpener = Rc<dyn Fn(&FileLink, &mut Window, &mut App)>;
@@ -380,7 +384,8 @@ pub fn terminal_canvas(
             if hovered_link.is_some() {
                 window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
             }
-            let painter = FramePainter { frame: &frame, bounds: grid_bounds, style: &style, is_focused, hovered_link };
+            let caret_shape = caret_shape(&frame.snapshot, is_focused);
+            let painter = FramePainter { frame: &frame, bounds: grid_bounds, style: &style, hovered_link, caret_shape };
             painter.paint_copy_line(window);
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
                 painter.paint_partial_row(window, cx);
@@ -392,6 +397,9 @@ pub fn terminal_canvas(
             if let Some(focus) = focus {
                 (focus.register_input)(bounds, window, cx);
             }
+            if is_focused && frame.snapshot.cursor.is_some() && frame.snapshot.cursor_style.blinking {
+                schedule_blink_frame(&pane, window, cx);
+            }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
             let links = Rc::new(frame.annotations.links);
             let grid_origin = grid_bounds.origin;
@@ -400,6 +408,46 @@ pub fn terminal_canvas(
         },
     )
     .size_full()
+}
+
+pub fn caret_shape(snapshot: &GridSnapshot, is_focused: bool) -> Option<CursorShape> {
+    let style = snapshot.cursor_style;
+    if !is_focused {
+        return (style != DEFAULT_CURSOR_STYLE).then_some(CursorShape::HollowBlock);
+    }
+    if style.blinking && !is_blink_phase_on() {
+        return None;
+    }
+    Some(style.shape)
+}
+
+fn blink_clock_ms() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis())
+}
+
+fn is_blink_phase_on() -> bool {
+    (blink_clock_ms() / BLINK_HALF_PERIOD_MS) % 2 == 0
+}
+
+fn until_next_blink() -> Duration {
+    let remaining = BLINK_HALF_PERIOD_MS - blink_clock_ms() % BLINK_HALF_PERIOD_MS;
+    Duration::from_millis(remaining as u64)
+}
+
+fn schedule_blink_frame(pane: &TerminalPane, window: &Window, cx: &App) {
+    if std::mem::replace(&mut pane.pointer.borrow_mut().is_blink_frame_scheduled, true) {
+        return;
+    }
+    let pointer = pane.pointer.clone();
+    window
+        .spawn(cx, async move |cx| {
+            cx.background_executor().timer(until_next_blink()).await;
+            pointer.borrow_mut().is_blink_frame_scheduled = false;
+            if let Err(err) = cx.update(|window, _cx| window.refresh()) {
+                tracing::debug!(?err, "cursor blink refresh skipped");
+            }
+        })
+        .detach();
 }
 
 fn scrolled_bounds(content: Bounds<Pixels>, frame: &Frame, window: &Window) -> Bounds<Pixels> {
@@ -414,7 +462,8 @@ pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<
         move |_bounds, window, _cx| prepare_frame(&handle, &prepare_style, false, window),
         move |bounds, frame, window, cx| {
             let bounds = device_aligned_content(bounds, style.insets, window);
-            let painter = FramePainter { frame: &frame, bounds, style: &style, is_focused: false, hovered_link: None };
+            let caret_shape = caret_shape(&frame.snapshot, false);
+            let painter = FramePainter { frame: &frame, bounds, style: &style, hovered_link: None, caret_shape };
             window.with_content_mask(Some(ContentMask { bounds }), |window| painter.paint(window, cx));
         },
     )
@@ -696,8 +745,8 @@ struct FramePainter<'a> {
     frame: &'a Frame,
     bounds: Bounds<Pixels>,
     style: &'a TerminalStyle,
-    is_focused: bool,
     hovered_link: Option<RowLink>,
+    caret_shape: Option<CursorShape>,
 }
 
 #[derive(Clone, Copy)]
@@ -762,7 +811,7 @@ impl FramePainter<'_> {
         let frame = Frame { snapshot, cell, annotations: Annotations::default(), hits: Vec::new() };
         let origin = self.bounds.origin - point(px(0.0), cell.height);
         let bounds = Bounds::new(origin, size(self.bounds.size.width, cell.height));
-        let painter = FramePainter { frame: &frame, bounds, style: self.style, is_focused: false, hovered_link: None };
+        let painter = FramePainter { frame: &frame, bounds, style: self.style, hovered_link: None, caret_shape: None };
         painter.paint(window, cx);
     }
 
@@ -839,15 +888,41 @@ impl FramePainter<'_> {
     }
 
     fn paint_caret(&self, metrics: TextMetrics, window: &mut Window) {
-        let Some(cursor) = self.frame.snapshot.cursor.filter(|_| self.is_focused) else {
+        let (Some(shape), Some(cursor)) = (self.caret_shape, self.frame.snapshot.cursor) else {
             return;
         };
-        let cell = self.cell_bounds(usize::from(cursor.row), usize::from(cursor.col), 1);
-        let row_origin = self.baseline_origin(usize::from(cursor.row), metrics.baseline, window);
+        let row = usize::from(cursor.row);
+        let cell = self.cell_bounds(row, usize::from(cursor.col), 1);
+        let caret = self.style.caret;
+        match shape {
+            CursorShape::Beam => self.paint_beam(cell, row, metrics, window),
+            CursorShape::Block => window.paint_quad(fill(cell, caret)),
+            CursorShape::Underline => {
+                let thickness = px(CARET_UNDERLINE_PX);
+                let origin = point(cell.origin.x, cell.bottom() - thickness);
+                window.paint_quad(fill(Bounds::new(origin, size(cell.size.width, thickness)), caret));
+            }
+            CursorShape::HollowBlock => {
+                let border = px(CARET_WIDTH_PX);
+                let transparent = gpui::transparent_black();
+                window.paint_quad(gpui::quad(cell, px(0.0), transparent, border, caret, gpui::BorderStyle::Solid));
+            }
+            CursorShape::Hidden => {}
+        }
+    }
+
+    fn paint_beam(&self, cell: Bounds<Pixels>, row: usize, metrics: TextMetrics, window: &mut Window) {
+        let row_origin = self.baseline_origin(row, metrics.baseline, window);
         let top = row_origin.y - metrics.ascent;
         let origin = point(snap_to_device(cell.origin.x, window.scale_factor()), top);
         let bounds = Bounds::new(origin, size(px(CARET_WIDTH_PX), metrics.ascent + metrics.descent));
         window.paint_quad(fill(bounds, self.style.caret));
+    }
+
+    fn is_block_caret_at(&self, row: usize, col: usize) -> bool {
+        let cursor = self.frame.snapshot.cursor;
+        let is_here = cursor.is_some_and(|cursor| usize::from(cursor.row) == row && usize::from(cursor.col) == col);
+        is_here && self.caret_shape == Some(CursorShape::Block)
     }
 
     fn paint_hits(&self, metrics: TextMetrics, window: &mut Window) {
@@ -867,6 +942,9 @@ impl FramePainter<'_> {
     }
 
     fn cell_color(&self, row: &PaintRow, col: usize, cell: &Cell) -> Hsla {
+        if self.is_block_caret_at(row.index, col) {
+            return self.style.colors.background;
+        }
         if row.is_inked(col) {
             return self.style.find.hit_current_ink;
         }
@@ -1136,7 +1214,7 @@ fn same_style(a: &TextRun, b: &TextRun) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use terminal_core::MatchPoint;
+    use terminal_core::{CursorStyle, MatchPoint};
 
     fn hit(line: i32, start: u16, end: u16) -> TextMatch {
         TextMatch { start: MatchPoint { line, col: start }, end: MatchPoint { line, col: end } }
@@ -1160,5 +1238,15 @@ mod tests {
         let rows = visible_hits(&hits, 0, GridSize::new(20, 5));
         let columns: Vec<(usize, Range<usize>)> = rows.into_iter().map(|hit| (hit.row, hit.columns)).collect();
         assert_eq!(columns, vec![(0, 18..20), (1, 0..2)]);
+    }
+
+    #[test]
+    fn caret_shape_follows_the_app_style_and_hollows_when_unfocused() {
+        let mut snapshot = GridSnapshot::empty(GridSize::new(4, 2));
+        assert_eq!(caret_shape(&snapshot, true), Some(CursorShape::Beam));
+        assert_eq!(caret_shape(&snapshot, false), None);
+        snapshot.cursor_style = CursorStyle { shape: CursorShape::Underline, blinking: false };
+        assert_eq!(caret_shape(&snapshot, true), Some(CursorShape::Underline));
+        assert_eq!(caret_shape(&snapshot, false), Some(CursorShape::HollowBlock));
     }
 }
