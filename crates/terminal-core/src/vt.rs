@@ -1,6 +1,6 @@
 use crate::event::{
     Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes,
-    KittyKeyboard, MouseModes, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    KittyKeyboard, MouseModes, PartialRow, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
@@ -76,9 +76,33 @@ struct TermState {
     blocks: CommandBlocks,
     palette: Option<ColorPalette>,
     cell_pixels: CellPixels,
+    scroll_fraction: f32,
 }
 
 impl TermState {
+    fn scroll(&mut self, scroll: Scroll) {
+        self.scroll_fraction = 0.0;
+        self.term.scroll_display(scroll);
+    }
+
+    fn scroll_smoothly(&mut self, lines: f32) {
+        let offset = self.term.grid().display_offset();
+        let history = self.term.grid().history_size();
+        let position = (offset as f32 + self.scroll_fraction + lines).clamp(0.0, history as f32);
+        let target = position.floor();
+        self.term.scroll_display(Scroll::Delta(target as i32 - offset as i32));
+        self.scroll_fraction = position - target;
+    }
+
+    fn partial_row(&self) -> Option<PartialRow> {
+        let grid = self.term.grid();
+        let line = Line(-(grid.display_offset() as i32) - 1);
+        if self.scroll_fraction <= 0.0 || line < grid.topmost_line() {
+            return None;
+        }
+        Some(PartialRow { cells: row_cells(grid, line).collect(), visible_fraction: self.scroll_fraction })
+    }
+
     fn apply_mark(&mut self, mark: ShellMark) -> Option<BlockChange> {
         let change = self.blocks.apply(mark, Instant::now());
         let link = match change {
@@ -211,6 +235,7 @@ impl Terminal {
                     blocks: CommandBlocks::default(),
                     palette: None,
                     cell_pixels: CellPixels::default(),
+                    scroll_fraction: 0.0,
                 }),
                 events: tx,
                 decoder: Mutex::new(Decoder::default()),
@@ -270,22 +295,18 @@ impl Terminal {
         let state = self.inner.state.lock();
         let grid: &Grid<AlacCell> = state.term.grid();
         let screen_lines = grid.screen_lines();
-        let columns = grid.columns();
         let rows = screen_lines as u16;
-        let cols = columns as u16;
+        let cols = grid.columns() as u16;
         let offset = grid.display_offset() as i32;
         let mut cells = Vec::with_capacity((rows as usize) * (cols as usize));
         for line_idx in 0..screen_lines {
-            let line = &grid[Line(line_idx as i32 - offset)];
-            for col_idx in 0..columns {
-                let cell = &line[Column(col_idx)];
-                cells.push(alac_cell_to_cell(cell));
-            }
+            cells.extend(row_cells(grid, Line(line_idx as i32 - offset)));
         }
         let cursor = visible_cursor(&state.term);
         let selection = visible_selection(&state.term);
         let is_vi_mode = state.term.mode().contains(TermMode::VI);
-        GridSnapshot { rows, cols, cells, cursor, selection, is_vi_mode }
+        let partial_row = state.partial_row();
+        GridSnapshot { rows, cols, cells, cursor, selection, is_vi_mode, partial_row }
     }
 
     pub fn input_modes(&self) -> InputModes {
@@ -307,11 +328,15 @@ impl Terminal {
     }
 
     pub fn scroll_lines(&self, delta: i32) {
-        self.inner.state.lock().term.scroll_display(Scroll::Delta(delta));
+        self.inner.state.lock().scroll(Scroll::Delta(delta));
+    }
+
+    pub fn scroll_smoothly(&self, lines: f32) {
+        self.inner.state.lock().scroll_smoothly(lines);
     }
 
     pub fn scroll_to_bottom(&self) {
-        self.inner.state.lock().term.scroll_display(Scroll::Bottom);
+        self.inner.state.lock().scroll(Scroll::Bottom);
     }
 
     pub fn start_selection(&self, kind: SelectionKind, point: GridPoint, side: Side) {
@@ -368,7 +393,7 @@ impl Terminal {
             state.term.toggle_vi_mode();
         }
         state.term.selection = None;
-        state.term.scroll_display(Scroll::Bottom);
+        state.scroll(Scroll::Bottom);
     }
 
     pub fn vi_motion(&self, motion: ViMotion) {
@@ -378,7 +403,7 @@ impl Terminal {
     pub fn vi_scroll_lines(&self, lines: i32) {
         let mut state = self.inner.state.lock();
         let target = state.term.vi_mode_cursor.scroll(&state.term, lines);
-        state.term.scroll_display(Scroll::Delta(lines));
+        state.scroll(Scroll::Delta(lines));
         state.term.vi_goto_point(target.point);
     }
 
@@ -422,7 +447,7 @@ impl Terminal {
         let grid = state.term.grid();
         let current = grid.display_offset();
         let target = crate::search::offset_revealing(line, current, grid.screen_lines(), grid.history_size());
-        state.term.scroll_display(Scroll::Delta(target as i32 - current as i32));
+        state.scroll(Scroll::Delta(target as i32 - current as i32));
     }
 
     pub fn set_bracketed_paste(&self, on: bool) {
@@ -652,6 +677,11 @@ fn visible_vi_cursor(term: &Term<TermListener>) -> Option<CursorPosition> {
         return None;
     }
     Some(CursorPosition { row: row as u16, col: point.column.0 as u16 })
+}
+
+fn row_cells(grid: &Grid<AlacCell>, line: Line) -> impl Iterator<Item = Cell> + '_ {
+    let row = &grid[line];
+    (0..grid.columns()).map(move |column| alac_cell_to_cell(&row[Column(column)]))
 }
 
 fn alac_cell_to_cell(c: &AlacCell) -> Cell {

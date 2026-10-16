@@ -232,6 +232,13 @@ pub struct GridSnapshot {
     pub cursor: Option<CursorPosition>,
     pub selection: Option<SelectionSpan>,
     pub is_vi_mode: bool,
+    pub partial_row: Option<PartialRow>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartialRow {
+    pub cells: Vec<Cell>,
+    pub visible_fraction: f32,
 }
 
 impl GridSnapshot {
@@ -244,6 +251,7 @@ impl GridSnapshot {
             cursor: None,
             selection: None,
             is_vi_mode: false,
+            partial_row: None,
         }
     }
 }

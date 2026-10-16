@@ -621,3 +621,22 @@ fn has_selection_tracks_started_and_cleared_selections() {
     terminal.clear_selection();
     assert!(!terminal.has_selection());
 }
+
+#[test]
+fn smooth_scroll_keeps_the_line_fraction_and_exposes_the_partial_row() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    terminal.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6");
+    terminal.scroll_smoothly(1.5);
+    assert_eq!(terminal.display_offset(), 1);
+    let partial = terminal.snapshot_grid().partial_row.expect("row above the viewport");
+    assert_eq!(partial.cells[0].ch, '2');
+    assert!((partial.visible_fraction - 0.5).abs() < 1e-6);
+    terminal.scroll_smoothly(10.0);
+    assert_eq!(terminal.display_offset(), 3);
+    assert!(terminal.snapshot_grid().partial_row.is_none());
+    terminal.scroll_smoothly(-2.25);
+    assert_eq!(terminal.display_offset(), 0);
+    assert!(terminal.snapshot_grid().partial_row.is_some());
+    terminal.scroll_to_bottom();
+    assert!(terminal.snapshot_grid().partial_row.is_none());
+}
