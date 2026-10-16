@@ -13,7 +13,9 @@ use crate::confirm::{
 use crate::menus::{install_menus, RunCommand};
 use crate::motion::fade_in;
 use crate::open_target::RecentEditors;
-use crate::input::{dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines};
+use crate::input::{
+    dropped_paths_text, encode_keystroke, is_composed_text, page_scroll_lines, FOCUS_IN_REPORT, FOCUS_OUT_REPORT,
+};
 use crate::palette as palette_render;
 use crate::settings::{BundleSide, Settings, EDITOR_BUNDLE_SIDE_KEY, EDITOR_BUNDLE_SIZE_KEY};
 use crate::pane_title::OscTitle;
@@ -853,8 +855,34 @@ impl Shell {
     }
 
     fn focused_handle(&self) -> Option<&TerminalHandle> {
-        let panel = self.model.tabs().active()?.focused();
+        let panel = self.focused_panel()?;
         self.panes.get(&panel).map(|pane| &pane.terminal.handle)
+    }
+
+    fn focused_panel(&self) -> Option<PanelId> {
+        self.model.tabs().active().map(|tab| tab.focused())
+    }
+
+    fn report_focus_change(&self, previous: Option<PanelId>) {
+        let current = self.focused_panel();
+        if previous == current {
+            return;
+        }
+        self.report_focus(previous, FOCUS_OUT_REPORT);
+        self.report_focus(current, FOCUS_IN_REPORT);
+    }
+
+    fn report_focus(&self, panel: Option<PanelId>, report: &[u8]) {
+        let Some(pane) = panel.and_then(|panel| self.panes.get(&panel)) else {
+            return;
+        };
+        let handle = &pane.terminal.handle;
+        if !handle.input_modes().focus_reporting {
+            return;
+        }
+        if let Err(err) = handle.write(report) {
+            tracing::warn!(?err, "pty focus report write failed");
+        }
     }
 
     fn request_close_focused(&mut self, cx: &mut Context<Self>) {
@@ -1079,9 +1107,11 @@ impl Shell {
     }
 
     fn focus_pane_toward(&mut self, direction: Direction) {
+        let previous = self.focused_panel();
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus_toward(direction);
         }
+        self.report_focus_change(previous);
     }
 
     fn swap_pane_toward(&mut self, direction: Direction) {
@@ -1119,9 +1149,11 @@ impl Shell {
     }
 
     fn focus_pane(&mut self, panel: PanelId) {
+        let previous = self.focused_panel();
         if let Some(tab) = self.model.tabs_mut().active_mut() {
             tab.focus(panel);
         }
+        self.report_focus_change(previous);
         self.remember_focused_editor();
         self.persist();
     }
@@ -1553,9 +1585,12 @@ pub fn open_shell_window(
         let shell = cx.new(|cx| {
             cx.observe_window_bounds(window, |_shell, _window, cx| cx.notify()).detach();
             cx.observe_window_activation(window, |shell: &mut Shell, window, cx| {
-                if window.is_window_active() {
-                    shell.refresh_git_statuses(cx);
+                if !window.is_window_active() {
+                    shell.report_focus(shell.focused_panel(), FOCUS_OUT_REPORT);
+                    return;
                 }
+                shell.report_focus(shell.focused_panel(), FOCUS_IN_REPORT);
+                shell.refresh_git_statuses(cx);
             })
             .detach();
             Shell::new(state, startup, cx)

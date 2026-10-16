@@ -25,6 +25,8 @@ const KITTY_F3: u8 = 13;
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
 const SHELL_SAFE_PUNCTUATION: &str = "/._-+,:@%=";
+pub const FOCUS_IN_REPORT: &[u8] = b"\x1b[I";
+pub const FOCUS_OUT_REPORT: &[u8] = b"\x1b[O";
 
 #[derive(Debug, Clone, Copy)]
 enum FunctionalKey {
