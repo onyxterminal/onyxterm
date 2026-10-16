@@ -12,12 +12,13 @@ pub mod vt;
 
 pub use event::{
     xterm_indexed_rgb, Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot,
-    InputModes, KittyKeyboard, MouseModes, PartialRow, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    InputModes, KittyKeyboard, MouseModes, PartialRow, SelectionKind, SelectionSpan, TerminalError, TerminalEvent,
+    TerminalOutput, DEFAULT_CURSOR_STYLE,
 };
 pub use command_blocks::{BlockId, BlockOutcome, BlockStatus, CommandBlock, CommandBlocks, ShellPhase};
 pub use alacritty_terminal::index::Side;
 pub use alacritty_terminal::vi_mode::ViMotion;
-pub use alacritty_terminal::vte::ansi::Rgb;
+pub use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle, Rgb};
 pub use search::{MatchPoint, TextMatch};
 pub use pty::{ForegroundJob, NativePty, Pty, PtyHandle};
 pub use tokio::sync::broadcast;

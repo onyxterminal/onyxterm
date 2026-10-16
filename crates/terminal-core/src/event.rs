@@ -1,6 +1,6 @@
 use crate::command_blocks::{BlockId, CommandBlock};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
+use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle, NamedColor, Rgb};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -12,6 +12,7 @@ const CURSOR_INDEX: usize = NamedColor::Cursor as usize;
 const CUBE_START: u8 = 16;
 const GRAYSCALE_START: u8 = 232;
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+pub const DEFAULT_CURSOR_STYLE: CursorStyle = CursorStyle { shape: CursorShape::Beam, blinking: false };
 
 #[derive(Debug, Error)]
 pub enum TerminalError {
@@ -230,6 +231,7 @@ pub struct GridSnapshot {
     pub cols: u16,
     pub cells: Vec<Cell>,
     pub cursor: Option<CursorPosition>,
+    pub cursor_style: CursorStyle,
     pub selection: Option<SelectionSpan>,
     pub is_vi_mode: bool,
     pub partial_row: Option<PartialRow>,
@@ -249,6 +251,7 @@ impl GridSnapshot {
             cols: size.cols,
             cells: vec![Cell::empty(); count],
             cursor: None,
+            cursor_style: DEFAULT_CURSOR_STYLE,
             selection: None,
             is_vi_mode: false,
             partial_row: None,

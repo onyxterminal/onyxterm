@@ -6,7 +6,9 @@ use terminal_core::event::{
     CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, InputModes, KittyKeyboard,
     MouseModes, SelectionKind, SelectionSpan, TerminalEvent,
 };
-use terminal_core::{BlockStatus, Rgb, ShellPhase, Side, ViMotion};
+use terminal_core::{
+    BlockStatus, CursorShape, CursorStyle, Rgb, ShellPhase, Side, ViMotion, DEFAULT_CURSOR_STYLE,
+};
 use terminal_core::pty::{NativePty, Pty, PtyHandle};
 use terminal_core::service::{InMemoryTerminalService, ShellCommand, TerminalService};
 use terminal_core::vt::Terminal;
@@ -639,4 +641,16 @@ fn smooth_scroll_keeps_the_line_fraction_and_exposes_the_partial_row() {
     assert!(terminal.snapshot_grid().partial_row.is_some());
     terminal.scroll_to_bottom();
     assert!(terminal.snapshot_grid().partial_row.is_none());
+}
+
+#[test]
+fn cursor_style_defaults_to_a_steady_beam_and_follows_decscusr() {
+    let terminal = Terminal::new(TerminalSessionId::new(), GridSize::new(10, 3), 100);
+    assert_eq!(terminal.snapshot_grid().cursor_style, DEFAULT_CURSOR_STYLE);
+    terminal.feed(b"\x1b[1 q");
+    assert_eq!(terminal.snapshot_grid().cursor_style, CursorStyle { shape: CursorShape::Block, blinking: true });
+    terminal.feed(b"\x1b[4 q");
+    assert_eq!(terminal.snapshot_grid().cursor_style, CursorStyle { shape: CursorShape::Underline, blinking: false });
+    terminal.feed(b"\x1b[0 q");
+    assert_eq!(terminal.snapshot_grid().cursor_style, DEFAULT_CURSOR_STYLE);
 }

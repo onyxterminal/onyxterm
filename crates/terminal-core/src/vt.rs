@@ -1,6 +1,7 @@
 use crate::event::{
     Cell, CellColor, CellPixels, ColorPalette, CursorPosition, GridPoint, GridSize, GridSnapshot, InputModes,
     KittyKeyboard, MouseModes, PartialRow, SelectionKind, SelectionSpan, TerminalError, TerminalEvent, TerminalOutput,
+    DEFAULT_CURSOR_STYLE,
 };
 use crate::command_blocks::{BlockChange, BlockId, CommandBlocks, ShellPhase};
 use crate::pty::{ForegroundJob, PtyHandle};
@@ -222,6 +223,7 @@ impl Terminal {
         let cfg = TermConfig {
             scrolling_history: scrollback.max(1),
             kitty_keyboard: true,
+            default_cursor_style: DEFAULT_CURSOR_STYLE,
             ..TermConfig::default()
         };
         let dim = TermSize::new(size.cols as usize, size.rows as usize);
@@ -303,10 +305,11 @@ impl Terminal {
             cells.extend(row_cells(grid, Line(line_idx as i32 - offset)));
         }
         let cursor = visible_cursor(&state.term);
+        let cursor_style = state.term.cursor_style();
         let selection = visible_selection(&state.term);
         let is_vi_mode = state.term.mode().contains(TermMode::VI);
         let partial_row = state.partial_row();
-        GridSnapshot { rows, cols, cells, cursor, selection, is_vi_mode, partial_row }
+        GridSnapshot { rows, cols, cells, cursor, cursor_style, selection, is_vi_mode, partial_row }
     }
 
     pub fn input_modes(&self) -> InputModes {
