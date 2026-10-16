@@ -850,6 +850,12 @@ impl Shell {
         }
     }
 
+    fn refresh_hovered_links(&self, window: &mut Window) {
+        if self.panes.values().any(|pane| pane.terminal.has_hovered_link()) {
+            window.refresh();
+        }
+    }
+
     fn focused_handle(&self) -> Option<&TerminalHandle> {
         let panel = self.model.tabs().active()?.focused();
         self.panes.get(&panel).map(|pane| &pane.terminal.handle)
@@ -1437,6 +1443,7 @@ impl Render for Shell {
             .text_color(theme.text_default())
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|shell, event, window, cx| shell.handle_key(event, window, cx)))
+            .on_modifiers_changed(cx.listener(|shell, _event, window, _cx| shell.refresh_hovered_links(window)))
             .on_action(cx.listener(|shell, action: &RunCommand, window, cx| shell.run_command(action.0, window, cx)))
             .on_mouse_move(cx.listener(|shell, event: &gpui::MouseMoveEvent, _window, cx| {
                 shell.drag_split(event, cx);

@@ -197,6 +197,10 @@ impl TerminalPane {
     pub fn new(handle: TerminalHandle, opener: LinkOpener) -> Self {
         Self { handle, pointer: Rc::default(), hits: TerminalHits::default(), opener }
     }
+
+    pub fn has_hovered_link(&self) -> bool {
+        self.pointer.borrow().hovered_link.is_some()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -364,7 +368,8 @@ pub fn terminal_canvas(
         },
         move |bounds, (frame, hitbox), window, cx| {
             let bounds = device_aligned_content(bounds, style.insets, window);
-            let hovered_link = pane.pointer.borrow().hovered_link.clone();
+            let is_link_modifier_held = window.modifiers().platform;
+            let hovered_link = pane.pointer.borrow().hovered_link.clone().filter(|_| is_link_modifier_held);
             if hovered_link.is_some() {
                 window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
             }
@@ -463,6 +468,11 @@ fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEven
     if !area.is_hovered(event.position, window) {
         return;
     }
+    let modified_link = area.link_at(event.position, window).filter(|_| is_link_click(event));
+    if let Some(link) = modified_link {
+        pane.pointer.borrow_mut().pressed_link = Some(link);
+        return;
+    }
     if is_reporting_mouse(pane, event.modifiers) {
         report_press(pane, area, event);
         window.refresh();
@@ -478,9 +488,7 @@ fn handle_mouse_down(pane: &TerminalPane, area: &PaneArea, event: &MouseDownEven
     } else {
         terminal.start_selection(selection_kind_for(event.click_count), point, side);
     }
-    let mut pointer = pane.pointer.borrow_mut();
-    pointer.is_selecting = true;
-    pointer.pressed_link = area.link_at(event.position, window);
+    pane.pointer.borrow_mut().is_selecting = true;
     window.refresh();
 }
 
@@ -535,6 +543,10 @@ fn copy_selection(pane: &TerminalPane, cx: &mut App) {
     if let Some(text) = pane.handle.terminal().selection_text() {
         cx.write_to_clipboard(ClipboardItem::new_string(text));
     }
+}
+
+fn is_link_click(event: &MouseDownEvent) -> bool {
+    event.modifiers.platform && event.button == MouseButton::Left
 }
 
 fn is_reporting_mouse(pane: &TerminalPane, modifiers: Modifiers) -> bool {
