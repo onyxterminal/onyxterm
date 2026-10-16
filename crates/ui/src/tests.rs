@@ -10,7 +10,8 @@ use crate::keymap::{Combo, Keymap};
 use crate::theme::{hex_to_hsla, Appearance, Theme, ThemeKind};
 use crate::tabs::Tabs;
 use crate::terminal_view::{
-    grid_point_at, grid_size_for, selection_kind_for, split_scroll, xterm_indexed_rgb, TerminalColors,
+    grid_point_at, grid_size_for, scaled_wheel_delta, selection_kind_for, split_scroll, xterm_indexed_rgb,
+    TerminalColors,
 };
 use domain::{Axis, LayoutNode, PanelId};
 use gpui::{px, Modifiers};
@@ -455,6 +456,17 @@ fn scroll_accumulates_fractional_trackpad_deltas() {
     assert_eq!(split_scroll(10.0, 18.0), (0, 10.0));
     assert_eq!(split_scroll(40.0, 18.0), (2, 4.0));
     assert_eq!(split_scroll(-20.0, 18.0), (-1, -2.0));
+}
+
+#[test]
+fn wheel_notches_scroll_three_lines_and_trackpad_pixels_scale_by_the_multiplier() {
+    assert_eq!(scaled_wheel_delta(px(18.0), false, 1.0), 54.0);
+    assert_eq!(scaled_wheel_delta(px(-7.0), true, 2.0), -14.0);
+}
+
+#[test]
+fn theme_defaults_scroll_multiplier_to_one() {
+    assert_eq!(Theme::load_default().unwrap().input.scroll_multiplier, 1.0);
 }
 
 #[test]

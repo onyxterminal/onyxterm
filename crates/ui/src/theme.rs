@@ -173,6 +173,7 @@ struct AnsiTokensRaw {
 pub struct InputTokens {
     pub option_as_meta: bool,
     pub copy_on_select: bool,
+    pub scroll_multiplier: f32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

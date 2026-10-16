@@ -11,10 +11,10 @@ use crate::pixel_grid::{
 };
 use crate::theme::{FindTokens, InputTokens, Theme};
 use gpui::{
-    canvas, fill, font, point, px, size, App, Bounds, Canvas, ClipboardItem, ContentMask, CursorStyle, DispatchPhase, Font,
-    FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    canvas, fill, font, point, px, size, App, Bounds, Canvas, ClipboardItem, ContentMask, CursorStyle, DispatchPhase,
+    Font, FontStyle, FontWeight, Hitbox, HitboxBehavior, Hsla, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollWheelEvent, ShapedLine, SharedString, Size, StrikethroughStyle, Styled, TextRun,
-    UnderlineStyle, Window,
+    TouchPhase, UnderlineStyle, Window,
 };
 use std::cell::RefCell;
 use std::ops::Range;
@@ -49,6 +49,7 @@ const KEYCAP_LINE_HEIGHT_PX: f32 = 16.0;
 const KEYCAP_BORDER_PX: f32 = 1.0;
 const KEYCAP_RADIUS_PX: f32 = 4.0;
 const HIT_RADIUS_PX: f32 = 2.0;
+const WHEEL_LINES_PER_NOTCH: f32 = 3.0;
 
 type CellSizeCache = Rc<RefCell<Option<(f32, Size<Pixels>)>>>;
 
@@ -163,6 +164,11 @@ pub fn grid_point_at(position: Point<Pixels>, origin: Point<Pixels>, cell: Size<
 pub fn split_scroll(accumulated: f32, line_height: f32) -> (i32, f32) {
     let lines = (accumulated / line_height).trunc();
     (lines as i32, accumulated - lines * line_height)
+}
+
+pub fn scaled_wheel_delta(delta: Pixels, is_precise: bool, multiplier: f32) -> f32 {
+    let notch_lines = if is_precise { 1.0 } else { WHEEL_LINES_PER_NOTCH };
+    f32::from(delta) * notch_lines * multiplier
 }
 
 pub fn selection_kind_for(click_count: usize) -> SelectionKind {
@@ -368,14 +374,16 @@ pub fn terminal_canvas(
         },
         move |bounds, (frame, hitbox), window, cx| {
             let bounds = device_aligned_content(bounds, style.insets, window);
+            let grid_bounds = scrolled_bounds(bounds, &frame, window);
             let is_link_modifier_held = window.modifiers().platform;
             let hovered_link = pane.pointer.borrow().hovered_link.clone().filter(|_| is_link_modifier_held);
             if hovered_link.is_some() {
                 window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
             }
-            let painter = FramePainter { frame: &frame, bounds, style: &style, is_focused, hovered_link };
+            let painter = FramePainter { frame: &frame, bounds: grid_bounds, style: &style, is_focused, hovered_link };
             painter.paint_copy_line(window);
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                painter.paint_partial_row(window, cx);
                 painter.paint(window, cx);
                 if let Some(text) = focus.as_ref().and_then(|focus| focus.marked_text.as_deref()) {
                     painter.paint_marked_text(text, window, cx);
@@ -386,11 +394,18 @@ pub fn terminal_canvas(
             }
             let grid = GridSize::new(frame.snapshot.cols, frame.snapshot.rows);
             let links = Rc::new(frame.annotations.links);
-            let area = PaneArea { bounds, cell: frame.cell, grid, hitbox, links, input: style.input };
+            let grid_origin = grid_bounds.origin;
+            let area = PaneArea { bounds, grid_origin, cell: frame.cell, grid, hitbox, links, input: style.input };
             register_mouse_handlers(pane, area, window);
         },
     )
     .size_full()
+}
+
+fn scrolled_bounds(content: Bounds<Pixels>, frame: &Frame, window: &Window) -> Bounds<Pixels> {
+    let fraction = frame.snapshot.partial_row.as_ref().map_or(0.0, |row| row.visible_fraction);
+    let shift = snap_to_device(frame.cell.height * fraction, window.scale_factor());
+    Bounds::new(content.origin + point(px(0.0), shift), content.size)
 }
 
 pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<Frame> {
@@ -409,6 +424,7 @@ pub fn terminal_preview(handle: TerminalHandle, style: TerminalStyle) -> Canvas<
 #[derive(Clone)]
 struct PaneArea {
     bounds: Bounds<Pixels>,
+    grid_origin: Point<Pixels>,
     cell: Size<Pixels>,
     grid: GridSize,
     hitbox: Hitbox,
@@ -418,7 +434,7 @@ struct PaneArea {
 
 impl PaneArea {
     fn point_at(&self, position: Point<Pixels>) -> (GridPoint, Side) {
-        grid_point_at(position, self.bounds.origin, self.cell, self.grid)
+        grid_point_at(position, self.grid_origin, self.cell, self.grid)
     }
 
     fn is_hovered(&self, position: Point<Pixels>, window: &Window) -> bool {
@@ -627,15 +643,20 @@ fn track_hovered_link(pane: &TerminalPane, hovered: Option<RowLink>, window: &mu
 }
 
 fn scroll_pane(pane: &TerminalPane, area: &PaneArea, event: &ScrollWheelEvent) {
-    let delta = f32::from(vertical_delta(event, area.cell.height));
-    let lines = take_whole_lines(pane, delta, f32::from(area.cell.height));
-    if lines == 0 {
-        return;
+    if matches!(event.touch_phase, TouchPhase::Started) {
+        pane.pointer.borrow_mut().scroll_remainder = 0.0;
     }
+    let line_height = f32::from(area.cell.height);
+    let raw_delta = vertical_delta(event, area.cell.height);
+    let delta = scaled_wheel_delta(raw_delta, event.delta.precise(), area.input.scroll_multiplier);
     let modes = pane.handle.input_modes();
     let is_app_scroll = modes.alt_screen || modes.mouse.is_reporting();
     if event.modifiers.shift || !is_app_scroll {
-        pane.handle.terminal().scroll_lines(lines);
+        pane.handle.terminal().scroll_smoothly(delta / line_height);
+        return;
+    }
+    let lines = take_whole_lines(pane, delta, line_height);
+    if lines == 0 {
         return;
     }
     let bytes = if modes.mouse.is_reporting() {
@@ -729,6 +750,20 @@ impl FramePainter<'_> {
             self.paint_ghost(metrics, window, cx);
             self.paint_block_labels(metrics, window, cx);
         });
+    }
+
+    fn paint_partial_row(&self, window: &mut Window, cx: &mut App) {
+        let Some(partial) = self.frame.snapshot.partial_row.as_ref() else {
+            return;
+        };
+        let cell = self.frame.cell;
+        let empty = GridSnapshot::empty(GridSize::new(self.frame.snapshot.cols, 0));
+        let snapshot = GridSnapshot { rows: 1, cells: partial.cells.clone(), ..empty };
+        let frame = Frame { snapshot, cell, annotations: Annotations::default(), hits: Vec::new() };
+        let origin = self.bounds.origin - point(px(0.0), cell.height);
+        let bounds = Bounds::new(origin, size(self.bounds.size.width, cell.height));
+        let painter = FramePainter { frame: &frame, bounds, style: self.style, is_focused: false, hovered_link: None };
+        painter.paint(window, cx);
     }
 
     fn grid_bounds(&self) -> Bounds<Pixels> {
