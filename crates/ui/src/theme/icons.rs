@@ -1,4 +1,5 @@
-use gpui::{div, prelude::*, px, svg, AssetSource, Div, Hsla, SharedString, Svg};
+use super::Appearance;
+use gpui::{img, prelude::*, px, svg, AssetSource, Hsla, Img, SharedString, Svg};
 use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,25 +83,36 @@ impl Icon {
     }
 }
 
-pub fn logo_mark(size_px: f32, fill: Hsla, ink: Hsla) -> Div {
-    div()
-        .relative()
-        .flex_none()
-        .size(px(size_px))
-        .child(Icon::Logo.sized(size_px, fill))
-        .child(Icon::LogoPrompt.sized(size_px, ink).absolute().top_0().left_0())
+const LOGO_LIGHT: &str = "logos/logo-light-mode.svg";
+const LOGO_DARK: &str = "logos/logo-dark-mode.svg";
+
+fn logo_asset_path(appearance: Appearance) -> &'static str {
+    match appearance {
+        Appearance::Light => LOGO_LIGHT,
+        Appearance::Dark => LOGO_DARK,
+    }
+}
+
+pub fn logo_mark(size_px: f32, appearance: Appearance) -> Img {
+    img(logo_asset_path(appearance)).flex_none().size(px(size_px))
 }
 
 pub struct IconAssets;
 
 impl AssetSource for IconAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        match path {
+            LOGO_LIGHT => return Ok(Some(Cow::Borrowed(include_bytes!("../../../../logos/logo-light-mode.svg")))),
+            LOGO_DARK => return Ok(Some(Cow::Borrowed(include_bytes!("../../../../logos/logo-dark-mode.svg")))),
+            _ => {},
+        }
         let icon = Icon::ALL.into_iter().find(|icon| icon.asset_path() == path);
         Ok(icon.map(|icon| Cow::Borrowed(icon.svg_bytes())))
     }
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
-        let paths = Icon::ALL.into_iter().map(Icon::asset_path).filter(|asset| asset.starts_with(path));
+        let paths = Icon::ALL.into_iter().map(Icon::asset_path)
+            .chain([LOGO_LIGHT, LOGO_DARK]).filter(|asset| asset.starts_with(path));
         Ok(paths.map(SharedString::from).collect())
     }
 }
@@ -108,6 +120,18 @@ impl AssetSource for IconAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brand_logos_use_the_supplied_artwork_for_each_appearance() {
+        for (appearance, expected) in [
+            (Appearance::Light, include_bytes!("../../../../logos/logo-light-mode.svg").as_slice()),
+            (Appearance::Dark, include_bytes!("../../../../logos/logo-dark-mode.svg").as_slice()),
+        ] {
+            let bytes = IconAssets.load(logo_asset_path(appearance)).unwrap().expect("logo is bundled");
+            assert_eq!(bytes.as_ref(), expected);
+        }
+        assert_eq!(IconAssets.list("logos/").unwrap().len(), 2);
+    }
 
     #[test]
     fn every_icon_loads_as_a_tintable_svg() {

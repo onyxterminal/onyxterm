@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onyx logo · Light and dark</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px system-ui, sans-serif; }
+  main { display: grid; grid-template-columns: repeat(2, 1fr); min-height: 100vh; }
+  section { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 32px; }
+  img { width: min(100%, 520px); height: auto; }
+  p { opacity: .55; }
+  .light { background: #fff; color: #171515; }
+  .dark { background: #141416; color: #fff; }
+  @media (max-width: 640px) { main { grid-template-columns: 1fr; } }
+</style>
+<main>
+  <section class="light"><img src="logo-light-mode.svg" alt="Dark Onyx logo on white"><p>Light mode</p></section>
+  <section class="dark"><img src="logo-dark-mode.svg" alt="Light Onyx logo on charcoal"><p>Dark mode</p></section>
+</main>
+</html>

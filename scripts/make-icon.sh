@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-glyph="$repo_root/assets/logo.png"
+glyph="$repo_root/logos/logo-light-mode.svg"
 output="$repo_root/assets/icons/Onyx.icns"
 work_dir="$repo_root/target/icon"
 master="$work_dir/master.png"

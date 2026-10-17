@@ -160,6 +160,7 @@ pub struct Shell {
     drop_target: Option<crate::pane_drop::DropTarget>,
     pane_drag: Option<pane_drag::PaneDrag>,
     tab_drag: Option<TabDrag>,
+    tab_activity: HashMap<TabId, tab_strip::TabActivity>,
     stage: islands::Stage,
     dropped_ghost: Option<pane_drag::DroppedGhost>,
     tab_bounds: pane_drag::BoundsMap<usize>,
@@ -216,6 +217,7 @@ impl Shell {
             drop_target: None,
             pane_drag: None,
             tab_drag: None,
+            tab_activity: HashMap::new(),
             dropped_ghost: None,
             tab_bounds: pane_drag::BoundsMap::default(),
             tab_scroll: gpui::ScrollHandle::new(),
@@ -1403,7 +1405,6 @@ impl Shell {
         let look = self.island_look(panel);
         islands::island_card(&self.state.theme)
             .group(islands::pane_group(panel))
-            .when(look.is_dimmed(), |card| card.opacity(look.opacity))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |shell, _event, window, cx| {
@@ -1414,11 +1415,15 @@ impl Shell {
                 }),
             )
             .on_drop(cx.listener(move |shell, paths: &ExternalPaths, window, cx| shell.drop_paths(panel, paths, window, cx)))
-            .child(islands::island_content(content))
-            .children(header)
-            .children(self.render_copy_hint(panel))
-            .children(self.render_find_bar(panel, cx))
-            .child(islands::island_edge(&self.state.theme, look))
+            .child(
+                div().relative().size_full()
+                    .when(look.is_dimmed(), |content| content.opacity(look.opacity))
+                    .child(islands::island_content(content))
+                    .children(header)
+                    .children(self.render_copy_hint(panel))
+                    .children(self.render_find_bar(panel, cx)),
+            )
+            .child(islands::island_edge(&self.state.theme, look).opacity(look.opacity))
             .children(self.render_drop_highlight(panel))
             .into_any_element()
     }
@@ -1434,6 +1439,7 @@ impl Render for Shell {
         self.spawn_terminals_on_tab_change(cx);
         self.sync_find(cx);
         let now = Instant::now();
+        self.sync_tab_activity(now, cx);
         let pane_area = self.render_pane_area(window, now, cx);
         if self.needs_motion_frame(now) {
             tracing::trace!("motion frame requested");
@@ -1485,8 +1491,10 @@ impl Render for Shell {
             }))
             .when_some(self.split_drag_cursor(), |el, cursor| el.cursor(cursor))
             .on_mouse_down(MouseButton::Left, cx.listener(|shell, _event, _window, cx| shell.commit_tab_field_on_click(cx)))
+            .child(self.render_tab_connection(now, true))
             .child(tab_strip)
             .child(div().flex_1().min_h(px(0.0)).w_full().px(margin).pb(margin).children(pane_area))
+            .child(self.render_tab_connection(now, false))
             .when(palette_visible, |el| el.child(fade_in(palette_overlay, "palette", animation_ms)))
             .children(quick_open.map(|overlay| fade_in(overlay, "quick-open", animation_ms)))
             .children(workspace_menu.map(|menu| fade_in(menu, "workspace-menu", animation_ms)))

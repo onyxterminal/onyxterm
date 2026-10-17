@@ -5,15 +5,16 @@ use crate::command::CommandId;
 use crate::pane_drop::{has_left_dead_zone, tab_drop_target};
 use crate::theme::icons::{logo_mark, Icon};
 use crate::text_field::TextField;
-use crate::theme::menu_chrome::{field_text, kbd_chip};
+use crate::theme::menu_chrome::field_text;
 use crate::theme::{box_shadows, Theme};
 use crate::workspace_menu::workspace_button_label;
+use domain::TabId;
 use gpui::{
     div, prelude::*, px, AnyElement, Bounds, BoxShadow, Context, Div, FontWeight, Keystroke,
-    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Stateful, Window,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Stateful, Task, Window,
 };
 use std::cell::Cell;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const DOUBLE_CLICK: usize = 2;
 const WORKSPACE_BUTTON_PADDING_X_PX: f32 = 8.0;
@@ -22,12 +23,6 @@ const CHEVRON_PX: f32 = 10.0;
 const CHEVRON_OPACITY: f32 = 0.55;
 const SEPARATOR_MARGIN_X_PX: f32 = 4.0;
 const NEW_TAB_ICON_PX: f32 = 13.0;
-const PALETTE_BUTTON_WIDTH_PX: f32 = 230.0;
-const PALETTE_BUTTON_MIN_WIDTH_PX: f32 = 120.0;
-const PALETTE_BUTTON_PADDING_LEFT_PX: f32 = 10.0;
-const PALETTE_BUTTON_PADDING_RIGHT_PX: f32 = 6.0;
-const PALETTE_BUTTON_GAP_PX: f32 = 8.0;
-const PALETTE_BUTTON_RADIUS_PX: f32 = 7.0;
 const PALETTE_ICON_PX: f32 = 13.0;
 const PALETTE_LABEL: &str = "Search commands";
 const DROP_RING_PX: f32 = 1.5;
@@ -35,14 +30,26 @@ const TAB_GHOST_OPACITY: f32 = 0.7;
 const TAB_GHOST_MIN_WIDTH_PX: f32 = 100.0;
 const TAB_MIN_WIDTH_PX: f32 = 70.0;
 const TAB_MAX_WIDTH_PX: f32 = 180.0;
-const TAB_CONTENT_GAP_PX: f32 = 6.0;
 const TAB_DOT_PX: f32 = 6.0;
 const TAB_CLOSE_PX: f32 = 18.0;
 const TAB_CLOSE_INSET_PX: f32 = 4.0;
 const TAB_CLOSE_RADIUS_PX: f32 = 4.0;
 const TAB_CLOSE_ICON_PX: f32 = 9.0;
-const INACTIVE_TAB_CLOSE_OPACITY: f32 = 0.5;
 const DRAG_NOTIFY_FRAME_MS: u128 = 8;
+const RUNNING_DOT_DELAY: Duration = Duration::from_millis(700);
+
+pub(super) struct TabActivity {
+    since: Instant,
+    _wake: Task<()>,
+}
+
+fn visible_run_state(state: RunState, since: Option<Instant>, now: Instant) -> RunState {
+    if state == RunState::Running && !since.is_some_and(|since| now.duration_since(since) >= RUNNING_DOT_DELAY) {
+        RunState::Idle
+    } else {
+        state
+    }
+}
 
 fn should_notify_drag(last: &Cell<Option<Instant>>, now: Instant) -> bool {
     let ready = match last.get() {
@@ -76,6 +83,23 @@ pub(super) struct TabDrag {
 }
 
 impl Shell {
+    pub(super) fn sync_tab_activity(&mut self, now: Instant, cx: &mut Context<Self>) {
+        let running: Vec<TabId> = self.model.tabs().iter()
+            .filter(|tab| self.tab_run_state(tab) == RunState::Running)
+            .map(|tab| tab.id())
+            .collect();
+        self.tab_activity.retain(|id, _| running.contains(id));
+        for id in running {
+            self.tab_activity.entry(id).or_insert_with(|| TabActivity {
+                since: now,
+                _wake: cx.spawn(async move |shell, cx| {
+                    cx.background_executor().timer(RUNNING_DOT_DELAY).await;
+                    let _ = shell.update(cx, |_shell, cx| cx.notify());
+                }),
+            });
+        }
+    }
+
     pub(super) fn render_tab_strip(&self, is_fullscreen: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let layout = theme.layout;
@@ -89,12 +113,14 @@ impl Shell {
             .flex_none()
             .pl(px(leading_inset))
             .pr(px(layout.window_margin_px))
+            .pt(px((layout.tab_strip_height_px - theme.top_bar.control_height_px).max(0.0)))
             .flex()
             .flex_row()
             .items_center()
             .gap(px(theme.top_bar.item_gap_px))
             .font_family(SharedString::from(theme.ui_font.family.clone()))
             .text_size(px(theme.ui_font.tab_px))
+            .line_height(px(theme.ui_font.workspace_px.max(theme.ui_font.tab_px) * 1.25))
             .on_mouse_down(MouseButton::Left, |event, window, _cx| {
                 if event.click_count == DOUBLE_CLICK {
                     window.titlebar_double_click();
@@ -121,6 +147,7 @@ impl Shell {
     fn render_tab_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let gap = px(self.state.theme.top_bar.tab_gap_px);
         div()
+            .h_full()
             .min_w(px(0.0))
             .flex_shrink()
             .flex()
@@ -130,6 +157,7 @@ impl Shell {
             .child(
                 div()
                     .id("workspace-tabs")
+                    .h_full()
                     .min_w(px(0.0))
                     .flex_shrink()
                     .overflow_x_scroll()
@@ -154,7 +182,9 @@ impl Shell {
                     Some(field) => TabLabel::Editing(field.input.clone()),
                     None => TabLabel::Title(self.tab_title(tab)),
                 };
-                TabPill { index, label, is_active: index == active, run_state: self.tab_run_state(tab) }
+                let since = self.tab_activity.get(&tab.id()).map(|activity| activity.since);
+                let run_state = visible_run_state(self.tab_run_state(tab), since, Instant::now());
+                TabPill { index, label, is_active: index == active, run_state }
             })
             .collect()
     }
@@ -166,10 +196,10 @@ impl Shell {
         let index = pill.index;
         let is_raised = pill.is_active || matches!(pill.label, TabLabel::Editing(_));
         let title = match pill.label {
-            TabLabel::Editing(input) => field_text(&input, "", theme),
-            TabLabel::Title(title) => div().min_w(px(0.0)).truncate().child(title),
+            TabLabel::Editing(input) => field_text(&input, "", theme).flex_1().text_center(),
+            TabLabel::Title(title) => div().flex_1().min_w(px(0.0)).text_center().truncate().child(title),
         };
-        let mut shadows = match is_raised {
+        let mut shadows = match is_raised && !pill.is_active {
             true => box_shadows(&theme.shadow.tab),
             false => Vec::new(),
         };
@@ -177,28 +207,37 @@ impl Shell {
             shadows.push(drop_ring(theme));
         }
         let status_dot = (pill.run_state != RunState::Idle).then(|| {
-            div().flex_none().size(px(TAB_DOT_PX * scale)).rounded_full().bg(pill.run_state.color(theme))
+            div()
+                .absolute()
+                .left(px((top_bar.tab_padding_right_px - TAB_DOT_PX * scale) / 2.0))
+                .top(px((top_bar.control_height_px - TAB_DOT_PX * scale) / 2.0))
+                .size(px(TAB_DOT_PX * scale))
+                .rounded_full()
+                .bg(pill.run_state.color(theme))
         });
         let pill_body = div()
             .h(px(top_bar.control_height_px))
             .min_w(px(0.0))
             .w_full()
-            .pl(px(top_bar.tab_padding_left_px))
+            .pl(px(top_bar.tab_padding_right_px))
             .pr(px(top_bar.tab_padding_right_px))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(TAB_CONTENT_GAP_PX * scale))
             .rounded(px(top_bar.control_radius_px))
             .text_color(theme.text.muted)
             .shadow(shadows)
-            .when(is_raised, |body| body.bg(theme.surface.raised))
-            .when(pill.is_active, |body| body.text_color(theme.text.default).font_weight(FontWeight::MEDIUM))
-            .children(status_dot)
+            .when(is_raised && !pill.is_active, |body| body.bg(theme.surface.raised))
+            .when(pill.is_active, |body| {
+                body.text_color(theme.text.default)
+                    .font_weight(FontWeight::MEDIUM)
+            })
             .child(title);
         div()
             .id(("tab", index))
+            .group(tab_group(index))
             .relative()
+            .h_full()
             .flex_none()
             .min_w(px(TAB_MIN_WIDTH_PX * scale))
             .max_w(px(TAB_MAX_WIDTH_PX * scale))
@@ -214,24 +253,26 @@ impl Shell {
                 }),
             )
             .child(pill_body)
-            .child(self.render_tab_close(index, pill.is_active, cx))
+            .children(status_dot)
+            .child(self.render_tab_close(index, cx))
             .into_any_element()
     }
 
-    fn render_tab_close(&self, index: usize, is_active: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_tab_close(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        let opacity = if is_active { 1.0 } else { INACTIVE_TAB_CLOSE_OPACITY };
         div()
             .id(("tab-close", index))
             .absolute()
             .right(px(TAB_CLOSE_INSET_PX * scale))
+            .top(px((theme.top_bar.control_height_px - TAB_CLOSE_PX * scale) / 2.0))
             .size(px(TAB_CLOSE_PX * scale))
             .flex()
             .items_center()
             .justify_center()
             .rounded(px(TAB_CLOSE_RADIUS_PX * scale))
-            .opacity(opacity)
+            .opacity(0.0)
+            .group_hover(tab_group(index), |style| style.opacity(1.0))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -263,7 +304,7 @@ impl Shell {
                     shell.toggle_workspace_menu(cx);
                 }),
             )
-            .child(logo_mark(theme.top_bar.logo_px, theme.accent.primary, theme.chrome.logo_ink))
+            .child(logo_mark(theme.top_bar.logo_px, theme.appearance))
             .child(div().min_w(px(0.0)).truncate().font_weight(FontWeight::SEMIBOLD).child(name))
             .child(Icon::Chevron.sized(CHEVRON_PX * scale, chevron_tint))
     }
@@ -286,18 +327,10 @@ impl Shell {
     fn render_palette_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.theme;
         let scale = self.state.settings.ui_scale;
-        let shortcut = self.state.keymap.combo_for(CommandId::OpenPalette).map(|combo| kbd_chip(combo.glyphs(), theme));
         strip_button("palette-button", theme)
-            .flex_shrink()
-            .w(px(PALETTE_BUTTON_WIDTH_PX * scale))
-            .min_w(px(PALETTE_BUTTON_MIN_WIDTH_PX * scale))
-            .pl(px(PALETTE_BUTTON_PADDING_LEFT_PX * scale))
-            .pr(px(PALETTE_BUTTON_PADDING_RIGHT_PX * scale))
-            .gap(px(PALETTE_BUTTON_GAP_PX * scale))
-            .rounded(px(PALETTE_BUTTON_RADIUS_PX * scale))
-            .bg(theme.chrome.control_fill)
-            .text_size(px(theme.ui_font.button_px))
-            .text_color(theme.text.subtle)
+            .w(px(theme.top_bar.control_height_px))
+            .justify_center()
+            .tooltip(self.tooltip_builder(PALETTE_LABEL.into()))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|shell, _event, window, cx| {
@@ -305,10 +338,7 @@ impl Shell {
                     shell.run_command(CommandId::OpenPalette, window, cx);
                 }),
             )
-            .child(Icon::MagnifierBold.sized(PALETTE_ICON_PX * scale, theme.text.subtle))
-            .child(div().min_w(px(0.0)).truncate().child(PALETTE_LABEL))
-            .child(div().flex_1())
-            .children(shortcut)
+            .child(Icon::MagnifierBold.sized(PALETTE_ICON_PX * scale, theme.text.muted))
     }
 
     fn press_tab_pill(&mut self, index: usize, press: Point<Pixels>, cx: &mut Context<Self>) {
@@ -467,6 +497,10 @@ impl Shell {
     }
 }
 
+fn tab_group(index: usize) -> SharedString {
+    SharedString::from(format!("workspace-tab-{index}"))
+}
+
 fn strip_button(id: &'static str, theme: &Theme) -> Stateful<Div> {
     div()
         .id(id)
@@ -491,4 +525,33 @@ fn drop_ring(theme: &Theme) -> BoxShadow {
 pub(super) struct TabField {
     pub(super) index: usize,
     pub(super) input: TextField,
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+
+    #[test]
+    fn running_dot_waits_for_a_sustained_command() {
+        let started = Instant::now();
+        assert_eq!(visible_run_state(RunState::Running, None, started), RunState::Idle);
+        assert_eq!(visible_run_state(RunState::Running, Some(started), started + RUNNING_DOT_DELAY - Duration::from_millis(1)), RunState::Idle);
+        assert_eq!(visible_run_state(RunState::Running, Some(started), started + RUNNING_DOT_DELAY), RunState::Running);
+    }
+
+    #[test]
+    fn finishing_before_the_delay_never_shows_a_running_dot() {
+        let started = Instant::now();
+        let finished = started + Duration::from_millis(10);
+        assert_eq!(visible_run_state(RunState::Running, Some(started), finished), RunState::Idle);
+        assert_eq!(visible_run_state(RunState::Idle, None, started + RUNNING_DOT_DELAY), RunState::Idle);
+        assert_eq!(visible_run_state(RunState::Failed, None, finished), RunState::Failed);
+    }
+
+    #[test]
+    fn a_new_command_has_its_own_delay() {
+        let previous = Instant::now();
+        let started = previous + RUNNING_DOT_DELAY;
+        assert_eq!(visible_run_state(RunState::Running, Some(started), started), RunState::Idle);
+    }
 }

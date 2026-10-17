@@ -8,8 +8,8 @@ use crate::terminal_view::island_grid;
 use crate::theme::{LayoutTokens, Theme};
 use domain::{LayoutNode, PanelId, TabId};
 use gpui::{
-    canvas, div, point, prelude::*, px, size, AnyElement, Bounds, Context, Div, Pixels, Point, SharedString, Size,
-    Window,
+    canvas, div, point, prelude::*, px, size, AnyElement, Bounds, ContentMask, Context, Div, Pixels, Point, SharedString, Size,
+    PathBuilder, Window,
 };
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -139,6 +139,79 @@ pub(super) fn island_edge(theme: &Theme, look: IslandLook) -> Div {
 }
 
 impl Shell {
+    pub(super) fn render_tab_connection(&self, now: Instant, background: bool) -> impl IntoElement {
+        let tabs = self.tab_bounds.clone();
+        let active = self.model.tabs().active_index();
+        let origin = self.stage.origin.clone();
+        let theme = &self.state.theme;
+        let color = theme.canvas();
+        let radius = px(theme.layout.island_radius_px);
+        let top_radius = px(theme.top_bar.control_height_px / 2.0);
+        let edge = px(theme.island.focus_ring_px.max(theme.island.unfocused_border_px));
+        let tab_border = theme.border.default;
+        let panes: Vec<_> = self.stage.layout.islands.iter().filter_map(|island| {
+            let frame = self.stage.motion.frame(island.panel, now)?;
+            let look = self.island_look(island.panel);
+            (frame.rect.y.abs() < 0.5).then_some((frame.rect, look.edge_color.opacity(look.opacity)))
+        }).collect();
+        canvas(|_bounds, _window, _cx| {}, move |bounds, (), window, _cx| {
+            let tabs = tabs.borrow();
+            let Some(tab) = tabs.get(&active).copied() else { return };
+            let touching: Vec<_> = panes.iter()
+                .map(|(rect, color)| (rect.to_bounds(origin.get()), *color))
+                .filter(|(pane, _)| tab_overlaps_pane(tab, *pane))
+                .collect();
+            let pane_bounds: Vec<_> = touching.iter().map(|(pane, _)| *pane).collect();
+            let polygon = tab_bubble_polygon(tab, &pane_bounds);
+            let trace = |path: &mut PathBuilder| round_bubble(path, &polygon, tab.top(), top_radius, radius);
+            let join_mask = Bounds::new(
+                point(tab.left() - radius, tab.bottom()),
+                size(tab.size.width + radius * 2.0, radius + edge * 2.0),
+            );
+            let mask = if background {
+                Bounds::new(bounds.origin, size(bounds.size.width, tab.bottom() - bounds.top()))
+            } else {
+                join_mask
+            };
+            let mut silhouette = PathBuilder::fill();
+            trace(&mut silhouette);
+            if let Ok(path) = silhouette.build() {
+                if background || !touching.is_empty() {
+                    window.with_content_mask(Some(ContentMask { bounds: mask }), |window| window.paint_path(path, color));
+                }
+            }
+            if !background {
+                let mut outline = PathBuilder::stroke(edge);
+                trace(&mut outline);
+                if let Ok(path) = outline.build() {
+                    let header_mask = Bounds::new(bounds.origin, size(bounds.size.width, tab.bottom() - bounds.top()));
+                    window.with_content_mask(Some(ContentMask { bounds: header_mask }), |window| window.paint_path(path, tab_border));
+                }
+                if !touching.is_empty() {
+                    let mut outline = PathBuilder::stroke(edge);
+                    trace(&mut outline);
+                    if let Ok(path) = outline.build() {
+                        window.with_content_mask(Some(ContentMask { bounds: join_mask }), |window| window.paint_path(path, tab_border));
+                    }
+                }
+                // Every pane touched by the tab shares the bubble. Preserve the
+                // focus outline of each lobe while rounding the gap between them.
+                for (pane, border) in touching {
+                    let left = join_mask.left().max(pane.left() - edge);
+                    let right = join_mask.right().min(pane.right() + edge);
+                    let mask = Bounds::new(point(left, join_mask.top()), size(right - left, join_mask.size.height));
+                    let mut outline = PathBuilder::stroke(edge);
+                    trace(&mut outline);
+                    if let Ok(path) = outline.build() {
+                        window.with_content_mask(Some(ContentMask { bounds: mask }), |window| window.paint_path(path, border));
+                    }
+                }
+            }
+        })
+        .absolute()
+        .size_full()
+    }
+
     pub(super) fn render_pane_area(
         &mut self,
         window: &mut Window,
@@ -251,5 +324,115 @@ impl Shell {
         let theme = &self.state.theme;
         let look = self.stage.looks.get(panel).unwrap_or_else(|| self.island_look(panel));
         island_card(theme).opacity(look.opacity).child(island_edge(theme, look))
+    }
+}
+
+fn tab_overlaps_pane(tab: Bounds<Pixels>, pane: Bounds<Pixels>) -> bool {
+    (pane.top() - tab.bottom()).abs() < px(1.0)
+        && tab.right().min(pane.right()) > tab.left().max(pane.left())
+}
+
+// Trace the union of axis-aligned rectangles. Using one contour makes the
+// shared tab work across arbitrary split positions and pane widths.
+fn tab_bubble_polygon(tab: Bounds<Pixels>, panes: &[Bounds<Pixels>]) -> Vec<Point<Pixels>> {
+    let rects: Vec<_> = std::iter::once(tab).chain(panes.iter().copied()).collect();
+    let mut xs: Vec<_> = rects.iter().flat_map(|rect| [rect.left(), rect.right()]).collect();
+    let mut ys: Vec<_> = rects.iter().flat_map(|rect| [rect.top(), rect.bottom()]).collect();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    xs.dedup();
+    ys.dedup();
+    let width = xs.len() - 1;
+    let height = ys.len() - 1;
+    let mut cells = vec![false; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let center = point((xs[x] + xs[x + 1]) * 0.5, (ys[y] + ys[y + 1]) * 0.5);
+            cells[y * width + x] = rects.iter().any(|rect| rect.contains(&center));
+        }
+    }
+    let mut edges = HashMap::new();
+    for y in 0..height {
+        for x in 0..width {
+            if !cells[y * width + x] { continue; }
+            if y == 0 || !cells[(y - 1) * width + x] { edges.insert((x, y), (x + 1, y)); }
+            if x + 1 == width || !cells[y * width + x + 1] { edges.insert((x + 1, y), (x + 1, y + 1)); }
+            if y + 1 == height || !cells[(y + 1) * width + x] { edges.insert((x + 1, y + 1), (x, y + 1)); }
+            if x == 0 || !cells[y * width + x - 1] { edges.insert((x, y + 1), (x, y)); }
+        }
+    }
+    let Some(start) = edges.keys().min_by_key(|(x, y)| (*y, *x)).copied() else { return Vec::new() };
+    let mut cursor = start;
+    let mut points = Vec::new();
+    while let Some(next) = edges.remove(&cursor) {
+        points.push(point(xs[cursor.0], ys[cursor.1]));
+        cursor = next;
+        if cursor == start { break; }
+    }
+    (0..points.len()).filter_map(|i| {
+        let prev = points[(i + points.len() - 1) % points.len()];
+        let here = points[i];
+        let next = points[(i + 1) % points.len()];
+        ((prev.x != here.x || here.x != next.x) && (prev.y != here.y || here.y != next.y)).then_some(here)
+    }).collect()
+}
+
+fn round_bubble(path: &mut PathBuilder, polygon: &[Point<Pixels>], tab_top: Pixels, top_radius: Pixels, radius: Pixels) {
+    if polygon.is_empty() { return; }
+    let corners: Vec<_> = (0..polygon.len()).map(|i| {
+        let prev = polygon[(i + polygon.len() - 1) % polygon.len()];
+        let here = polygon[i];
+        let next = polygon[(i + 1) % polygon.len()];
+        let incoming = (prev.x - here.x).abs() + (prev.y - here.y).abs();
+        let outgoing = (next.x - here.x).abs() + (next.y - here.y).abs();
+        let desired = if here.y == tab_top { top_radius } else { radius };
+        let r = desired.min(incoming * 0.5).min(outgoing * 0.5);
+        let entry = here + (prev - here) * (f32::from(r) / f32::from(incoming));
+        let exit = here + (next - here) * (f32::from(r) / f32::from(outgoing));
+        (entry, here, exit)
+    }).collect();
+    path.move_to(corners.last().unwrap().2);
+    for (entry, corner, exit) in corners {
+        path.line_to(entry);
+        path.curve_to(exit, corner);
+    }
+    path.close();
+}
+
+#[cfg(test)]
+mod tab_connection_tests {
+    use super::*;
+
+    fn bounds(x: f32, y: f32, width: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(x), px(y)), size(px(width), px(100.0)))
+    }
+
+    #[test]
+    fn a_tab_spanning_a_split_joins_both_panes_in_one_contour() {
+        let tab = Bounds::new(point(px(210.0), px(8.0)), size(px(75.0), px(26.0)));
+        let panes = [bounds(8.0, 34.0, 220.0), bounds(234.0, 34.0, 400.0)];
+        assert!(panes.iter().all(|pane| tab_overlaps_pane(tab, *pane)));
+        let polygon = tab_bubble_polygon(tab, &panes);
+        for pane in panes {
+            assert!(polygon.contains(&pane.bottom_left()));
+            assert!(polygon.contains(&pane.bottom_right()));
+        }
+        // The gap remains open below the shared tab.
+        assert!(polygon.contains(&point(px(228.0), px(34.0))));
+        assert!(polygon.contains(&point(px(234.0), px(34.0))));
+    }
+
+    #[test]
+    fn panes_beside_or_below_the_tab_keep_their_own_outline() {
+        let tab = Bounds::new(point(px(100.0), px(8.0)), size(px(75.0), px(26.0)));
+        assert!(tab_overlaps_pane(tab, bounds(8.0, 34.0, 400.0)));
+        assert!(!tab_overlaps_pane(tab, bounds(200.0, 34.0, 400.0)));
+        assert!(!tab_overlaps_pane(tab, bounds(8.0, 100.0, 400.0)));
+    }
+
+    #[test]
+    fn a_tab_without_a_pane_still_has_a_closed_bubble() {
+        let tab = Bounds::new(point(px(100.0), px(8.0)), size(px(75.0), px(26.0)));
+        assert_eq!(tab_bubble_polygon(tab, &[]).len(), 4);
     }
 }

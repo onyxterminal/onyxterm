@@ -183,7 +183,7 @@ impl Shell {
                     .gap(px(DIALOG_GAP_PX))
                     .text_center()
                     .child(
-                        logo_mark(dialog.logo_px, theme.accent.primary, theme.chrome.logo_ink)
+                        logo_mark(dialog.logo_px, theme.appearance)
                             .mb(px(DIALOG_LOGO_BOTTOM_PX)),
                     )
                     .child(

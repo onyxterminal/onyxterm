@@ -227,7 +227,7 @@ copy_on_select = true
 scroll_multiplier = 1.0
 
 [layout]
-tab_strip_height_px = 40
+tab_strip_height_px = 34
 pane_header_height_px = 30
 border_radius_px = 6
 gap_px = 1

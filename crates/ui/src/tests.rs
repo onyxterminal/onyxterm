@@ -1254,6 +1254,19 @@ fn every_builtin_theme_reports_its_appearance() {
 }
 
 #[test]
+fn toolbar_controls_share_the_native_button_center_at_every_ui_scale() {
+    for kind in ThemeKind::ALL {
+        for scale in [0.8, 1.0, 1.25, 1.5] {
+            let mut theme = Theme::load(kind).unwrap();
+            theme.scale_ui(scale);
+            let row_center = theme.layout.tab_strip_height_px - theme.top_bar.control_height_px / 2.0;
+            let native_center = theme.layout.traffic_light_top_px + 7.0;
+            assert!((row_center - native_center).abs() < 0.001, "{kind:?} at scale {scale}");
+        }
+    }
+}
+
+#[test]
 fn custom_theme_inherits_its_base_appearance() {
     let mut settings = crate::settings::Settings { theme: ThemeKind::SolarizedLight, ..Default::default() };
     settings.customize_current_theme();
@@ -1285,7 +1298,7 @@ fn apple_light_theme_loads_every_redesign_token() {
         [12.0, 11.5, 13.0, 16.0]
     );
     assert_eq!(theme.ui_font.hint_px, 11.0);
-    assert_eq!(theme.layout.tab_strip_height_px, 40.0);
+    assert_eq!(theme.layout.tab_strip_height_px, 34.0);
     assert_eq!(theme.top_bar.control_height_px, 26.0);
     assert_eq!(theme.top_bar.tab_gap_px, 2.0);
     assert_eq!((theme.top_bar.tab_padding_left_px, theme.top_bar.tab_padding_right_px), (12.0, 26.0));

@@ -311,6 +311,10 @@ impl Theme {
         scale!(self.top_bar, leading_gap_px, control_height_px, control_radius_px, logo_px,
             separator_width_px, separator_height_px, tab_padding_left_px, tab_padding_right_px, tab_gap_px,
             item_gap_px);
+        // Native macOS traffic lights stay 14 points tall at every UI scale.
+        // Let the control row end at the pane edge, centered on those buttons.
+        self.layout.tab_strip_height_px = self.layout.traffic_light_top_px + 7.0
+            + self.top_bar.control_height_px / 2.0;
         scale!(self.pane_header, padding_left_px, padding_right_px, status_dot_px, icon_button_px,
             icon_button_radius_px, icon_px, close_icon_px);
         scale!(self.menu, width_px, radius_px, padding_px, border_px, row_height_px, row_radius_px,

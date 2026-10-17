@@ -15,7 +15,7 @@ func fail(_ message: String, code: Int32) -> Never {
 
 let arguments = CommandLine.arguments
 guard arguments.count == 3 else {
-    fail("usage: compose-icon.swift <glyph.png> <output.png>", code: 64)
+    fail("usage: compose-icon.swift <glyph-image> <output.png>", code: 64)
 }
 
 guard let glyph = NSImage(contentsOfFile: arguments[1]),

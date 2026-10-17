@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(theme.name, "onyx-dark");
         assert_eq!(theme.font.family, "Menlo");
         assert_eq!(theme.font.size_px, 16.0);
-        assert_eq!(theme.layout.tab_strip_height_px, 40.0 * 1.2);
+        assert!((theme.layout.tab_strip_height_px - 39.4).abs() < 0.001);
         assert!(!theme.island.dim_unfocused);
     }
 
