@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/onyxterminal/onyxterm/compare/v0.3.0...v0.4.0) (2026-10-17)
+
+
+### Features
+
+* **observability:** log startup phase timings and milestones ([3592ff6](https://github.com/onyxterminal/onyxterm/commit/3592ff61659144c243c37672d445ee71afeba170))
+* **shell-integration:** inject OSC 133 marks into zsh through a ZDOTDIR shim that sources the user config ([3780713](https://github.com/onyxterminal/onyxterm/commit/37807134625b44ac42f17b9ef5722edcc518d247))
+
 ## [0.3.0](https://github.com/onyxterminal/onyxterm/compare/v0.2.0...v0.3.0) (2026-10-12)
 
 
